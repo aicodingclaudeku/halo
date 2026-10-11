@@ -34,6 +34,7 @@ import { formUi } from '@/theme/form';
 import { getTanggalLokalHariIni } from '@/utils/tanggal';
 import { useFocusRefresh } from '@/hooks/useFocusRefresh';
 import DokumenAkadExportButton from '@/components/DokumenAkadExportButton';
+import PenyelesaianPinjamanCard from '@/components/pinjaman/PenyelesaianPinjamanCard';
 import { getSusunanPengurusInti, LABEL_JABATAN_PENGURUS } from '@/services/KoperasiMasterService';
 import { jabatanIntiKosong, type JabatanPengurusInti } from '@/services/PengurusInti';
 import { calculateMaturityDate } from '@/accounting/InstallmentDate';
@@ -540,6 +541,15 @@ export default function PinjamanDetailScreen() {
           <Row label="Persentase Jasa" value={`${detail.persentaseJasa}% / periode`} />
           <Row label="Status" value={detail.status} bold />
         </View>
+
+        {/* RC-S133.6.4 (v82) — pencatatan manual penyelesaian ke Pengadilan Negeri / klaim asuransi (kriteria Macet angka 3). */}
+        <PenyelesaianPinjamanCard
+          pinjamanId={pinjamanId}
+          statusPinjaman={detail.status}
+          tanggalPinjaman={detail.tanggal}
+          penyelesaian={detail.penyelesaian}
+          onBerubah={load}
+        />
 
         {detail.metodeJasa === 'CUSTOM' && (detail.status === 'DIAJUKAN' || detail.status === 'DISETUJUI') && (
           <TouchableOpacity

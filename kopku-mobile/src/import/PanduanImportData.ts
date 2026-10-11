@@ -4,6 +4,12 @@ import { JUDUL_SHEET, JUDUL_SHEET_SALDO_AWAL_AKUN, pilihRekeningBankImport, type
 import { KODE_CONTOH, SHEET_TEMPLATE, type JenisTemplateDataAwal } from '@/import/TemplateDataAwal';
 import { DEFAULT_ACCOUNTS } from '@/config/defaultCOA';
 import {
+  checkKepemilikanSimpananPokokWajib,
+  checkSaldoSimpananMinimum,
+  checkLimitPinjaman,
+  alasanSebagaiPeringatan,
+} from '@/validators/BusinessRuleEngine';
+import {
   bandingkanSidik,
   hitungSidikBerkas,
   normalkanNamaSidik,
@@ -749,6 +755,12 @@ export function periksaSebelumImport(
      * sebelum sidik dicatat (data sebelum v81).
      */
     anggotaTerdaftar?: { nomorAnggota: string; nama: string; tanggalBergabung: string | null }[];
+    /**
+     * RC-S133.6.4 — kebijakan syarat pinjaman yang berlaku (saldo simpanan
+     * minimum, plafon pinjaman). Diberikan = pratinjau memeriksa syarat
+     * pinjaman PADA TANGGAL tiap pinjaman; tidak diberikan = dilewati.
+     */
+    kebijakanSyaratPinjaman?: KebijakanSyaratPinjamanImport;
   }
 ): PeringatanImport[] {
   const h = ringkasan.hasil;
@@ -923,6 +935,23 @@ export function periksaSebelumImport(
 
   // ---- A3. RC-S133.4.8 — SATUAN JASA PINJAMAN & RINGKASAN PIUTANG ----
   out.push(...periksaJasaPinjaman(h.pinjaman.baris));
+
+  // ---- A3b. RC-S133.6.4 — SYARAT PINJAMAN PADA TANGGAL PINJAMAN ----
+  if (opsi.kebijakanSyaratPinjaman) {
+    const sudahPinjaman = new Set<number>();
+    if (sidikBerkas && opsi.sidikTercatat) {
+      for (const b of bandingkanSidik(sidikBerkas, opsi.sidikTercatat).sudah) {
+        if (b.jenis === 'PINJAMAN') sudahPinjaman.add(b.baris);
+      }
+    }
+    out.push(
+      ...periksaSyaratPinjamanImport(h, {
+        cutOff: opsi.sifat === 'SALDO_AWAL' ? opsi.cutOff : undefined,
+        kebijakan: opsi.kebijakanSyaratPinjaman,
+        lewatiBaris: sudahPinjaman,
+      })
+    );
+  }
 
   const adaSheet7 = (h.saldoAwalAkun?.baris.length ?? 0) > 0;
   const kolomMigrasi = h.pinjaman.baris.filter(
@@ -1168,6 +1197,97 @@ export function periksaJasaPinjaman(daftar: BarisPinjaman[]): PeringatanImport[]
         : 'Jasa Persen dibaca per bulan/periode.'),
   });
   return out;
+}
+
+// ===========================================================================
+// 5. RC-S133.6.4 — SYARAT PINJAMAN PADA TANGGAL PINJAMAN (PRATINJAU)
+// ===========================================================================
+
+export interface KebijakanSyaratPinjamanImport {
+  /** MINIMUM_SALDO_SIMPANAN_PINJAMAN (0 = tidak ada syarat). */
+  saldoMinimum: number;
+  /** MAX_PINJAMAN_PER_ANGGOTA (0 = tanpa batas). */
+  plafonPinjaman: number;
+}
+
+const MAKS_BARIS_SYARAT_DITAMPILKAN = 8;
+
+/**
+ * Pemeriksaan syarat pinjaman pada pratinjau — hasilnya PERINGATAN, tidak
+ * pernah BLOKIR: pinjaman historis sudah terjadi, jadi syarat yang tidak
+ * terpenuhi pada tanggalnya tidak menahan import (keputusan RC-S133.6.4).
+ *
+ * Yang diperiksa adalah pinjaman yang dicairkan lewat jalur pencairan
+ * biasa (bertanggal pada/setelah cut-off, atau seluruhnya bila "Transaksi
+ * baru") — jalur yang di eksekutor memanggil `ajukanPinjaman()`. Pinjaman
+ * lama sebelum cut-off masuk jalur migrasi saldo awal yang memang tidak
+ * pernah memeriksa syarat pengajuan.
+ *
+ * Saldo simpanan dihitung dari sheet Simpanan berkas ini yang bertanggal
+ * <= tanggal pinjaman (sheet itu diimpor lebih dulu daripada Pinjaman).
+ * Yang TIDAK dapat dinilai di pratinjau — sisa pinjaman berjalan dan
+ * tunggakan anggota — dinilai saat import (per tanggal pinjaman) dan
+ * hasilnya tercatat di Riwayat Import.
+ */
+export function periksaSyaratPinjamanImport(
+  h: RingkasanParse['hasil'],
+  opsi: { cutOff?: string; kebijakan: KebijakanSyaratPinjamanImport; lewatiBaris?: ReadonlySet<number> }
+): PeringatanImport[] {
+  const jalurPencairan = h.pinjaman.baris.filter(
+    (r) => (!opsi.cutOff || r.tanggal >= opsi.cutOff) && !(opsi.lewatiBaris?.has(r.baris) ?? false)
+  );
+  if (jalurPencairan.length === 0) return [];
+
+  const temuan: { baris: number; kode: string; tanggal: string; alasan: string[] }[] = [];
+  for (const r of jalurPencairan) {
+    const kode = r.kode.trim().toUpperCase();
+    let pokok = 0;
+    let wajib = 0;
+    let sukarela = 0;
+    for (const sp of h.simpanan.baris) {
+      if (sp.kode.trim().toUpperCase() !== kode || sp.tanggal > r.tanggal) continue;
+      pokok += sp.pokok;
+      wajib += sp.wajib;
+      sukarela += sp.sukarela;
+    }
+    const alasan = [
+      checkKepemilikanSimpananPokokWajib(pokok, wajib),
+      checkSaldoSimpananMinimum(pokok + wajib + sukarela, opsi.kebijakan.saldoMinimum),
+      checkLimitPinjaman(r.jumlahPinjaman, opsi.kebijakan.plafonPinjaman),
+    ]
+      .filter((x) => !x.valid)
+      .map((x) => alasanSebagaiPeringatan(x.reason ?? 'Syarat tidak terpenuhi.'));
+    if (alasan.length > 0) temuan.push({ baris: r.baris, kode: r.kode, tanggal: r.tanggal, alasan });
+  }
+
+  const catatan =
+    'Pinjaman ini TETAP diimpor (peringatan, bukan penolakan) dan hasil pemeriksaannya dicatat di Riwayat Import. ' +
+    'Sisa pinjaman berjalan dan tunggakan anggota diperiksa saat import, per tanggal pinjaman.';
+  if (temuan.length === 0) {
+    return [
+      {
+        kunci: 'syarat-pinjaman-lampau',
+        tingkat: 'INFO',
+        judul: `Syarat ${jalurPencairan.length} pinjaman terpenuhi pada tanggal pinjamannya`,
+        pesan:
+          'Simpanan pokok & wajib, saldo simpanan minimum, dan plafon pinjaman diperiksa per tanggal tiap pinjaman, bukan per hari ini. ' +
+          'Sisa pinjaman berjalan dan tunggakan anggota diperiksa saat import.',
+      },
+    ];
+  }
+  const rincian = temuan
+    .slice(0, MAKS_BARIS_SYARAT_DITAMPILKAN)
+    .map((t) => `Baris ${t.baris} (${t.kode}, ${t.tanggal}): ${t.alasan.join(' ')}`)
+    .join(' · ');
+  const sisa = temuan.length - MAKS_BARIS_SYARAT_DITAMPILKAN;
+  return [
+    {
+      kunci: 'syarat-pinjaman-lampau',
+      tingkat: 'PERINGATAN',
+      judul: `${temuan.length} pinjaman tidak memenuhi syarat pada tanggal pinjamannya`,
+      pesan: `${JUDUL_SHEET.PINJAMAN}: ${rincian}${sisa > 0 ? ` · …dan ${sisa} pinjaman lain` : ''}. ${catatan}`,
+    },
+  ];
 }
 
 /** True bila ada peringatan yang menahan tombol Import. */

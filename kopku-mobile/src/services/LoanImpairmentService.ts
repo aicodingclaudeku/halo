@@ -7,6 +7,7 @@ import { requirePermission } from '@/services/PermissionService';
 import { nextSequence } from '@/utils/id';
 import { Rupiah } from '@/utils/money';
 import { getTanggalLokalHariIni } from '@/utils/tanggal';
+import { ringkasPenyelesaian, type JalurPenyelesaian } from '@/accounting/PenyelesaianPinjaman';
 import {
   HasilKlasifikasiSom,
   KolektibilitasSom,
@@ -151,6 +152,16 @@ export interface KlasifikasiPinjamanItem {
   angsuranTerbayar: Rupiah;
   /** Kewajiban KONTRAKTUAL pokok + bunga sepanjang jadwal (penyebut rasio 75%). */
   kewajibanKontraktual: Rupiah;
+  /**
+   * RC-S133.6.4 (v82) — pencatatan penyelesaian ke Pengadilan Negeri /
+   * klaim asuransi (kriteria Macet angka 3), apa adanya dari `pinjaman`.
+   * `penyelesaianBerlaku` = pencatatan ada DAN tanggalnya <= tanggal laporan
+   * (hanya itu yang memicu Macet). Opsional agar pemanggil/uji lama tetap valid.
+   */
+  penyelesaianJalur?: JalurPenyelesaian | null;
+  penyelesaianTanggal?: string | null;
+  penyelesaianNomor?: string | null;
+  penyelesaianBerlaku?: boolean;
   /** Angsuran terbayar sebagai persen dari kewajiban kontraktual (kriteria Diragukan huruf a). */
   rasioAngsuranPersen: number;
   /** Nilai agunan sebagai persen dari SISA utang pokok + jasa (kriteria Diragukan huruf b). */
@@ -232,6 +243,7 @@ export async function getKlasifikasiPinjamanAktif(
   const rows = await db.getAllAsync<any>(
     `SELECT p.id as pinjaman_id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status as status_anggota,
             p.satuan_tenor, p.tanggal_jatuh_tempo,
+            p.penyelesaian_jalur, p.penyelesaian_tanggal, p.penyelesaian_nomor,
             COALESCE(SUM(aj.total - aj.pokok_terbayar - aj.jasa_terbayar), 0) as saldo_piutang,
             COALESCE(SUM(aj.pokok - aj.pokok_terbayar), 0) as saldo_pokok,
             COALESCE(SUM(aj.jasa - aj.jasa_terbayar), 0) as saldo_jasa,
@@ -282,7 +294,8 @@ export async function getKlasifikasiPinjamanAktif(
      LEFT JOIN angsuran_jadwal aj ON aj.pinjaman_id = p.id AND ${sqlJadwalBukanObsolete('aj')}
      WHERE ${filters.join(' AND ')}
      GROUP BY p.id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status,
-              p.satuan_tenor, p.tanggal_jatuh_tempo`,
+              p.satuan_tenor, p.tanggal_jatuh_tempo,
+              p.penyelesaian_jalur, p.penyelesaian_tanggal, p.penyelesaian_nomor`,
     // URUTAN PENTING: seluruh `?` di bawah ada di SELECT (sebelum WHERE) —
     // lima kemunculan `tanggalLaporan` mengikuti urutan kolomnya di atas
     // (jatuh_tempo_tertua, jatuh_tempo_pokok_tertua, jatuh_tempo_jasa_tertua,
@@ -334,6 +347,15 @@ export async function getKlasifikasiPinjamanAktif(
       const angsuranTerbayar = Math.max(0, r.angsuran_terbayar ?? 0);
       const kewajibanKontraktual = Math.max(0, r.kewajiban_kontraktual ?? 0);
 
+      // RC-S133.6.4 — kriteria Macet angka 3: hanya bila pencatatan ADA dan
+      // sudah berlaku pada tanggal laporan (laporan untuk tanggal sebelum
+      // penyelesaian diserahkan tidak boleh ikut Macet).
+      const jalurPenyelesaian: JalurPenyelesaian | null =
+        r.penyelesaian_jalur === 'PENGADILAN' || r.penyelesaian_jalur === 'ASURANSI' ? r.penyelesaian_jalur : null;
+      const tanggalPenyelesaian: string | null = r.penyelesaian_tanggal ? String(r.penyelesaian_tanggal) : null;
+      const nomorPenyelesaian: string | null = r.penyelesaian_nomor ? String(r.penyelesaian_nomor) : null;
+      const penyelesaianBerlaku = !!jalurPenyelesaian && !!tanggalPenyelesaian && tanggalPenyelesaian <= tanggalLaporan;
+
       const som: HasilKlasifikasiSom = klasifikasikanSom({
         polaPengembalian,
         masaAngsuranBulan,
@@ -350,9 +372,13 @@ export async function getKlasifikasiPinjamanAktif(
         totalKewajibanKontraktual: kewajibanKontraktual,
         nilaiAgunan,
         sisaUtang: saldoPokok + saldoJasa,
-        // Tidak ada kolomnya di basis data — lihat komentar field ini di
-        // `InputKlasifikasiSom`.
-        diserahkanKePengadilanAtauAsuransi: false,
+        // v82 (RC-S133.6.4): dicatat manual di `pinjaman.penyelesaian_*` —
+        // lihat komentar field ini di `InputKlasifikasiSom`.
+        diserahkanKePengadilanAtauAsuransi: penyelesaianBerlaku,
+        rujukanPenyelesaian:
+          penyelesaianBerlaku && jalurPenyelesaian
+            ? ringkasPenyelesaian({ jalur: jalurPenyelesaian, nomor: nomorPenyelesaian, tanggal: tanggalPenyelesaian })
+            : undefined,
       });
 
       return {
@@ -374,6 +400,10 @@ export async function getKlasifikasiPinjamanAktif(
         nilaiAgunan,
         angsuranTerbayar,
         kewajibanKontraktual,
+        penyelesaianJalur: jalurPenyelesaian,
+        penyelesaianTanggal: tanggalPenyelesaian,
+        penyelesaianNomor: nomorPenyelesaian,
+        penyelesaianBerlaku,
         rasioAngsuranPersen: som.rasioAngsuranPersen,
         rasioAgunanPersen: som.rasioAgunanPersen,
         bulanSejakDiragukan: som.bulanSejakDiragukan,

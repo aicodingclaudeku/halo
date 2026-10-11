@@ -238,3 +238,26 @@ export function validateAll(...results: RuleResult[]): RuleResult {
   const gagal = results.find((r) => !r.valid);
   return gagal ?? { valid: true };
 }
+
+/**
+ * RC-S133.6.4 — pasangan `validateAll` yang mengembalikan SEMUA alasan
+ * kegagalan, bukan hanya yang pertama. Dipakai di tempat yang tidak
+ * menolak melainkan memperingatkan (import data awal): pengurus perlu
+ * melihat seluruh syarat yang tidak terpenuhi sekaligus.
+ */
+export function collectFailures(...results: RuleResult[]): string[] {
+  return results.filter((r) => !r.valid).map((r) => r.reason ?? 'Syarat tidak terpenuhi.');
+}
+
+/**
+ * RC-S133.6.4 — ubah alasan penolakan menjadi kalimat peringatan netral
+ * ("ditolak" menyesatkan bila pinjaman justru tetap dicatat). Pesan asli
+ * tidak diubah; ini hanya dipakai di jalur peringatan (import data awal).
+ */
+export function alasanSebagaiPeringatan(reason: string): string {
+  const netral = reason
+    .replace(/^Pengajuan pinjaman ditolak: /, '')
+    .replace(/ — pengajuan pinjaman baru ditolak\.$/, '.')
+    .replace(/ — hanya anggota AKTIF yang bisa melakukan transaksi baru\.$/, '.');
+  return netral.charAt(0).toUpperCase() + netral.slice(1);
+}

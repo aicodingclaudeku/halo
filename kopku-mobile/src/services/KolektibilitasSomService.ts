@@ -354,8 +354,19 @@ export interface InputKlasifikasiSom {
    * pemanggil dari database selalu mengirim `false`; parameternya tetap
    * ada supaya kriteria peraturannya lengkap & teruji, dan supaya
    * penambahan kolomnya nanti tidak perlu mengubah mesin aturan.
+   *
+   * RC-S133.6.4 (v82) — kolomnya SEKARANG ADA: `pinjaman.penyelesaian_*`,
+   * dicatat manual oleh Admin/Pengurus (PenyelesaianPinjamanService).
+   * Pemanggil dari database mengirim `true` bila pencatatan itu ada DAN
+   * tanggalnya <= tanggal laporan.
    */
   diserahkanKePengadilanAtauAsuransi?: boolean;
+  /**
+   * RC-S133.6.4 — rujukan pencatatan (jalur, tanggal, nomor perkara/klaim)
+   * untuk dicantumkan di dasar penggolongan. Hanya teks; tidak memengaruhi
+   * kategori.
+   */
+  rujukanPenyelesaian?: string;
 }
 
 /** Tingkat keparahan satu dimensi tunggakan terhadap ambang Kurang Lancar. */
@@ -444,7 +455,8 @@ export function klasifikasikanSom(input: InputKlasifikasiSom): HasilKlasifikasiS
   if (input.diserahkanKePengadilanAtauAsuransi) {
     return hasil(
       'MACET',
-      'Macet — penyelesaian sudah diserahkan ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan asuransi kredit (SOM 12.1 kriteria Macet angka 3).'
+      'Macet — penyelesaian sudah diserahkan ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan asuransi kredit (SOM 12.1 kriteria Macet angka 3)' +
+        (input.rujukanPenyelesaian ? ` — ${input.rujukanPenyelesaian}.` : '.')
     );
   }
 

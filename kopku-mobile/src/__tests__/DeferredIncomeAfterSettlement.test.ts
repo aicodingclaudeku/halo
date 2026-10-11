@@ -143,9 +143,14 @@ async function setupFixture(): Promise<void> {
       `INSERT INTO journal_entry (id, journal_id, account_id, debit, kredit) VALUES (?,?,?,0,?)`,
       `je-${id}-k`, `j-${id}`, akun, nominal
     );
+    // DIPERBARUI RC-S133.6.4: setoran simpanan fixture bertanggal 2026-01-02 PADA
+    // pinjaman bertanggal 2026-01-01. Syarat pinjaman kini dinilai pada tanggal
+    // pengajuan, jadi setoran yang baru ada SESUDAH pengajuan tidak dihitung —
+    // tanggal fixture digeser ke 2026-01-01 agar anggota ini tetap "sehat" saat
+    // pengajuan (yang diuji tes ini adalah jasa dimuka, bukan syarat pinjaman).
     await testDb.runAsync(
       `INSERT INTO simpanan_transaksi (id, anggota_id, jenis, tipe, tanggal, nominal, sumber_dana, nomor_transaksi, created_by, created_at)
-       VALUES (?,?,?,'SETOR','2026-01-02',?,'KAS',?,'user-1',?)`,
+       VALUES (?,?,?,'SETOR','2026-01-01',?,'KAS',?,'user-1',?)`,
       id, ANGGOTA_ID, jenis, nominal, id, now
     );
   }

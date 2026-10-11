@@ -15,6 +15,8 @@ import {
 import type { JenisTemplateDataAwal } from '@/import/TemplateDataAwal';
 import { bangunWorkbookTemplate } from '@/import/TemplateWorkbook';
 import { getDb } from '@/database/db';
+import { getPolicyValue } from '@/services/AccountingPolicyService';
+import type { KebijakanSyaratPinjamanImport } from '@/import/PanduanImportData';
 import { muatSidikTercatat } from '@/import/RiwayatImportRepository';
 import { hitungSidikBerkas, type SidikTercatat } from '@/import/SidikImport';
 import {
@@ -163,6 +165,7 @@ export {
   KETERANGAN_STATUS_RIWAYAT,
   LABEL_FILTER_LOG,
   saringLogRiwayat,
+  adalahPeringatanSyarat,
   turunkanStatusRiwayat,
   type BarisLogRiwayat,
   type FilterLogRiwayat,
@@ -215,6 +218,18 @@ export async function ambilAnggotaTerdaftar(): Promise<{ nomorAnggota: string; n
     `SELECT nomor_anggota, nama_lengkap, tanggal_bergabung FROM anggota`
   );
   return rows.map((r) => ({ nomorAnggota: r.nomor_anggota, nama: r.nama_lengkap, tanggalBergabung: r.tanggal_bergabung }));
+}
+
+/**
+ * RC-S133.6.4 — kebijakan syarat pinjaman yang berlaku, untuk pemeriksaan
+ * syarat pinjaman di pratinjau (`periksaSyaratPinjamanImport`).
+ */
+export async function ambilKebijakanSyaratPinjaman(): Promise<KebijakanSyaratPinjamanImport> {
+  const [saldoMinimum, plafonPinjaman] = await Promise.all([
+    getPolicyValue('MINIMUM_SALDO_SIMPANAN_PINJAMAN'),
+    getPolicyValue('MAX_PINJAMAN_PER_ANGGOTA'),
+  ]);
+  return { saldoMinimum, plafonPinjaman };
 }
 
 /** Jumlah riwayat tersimpan — dipakai lencana pada ikon riwayat. */

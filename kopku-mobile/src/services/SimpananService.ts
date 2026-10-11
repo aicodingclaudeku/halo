@@ -314,16 +314,24 @@ export async function listSimpananHistori(opts: {
 export async function getSaldoSimpanan(
   db: SQLite.SQLiteDatabase,
   anggotaId: string,
-  jenis: JenisSimpanan
+  jenis: JenisSimpanan,
+  /**
+   * RC-S133.6.4 — bila diisi, saldo dihitung dari transaksi bertanggal
+   * <= tanggal ini (saldo PER TANGGAL itu, bukan saldo hari ini). Dipakai
+   * penilaian syarat pinjaman bertanggal lampau. Tidak diisi = perilaku
+   * lama persis (seluruh transaksi).
+   */
+  sampaiTanggal?: string
 ): Promise<Rupiah> {
   const row = await db.getFirstAsync<{ total: number }>(
     `SELECT COALESCE(SUM(CASE WHEN tipe = 'SETOR' THEN nominal
                                WHEN tipe = 'TARIK' THEN -nominal
                                ELSE 0 END), 0) as total
      FROM simpanan_transaksi
-     WHERE anggota_id = ? AND jenis = ? AND ${SIMPANAN_TIDAK_DIKOREKSI_CLAUSE}`,
-    anggotaId,
-    jenis
+     WHERE anggota_id = ? AND jenis = ? AND ${SIMPANAN_TIDAK_DIKOREKSI_CLAUSE}${
+       sampaiTanggal ? ' AND tanggal <= ?' : ''
+     }`,
+    ...(sampaiTanggal ? [anggotaId, jenis, sampaiTanggal] : [anggotaId, jenis])
   );
   return row?.total ?? 0;
 }
@@ -336,10 +344,12 @@ export async function getSaldoSimpanan(
  */
 export async function getSaldoSimpananAnggota(
   anggotaId: string,
-  jenis: JenisSimpanan
+  jenis: JenisSimpanan,
+  /** RC-S133.6.4 — saldo per tanggal ini (tidak diisi = saldo hari ini / seluruh transaksi). */
+  sampaiTanggal?: string
 ): Promise<Rupiah> {
   const db = await getDb();
-  return getSaldoSimpanan(db, anggotaId, jenis);
+  return getSaldoSimpanan(db, anggotaId, jenis, sampaiTanggal);
 }
 
 export interface SaldoSimpananAnggotaRow {

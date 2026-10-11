@@ -230,7 +230,7 @@ describe('RC-S132 §D — akun Anggota ditautkan ke data anggota (migrasi v80)',
   });
 
   it('skema v80: kolom app_user.anggota_id + indeks unik parsial', async () => {
-    expect(SCHEMA_VERSION).toBe(81); // DIPERBARUI v81 (RC-S133.6.2: tabel import_data_awal_sidik & koreksi_transaksi + 2 kolom riwayat import, aditif; migrasi milik RC-S133.6.2 — invarian test ini TIDAK berubah).
+    expect(SCHEMA_VERSION).toBe(82); // DIPERBARUI v82 (RC-S133.6.4: enam kolom pinjaman.penyelesaian_* untuk pencatatan penyelesaian Pengadilan/asuransi, aditif; migrasi milik RC-S133.6.4 — invarian test ini TIDAK berubah). DIPERBARUI v81 (RC-S133.6.2: tabel import_data_awal_sidik & koreksi_transaksi + 2 kolom riwayat import, aditif; migrasi milik RC-S133.6.2 — invarian test ini TIDAK berubah).
     const kolom = await testDb.getAllAsync<{ name: string }>(`PRAGMA table_info(app_user)`);
     expect(kolom.map((k) => k.name)).toContain('anggota_id');
     const idx = await testDb.getFirstAsync<{ sql: string }>(`SELECT sql FROM sqlite_master WHERE name = 'idx_app_user_anggota'`);

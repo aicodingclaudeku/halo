@@ -156,6 +156,12 @@ export interface BerhasilImport {
   jenis: JenisSheetImport;
   baris: number;
   keterangan: string;
+  /**
+   * RC-S133.6.4 — syarat pinjaman yang TIDAK terpenuhi pada tanggal pinjaman
+   * ini. Baris tetap BERHASIL (pinjaman historis sudah terjadi); alasan ini
+   * dicatat di hasil dan Riwayat Import agar pengurus dapat menelusurinya.
+   */
+  peringatan?: string[];
 }
 
 export interface HasilPerSheet {
@@ -446,9 +452,9 @@ export async function jalankanImportDataAwal(
    * di `perSheet` dan panjang daftar `berhasil` mustahil divergen (dulu
    * penghitung dinaikkan langsung di enam tempat berbeda).
    */
-  const catatBerhasil = (jenis: JenisSheetImport, baris: number, keterangan: string) => {
+  const catatBerhasil = (jenis: JenisSheetImport, baris: number, keterangan: string, peringatan?: string[]) => {
     hitung[jenis].berhasil += 1;
-    berhasil.push({ jenis, baris, keterangan });
+    berhasil.push(peringatan && peringatan.length > 0 ? { jenis, baris, keterangan, peringatan } : { jenis, baris, keterangan });
   };
 
   /**
@@ -845,11 +851,12 @@ export async function jalankanImportDataAwal(
     const a = anggotaUntuk('PINJAMAN', r);
     if (!a) continue;
     let pinjamanId: string | null = null;
+    let peringatanSyarat: string[] = [];
     try {
       // AUDIT F-1b — tentukan rekening SEBELUM ajukanPinjaman agar kegagalan
       // tidak meninggalkan pinjaman DIAJUKAN yatim.
       const bankP = await bankUntukImport(opsi.dbMigrasi ?? (await getDb()), r.sumberDana, r.rekeningBank);
-      ({ id: pinjamanId } = await ajukanPinjaman({
+      ({ id: pinjamanId, peringatanSyarat } = await ajukanPinjaman({
         anggotaId: a.id,
         tanggal: r.tanggal,
         jumlahPinjaman: r.jumlahPinjaman,
@@ -861,6 +868,10 @@ export async function jalankanImportDataAwal(
         biayaAdminNilai: 0,
         dendaAktif: false,
         createdBy: opsi.createdBy,
+        // RC-S133.6.4 — syarat pinjaman dinilai pada tanggal pinjaman (bukan
+        // hari ini) dan, untuk import data awal, hanya MEMPERINGATKAN: pinjaman
+        // historis sudah terjadi, jadi menolaknya hanya menghalangi pemindahan data.
+        modeEligibilitas: 'PERINGATAN',
       } as Parameters<typeof ajukanPinjaman>[0]));
 
       await cairkanPinjaman({
@@ -896,7 +907,7 @@ export async function jalankanImportDataAwal(
         }
       }
 
-      catatBerhasil('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`);
+      catatBerhasil('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, peringatanSyarat);
       await simpanSidik('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, 'BERHASIL', 'pinjaman', pinjamanId);
     } catch (e) {
       // RC-S133.6 (sisa AUDIT F-1b) — kegagalan SESUDAH ajukanPinjaman (mis.

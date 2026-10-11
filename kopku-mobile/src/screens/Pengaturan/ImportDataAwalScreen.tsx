@@ -16,6 +16,7 @@ import {
   ambilNikTerdaftar,
   ambilSidikTercatat,
   ambilAnggotaTerdaftar,
+  ambilKebijakanSyaratPinjaman,
   unduhTemplateDataAwal,
 } from '@/services/ImportDataAwalService';
 import { bandingkanSidik, hitungSidikBerkas, type SidikTercatat } from '@/import/SidikImport';
@@ -109,6 +110,8 @@ export default function ImportDataAwalScreen() {
   const [nikTerdaftar, setNikTerdaftar] = useState<string[] | null>(null);
   /** RC-S133.6.2 — sidik baris berkas ini yang sudah pernah diimpor (null = belum dibaca). */
   const [sidikTercatat, setSidikTercatat] = useState<Map<string, SidikTercatat> | null>(null);
+  /** RC-S133.6.4 — kebijakan syarat pinjaman, untuk pemeriksaan syarat pada tanggal tiap pinjaman. */
+  const [kebijakanSyarat, setKebijakanSyarat] = useState<Awaited<ReturnType<typeof ambilKebijakanSyaratPinjaman>> | null>(null);
   const [anggotaTerdaftar, setAnggotaTerdaftar] = useState<
     { nomorAnggota: string; nama: string; tanggalBergabung: string | null }[] | null
   >(null);
@@ -151,9 +154,10 @@ export default function ImportDataAwalScreen() {
             nikTerdaftar: nikTerdaftar ?? undefined,
             sidikTercatat: sidikTercatat ?? undefined,
             anggotaTerdaftar: anggotaTerdaftar ?? undefined,
+            kebijakanSyaratPinjaman: kebijakanSyarat ?? undefined,
           })
         : [],
-    [ringkasan, sifatData, cutOffEfektif, rekeningAktif, nikTerdaftar, sidikTercatat, anggotaTerdaftar]
+    [ringkasan, sifatData, cutOffEfektif, rekeningAktif, nikTerdaftar, sidikTercatat, anggotaTerdaftar, kebijakanSyarat]
   );
   /** RC-S133.6.2 — jumlah baris yang akan dilewati karena sudah pernah diimpor. */
   const jumlahDilewati = useMemo(
@@ -192,6 +196,7 @@ export default function ImportDataAwalScreen() {
       // bila sidik tidak dapat dibaca, pratinjau dibatalkan dengan pesan).
       setSidikTercatat(await ambilSidikTercatat(r));
       setAnggotaTerdaftar(await ambilAnggotaTerdaftar());
+      setKebijakanSyarat(await ambilKebijakanSyaratPinjaman());
       setNamaBerkas(berkas.nama);
       setRingkasan(r);
     } catch (e) {
@@ -739,6 +744,34 @@ export default function ImportDataAwalScreen() {
                 {hasil.dilewati!.length > 50 ? (
                   <Text style={styles.galatPesan}>…dan {hasil.dilewati!.length - 50} baris lain (lihat Riwayat Import).</Text>
                 ) : null}
+              </View>
+            </View>
+          )}
+
+          {/* RC-S133.6.4 — pinjaman yang masuk walau syaratnya tidak terpenuhi pada tanggal pinjaman. */}
+          {hasil.berhasil.some((b) => (b.peringatan?.length ?? 0) > 0) && (
+            <View style={[styles.card, styles.cardSpaced]} testID="hasil-peringatan-syarat">
+              <Text style={styles.cardTitle}>
+                Pinjaman dengan Peringatan Syarat ({hasil.berhasil.filter((b) => (b.peringatan?.length ?? 0) > 0).length})
+              </Text>
+              <Text style={styles.cardSub}>
+                Pinjaman ini SUDAH tercatat. Syarat pengajuannya dinilai pada tanggal pinjaman (bukan hari ini) dan tidak
+                terpenuhi; karena pinjaman historis sudah terjadi, import tidak menolaknya. Hasil ini juga tersimpan di Riwayat Import.
+              </Text>
+              <View style={styles.galatBox}>
+                {hasil.berhasil
+                  .filter((b) => (b.peringatan?.length ?? 0) > 0)
+                  .map((b, i) => (
+                    <View key={i} style={styles.galatItem}>
+                      <View style={styles.pilBaris}>
+                        <Text style={styles.pilBarisTeks}>
+                          {JUDUL_SHEET[b.jenis]} · Baris {b.baris}
+                        </Text>
+                      </View>
+                      <Text style={styles.galatKeterangan}>{b.keterangan}</Text>
+                      <Text style={[styles.galatPesan, { color: colors.warning }]}>{(b.peringatan ?? []).join(' ')}</Text>
+                    </View>
+                  ))}
               </View>
             </View>
           )}

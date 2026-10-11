@@ -130,12 +130,15 @@ describe('RC-S133.6.3 — dokumen berseksi', () => {
     expect(dasar.baris[1]).toEqual(['PJ-2', '1 bulan', 1_500_000, '25%', 5_000_000, '111,1%', 'Lancar — uji.']);
   });
 
-  test('catatan menyebut penafsiran masa angsuran & kriteria Macet pengadilan/asuransi yang belum diterapkan', () => {
+  test('catatan menyebut penafsiran masa angsuran & kriteria Macet pengadilan/asuransi', () => {
     const c = seksi[6];
     if (c.jenis !== 'KV') throw new Error('KV');
     const teks = c.baris.map((b) => `${b.label}: ${b.nilai}`).join(' ');
     expect(teks).toMatch(/tepat 1 bulan dan 4–5 bulan/);
-    expect(teks).toMatch(/Pengadilan Negeri \/ klaim asuransi kredit belum tercatat/);
+    // DIPERBARUI RC-S133.6.4 (v82): kriteria ini kini dapat dicatat manual (sebelumnya
+    // "belum tercatat di aplikasi"). Data uji tanpa pencatatan -> catatan menyatakan tidak ada.
+    expect(teks).toMatch(/Pengadilan Negeri \/ klaim asuransi kredit dicatat manual oleh Admin\/Pengurus/);
+    expect(teks).toMatch(/tidak ada pinjaman yang tercatat memenuhi kriteria ini/);
   });
 
   test('Excel berseksi: sel Rupiah hanya pada kolom nominal', () => {

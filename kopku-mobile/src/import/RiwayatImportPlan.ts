@@ -51,6 +51,26 @@ export const KETERANGAN_STATUS_RIWAYAT: Record<StatusRiwayatImport, string> = {
   GAGAL: 'Tidak ada satu pun baris yang masuk.',
 };
 
+/**
+ * RC-S133.6.4 — peringatan syarat pinjaman pada baris yang BERHASIL.
+ *
+ * Pinjaman historis dari import data awal tidak ditolak bila syarat
+ * pengajuan (simpanan pokok/wajib, saldo minimum, batas pinjaman, batas
+ * tunggakan) tidak terpenuhi PADA TANGGAL PINJAMAN; baris tetap berhasil,
+ * dan alasannya dicatat di kolom `pesan` log baris tersebut (kolom itu
+ * sebelumnya hanya terisi untuk baris GAGAL) — tanpa perubahan skema.
+ */
+export const AWALAN_PERINGATAN_SYARAT = 'Peringatan syarat pinjaman pada tanggal pinjaman: ';
+
+export function pesanPeringatanSyarat(alasan: readonly string[]): string {
+  return AWALAN_PERINGATAN_SYARAT + alasan.join(' ');
+}
+
+/** Baris log yang BERHASIL tetapi membawa peringatan syarat pinjaman. */
+export function adalahPeringatanSyarat(b: { status: string; pesan: string | null }): boolean {
+  return b.status === 'BERHASIL' && !!b.pesan && b.pesan.startsWith(AWALAN_PERINGATAN_SYARAT);
+}
+
 export type FilterLogRiwayat = 'SEMUA' | 'BERHASIL' | 'GAGAL';
 
 export const LABEL_FILTER_LOG: Record<FilterLogRiwayat, string> = {

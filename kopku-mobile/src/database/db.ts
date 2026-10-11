@@ -2885,6 +2885,10 @@ export async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
       await migrasiV81(db, tambahKolomJikaBelumAda);
     }
 
+    if (currentVersion < 82) {
+      await migrasiV82(db, tambahKolomJikaBelumAda);
+    }
+
     // PHASE 2E — versi HANYA dinaikkan di sini, yaitu setelah SELURUH
     // blok migrasi di atas selesai tanpa exception. Kalau ada satu saja
     // yang melempar, baris ini tidak pernah dijalankan: percobaan
@@ -4196,6 +4200,39 @@ export async function migrasiV81(
   if (riwayat) {
     await tambahKolom('import_data_awal_riwayat', 'sidik_berkas', 'TEXT');
     await tambahKolom('import_data_awal_riwayat', 'total_dilewati', 'INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
+/**
+ * v82 (RC-S133.6.4) — pencatatan penyelesaian pinjaman ke Pengadilan Negeri /
+ * klaim asuransi (kriteria Macet angka 3 SOM 12.1). ADITIF MURNI & IDEMPOTEN:
+ * enam kolom `penyelesaian_*` pada `pinjaman`, semuanya NULL. Tidak ada baris
+ * yang diubah, tidak ada tabel dibangun ulang, tidak ada jurnal. Salinan
+ * database dibuat lebih dulu oleh `cadangkanSebelumMigrasi`.
+ */
+export const KOLOM_PENYELESAIAN_V82: readonly { nama: string; tipe: string }[] = [
+  { nama: 'penyelesaian_jalur', tipe: "TEXT CHECK (penyelesaian_jalur IN ('PENGADILAN','ASURANSI'))" },
+  { nama: 'penyelesaian_tanggal', tipe: 'TEXT' },
+  { nama: 'penyelesaian_nomor', tipe: 'TEXT' },
+  { nama: 'penyelesaian_dokumen', tipe: 'TEXT' },
+  { nama: 'penyelesaian_alasan', tipe: 'TEXT' },
+  { nama: 'penyelesaian_oleh', tipe: 'TEXT' },
+];
+
+export async function migrasiV82(
+  db: SQLite.SQLiteDatabase,
+  tambahKolom: (tabel: string, kolom: string, tipe: string) => Promise<void>
+): Promise<void> {
+  for (const k of KOLOM_PENYELESAIAN_V82) {
+    await tambahKolom('pinjaman', k.nama, k.tipe);
+  }
+  // `tambahKolom` menelan galat (agar aman diulang). Karena versi skema baru
+  // dinaikkan setelah blok ini, pastikan keenam kolom benar-benar ada —
+  // kalau tidak, gagal keras supaya percobaan berikutnya mengulang.
+  const ada = new Set((await db.getAllAsync<{ name: string }>(`PRAGMA table_info(pinjaman)`)).map((c) => c.name));
+  const hilang = KOLOM_PENYELESAIAN_V82.filter((k) => !ada.has(k.nama)).map((k) => k.nama);
+  if (hilang.length > 0) {
+    throw new Error(`[migrasi v82] kolom pinjaman belum lengkap: ${hilang.join(', ')}.`);
   }
 }
 

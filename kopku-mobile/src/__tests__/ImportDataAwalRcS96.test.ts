@@ -187,9 +187,15 @@ describe('RC-S96 — import data awal: anggota, simpanan, berjangka, pinjaman', 
     expect(debit).toBe(kredit);
   });
 
-  test('pinjaman tanpa simpanan pokok/wajib ditolak aturan kelayakan yang sudah ada', async () => {
-    // Import TIDAK BOLEH menjadi pintu belakang: `checkEligibilitasPinjaman`
-    // mewajibkan anggota sudah punya Simpanan Pokok & Wajib.
+  // DIPERBARUI RC-S133.6.4 (keputusan pengguna): sebelumnya tes ini
+  // 'pinjaman tanpa simpanan pokok/wajib ditolak aturan kelayakan yang sudah ada'
+  // dan mengharapkan pinjaman GAGAL (`gagal` = 1, `listPinjaman` kosong).
+  // Syarat pinjaman kini dinilai pada TANGGAL PINJAMAN dan, untuk import data awal,
+  // hanya menjadi PERINGATAN: pinjaman historis sudah terjadi, jadi menolaknya
+  // hanya menghalangi pemindahan data. Pinjaman tetap masuk; peringatannya
+  // tercatat di hasil (dan Riwayat Import). Form pengajuan TETAP menolak
+  // (lihat PinjamanService.test.ts & SyaratPinjamanTanggalPengajuanRcS133_6_4.test.ts).
+  test('pinjaman tanpa simpanan pokok/wajib TETAP masuk sebagai peringatan syarat (bukan ditolak)', async () => {
     const ringkasan = parseBerkasDataAwal({
       ANGGOTA: sheetAnggota([['A1', 'Tanpa Simpanan', '01/01/2026']]),
       PINJAMAN: [
@@ -201,10 +207,12 @@ describe('RC-S96 — import data awal: anggota, simpanan, berjangka, pinjaman', 
     const hasil = await jalankanImportDataAwal(ringkasan, { createdBy: USER_ID, dbRiwayat: testDb as never });
 
     expect(hasil.perSheet.find((s) => s.jenis === 'ANGGOTA')!.berhasil).toBe(1);
-    expect(hasil.perSheet.find((s) => s.jenis === 'PINJAMAN')!.gagal).toBe(1);
-    expect(hasil.gagal[0].jenis).toBe('PINJAMAN');
-    // Tidak ada pinjaman yang tertinggal separuh jadi.
-    expect(await listPinjaman({})).toHaveLength(0);
+    expect(hasil.perSheet.find((s) => s.jenis === 'PINJAMAN')!.berhasil).toBe(1);
+    expect(hasil.perSheet.find((s) => s.jenis === 'PINJAMAN')!.gagal).toBe(0);
+    expect(hasil.gagal).toEqual([]);
+    const peringatan = hasil.berhasil.find((b) => b.jenis === 'PINJAMAN')!.peringatan!;
+    expect(peringatan.join(' ')).toMatch(/Simpanan Pokok dan Simpanan Wajib/);
+    expect(await listPinjaman({})).toHaveLength(1);
   });
 
   test('baris milik anggota yang gagal dibuat dilewati dengan sebab yang jelas, bukan galat susulan', async () => {

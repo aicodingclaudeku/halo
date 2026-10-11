@@ -6,6 +6,7 @@ import {
   BarisLogRiwayat,
   RingkasanRiwayatImport,
   StatusRiwayatImport,
+  pesanPeringatanSyarat,
   statusDariHasil,
 } from './RiwayatImportPlan';
 
@@ -118,12 +119,14 @@ export async function catatRiwayatImport(
       await db.runAsync(
         `INSERT INTO import_data_awal_log
            (id, riwayat_id, jenis_sheet, baris, keterangan, status, pesan, created_at)
-         VALUES (?,?,?,?,?, 'BERHASIL', NULL, ?)`,
+         VALUES (?,?,?,?,?, 'BERHASIL', ?, ?)`,
         newId(),
         riwayatId,
         b.jenis,
         b.baris,
         b.keterangan,
+        // RC-S133.6.4 — peringatan syarat pinjaman (baris tetap berhasil).
+        b.peringatan && b.peringatan.length > 0 ? pesanPeringatanSyarat(b.peringatan) : null,
         nowIso
       );
     }

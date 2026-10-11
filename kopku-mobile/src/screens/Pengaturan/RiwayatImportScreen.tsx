@@ -8,6 +8,7 @@ import {
   LABEL_STATUS_RIWAYAT,
   KETERANGAN_STATUS_RIWAYAT,
   saringLogRiwayat,
+  adalahPeringatanSyarat,
   type BarisLogRiwayat,
   type FilterLogRiwayat,
   type RingkasanRiwayatImport,
@@ -144,6 +145,8 @@ function KartuRiwayat({
   const warna = WARNA_STATUS[riwayat.status];
   const logTampil = log ? saringLogRiwayat(log, filter) : [];
   const jumlahGagal = log ? log.filter((b) => b.status === 'GAGAL').length : riwayat.totalGagal;
+  // RC-S133.6.4 — pinjaman yang masuk walau syarat pengajuan tidak terpenuhi pada tanggal pinjamannya.
+  const jumlahPeringatanSyarat = log ? log.filter(adalahPeringatanSyarat).length : 0;
 
   return (
     <View style={[styles.kartu, { borderLeftColor: warna }]}>
@@ -245,15 +248,29 @@ function KartuRiwayat({
             </Text>
           )}
 
+          {jumlahPeringatanSyarat > 0 && (
+            <Text style={styles.logPeringatanRingkas} testID="riwayat-peringatan-syarat">
+              {jumlahPeringatanSyarat} pinjaman masuk walau syarat pengajuannya tidak terpenuhi pada tanggal pinjaman
+              (peringatan, bukan penolakan). Lihat baris bertanda kuning di bawah.
+            </Text>
+          )}
+
           {logTampil.map((b) => (
             <View key={b.id} style={styles.logBaris}>
-              <View style={[styles.logTanda, { backgroundColor: b.status === 'GAGAL' ? colors.danger : colors.success }]} />
+              <View
+                style={[
+                  styles.logTanda,
+                  { backgroundColor: b.status === 'GAGAL' ? colors.danger : adalahPeringatanSyarat(b) ? colors.warning : colors.success },
+                ]}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={styles.logKepala}>
                   {LABEL_SHEET[b.jenisSheet as never] ?? b.jenisSheet} · baris {b.baris}
                 </Text>
                 <Text style={styles.logKeterangan}>{b.keterangan}</Text>
-                {b.pesan ? <Text style={styles.logPesan}>{b.pesan}</Text> : null}
+                {b.pesan ? (
+                  <Text style={[styles.logPesan, adalahPeringatanSyarat(b) && { color: colors.warning }]}>{b.pesan}</Text>
+                ) : null}
               </View>
             </View>
           ))}
@@ -354,4 +371,5 @@ const styles = StyleSheet.create({
   logKepala: { fontSize: 11, fontWeight: '700', color: colors.textMuted },
   logKeterangan: { fontSize: 12, color: colors.text, marginTop: 1 },
   logPesan: { fontSize: 11, color: colors.danger, marginTop: 2, lineHeight: 15 },
+  logPeringatanRingkas: { fontSize: 12, color: colors.warning, marginBottom: spacing.sm, lineHeight: 17 },
 });

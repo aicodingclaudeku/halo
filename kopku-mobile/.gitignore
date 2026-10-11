@@ -19,3 +19,7 @@ desktop/node_modules/
 desktop/renderer/
 desktop/dist/
 desktop/test/e2e/.out/
+
+# Keluaran build harness verifikasi (bukan source)
+.harness/build3/
+.harness/out/

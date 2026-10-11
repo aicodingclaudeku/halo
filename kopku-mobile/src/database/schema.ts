@@ -46,7 +46,12 @@
 // mencegah import ganda walau nama berkas berubah dan melanjutkan import
 // yang gagal sebagian; (b) jejak koreksi transaksi dari History (tabel BARU
 // koreksi_transaksi). Aditif murni; sebelum migrasi dibuat salinan database.
-export const SCHEMA_VERSION = 81;
+// RC-S133.6.4 — v82: pencatatan MANUAL penyelesaian pinjaman ke Pengadilan
+// Negeri / klaim asuransi kredit (kriteria Macet angka 3 SOM 12.1): enam kolom
+// penyelesaian_* pada `pinjaman` (semuanya NULL untuk data lama). Aditif murni
+// lewat ADD COLUMN; sebelum migrasi dibuat salinan database. HP & desktop harus
+// sama-sama v82 (sinkron menolak versi skema berbeda).
+export const SCHEMA_VERSION = 82;
 
 export const CREATE_TABLES_SQL = `
 PRAGMA foreign_keys = ON;
@@ -863,7 +868,20 @@ CREATE TABLE IF NOT EXISTS pinjaman (
   -- (§R/§T, instrumen sudah dihentikan/dilunasi/dihapusbukukan).
   eir_measurement_status TEXT NOT NULL CHECK (eir_measurement_status IN (
     'EIR_NOT_MIGRATED','NOT_APPLICABLE','MEASURED','PENDING_RESTRUCTURING_EIR_REVIEW','DERECOGNIZED'
-  )) DEFAULT 'EIR_NOT_MIGRATED'
+  )) DEFAULT 'EIR_NOT_MIGRATED',
+  -- v82 (RC-S133.6.4) — PENYELESAIAN KE PENGADILAN NEGERI / KLAIM ASURANSI.
+  -- Kriteria Macet angka 3 (SOM 12.1): penyelesaian pinjaman sudah diserahkan
+  -- ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan
+  -- asuransi kredit. Dicatat MANUAL oleh Admin/Pengurus (nomor perkara/klaim
+  -- dan dokumen tidak mungkin ditebak otomatis); setiap pencatatan,
+  -- perubahan, dan pembatalan masuk audit_log. NULL = tidak ada (seluruh
+  -- pinjaman lama). Pencatatan ini TIDAK membuat jurnal.
+  penyelesaian_jalur TEXT CHECK (penyelesaian_jalur IN ('PENGADILAN','ASURANSI')),
+  penyelesaian_tanggal TEXT,          -- tanggal diserahkan / diajukan (YYYY-MM-DD); Macet berlaku sejak tanggal ini
+  penyelesaian_nomor TEXT,            -- nomor perkara (PENGADILAN) / nomor klaim (ASURANSI)
+  penyelesaian_dokumen TEXT,          -- dokumen bukti (mis. nomor/nama surat gugatan, surat klaim)
+  penyelesaian_alasan TEXT,           -- keterangan / alasan pencatatan
+  penyelesaian_oleh TEXT              -- app_user.id pencatat terakhir (tanpa FK: jejak peristiwa)
 );
 
 -- ============================================================

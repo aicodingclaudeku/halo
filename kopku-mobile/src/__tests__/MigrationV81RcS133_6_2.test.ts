@@ -113,13 +113,15 @@ function denganBerkas(d: TestDb, opsi: { gagal?: boolean; berkas?: string }) {
 test('salinan pengaman dibuat SEBELUM DDL v81, di folder database, bernama pra-migrasi-v80-ke-v81-*', async () => {
   const { w, urutan } = denganBerkas(db, {});
   await runMigrations(w);
-  expect(urutan[0]).toMatch(/^VACUUM INTO '\/data\/user\/0\/kopku\/files\/SQLite\/pra-migrasi-v80-ke-v81-\d{8}T\d{6}Z\.db'$/);
+  // DIPERBARUI RC-S133.6.4: target versi mengikuti SCHEMA_VERSION (kini 82) — salinan dibuat
+  // sekali SEBELUM seluruh rantai migrasi v80 -> terbaru, bukan per langkah.
+  expect(urutan[0]).toMatch(new RegExp(`^VACUUM INTO '/data/user/0/kopku/files/SQLite/pra-migrasi-v80-ke-v${SCHEMA_VERSION}-\\d{8}T\\d{6}Z\\.db'$`));
   expect(urutan.indexOf('DDL v81')).toBeGreaterThan(0);
 });
 
 test('salinan GAGAL -> migrasi dihentikan: versi tetap 80, tabel v81 tidak dibuat, pesan jelas', async () => {
   const { w } = denganBerkas(db, { gagal: true });
-  await expect(runMigrations(w)).rejects.toThrow(/v80 ke v81 dihentikan: salinan pengaman .* Data tidak diubah/);
+  await expect(runMigrations(w)).rejects.toThrow(new RegExp(`v80 ke v${SCHEMA_VERSION} dihentikan: salinan pengaman .* Data tidak diubah`)); // DIPERBARUI RC-S133.6.4: target = SCHEMA_VERSION
   expect((await db.getFirstAsync<any>(`SELECT version FROM schema_meta`)).version).toBe(80);
   expect(await db.getFirstAsync(`SELECT name FROM sqlite_master WHERE name = 'import_data_awal_sidik'`)).toBe(null);
   // Percobaan berikutnya (salinan berhasil) melanjutkan dari awal.

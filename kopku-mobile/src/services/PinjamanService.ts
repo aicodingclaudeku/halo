@@ -20,8 +20,8 @@ import {
   SatuanTenor,
 } from '@/accounting/PinjamanCalculator';
 import { checkLiquiditasPencairan, checkSaldoAkunCukup } from '@/services/LiquidityService';
-import { checkEligibilitasPinjaman } from '@/services/LoanEligibilityService';
-import { checkBelumDicairkan, checkPembayaranTidakMelebihiOutstanding, checkAnggotaAktif, validateAll } from '@/validators/BusinessRuleEngine';
+import { evaluasiEligibilitasPinjaman } from '@/services/LoanEligibilityService';
+import { checkBelumDicairkan, checkPembayaranTidakMelebihiOutstanding, checkAnggotaAktif, validateAll, alasanSebagaiPeringatan } from '@/validators/BusinessRuleEngine';
 import { requirePermission } from '@/services/PermissionService';
 import { getKlasifikasiPinjamanAktif } from '@/services/LoanImpairmentService';
 import {
@@ -42,6 +42,7 @@ import {
   calculateMaturityDate,
 } from '@/accounting/InstallmentDate';
 import { getTanggalLokalHariIni } from '@/utils/tanggal';
+import { bacaPenyelesaianDariRow } from '@/accounting/PenyelesaianPinjaman';
 import { urutkanEventAkadUlang, jatuhTempoAkhir } from '@/services/AkadUlangPresentasi';
 import { getSusunanPengurusInti } from '@/services/KoperasiMasterService';
 import type { SusunanPengurusInti } from '@/services/PengurusInti';
@@ -166,6 +167,17 @@ export interface AjukanPinjamanInput {
   dendaNilai?: number;
   keterangan?: string;
   createdBy: string;
+  /**
+   * RC-S133.6.4 — perlakuan syarat pinjaman (eligibilitas) yang tidak terpenuhi.
+   *   'TOLAK' (bawaan) — pengajuan ditolak dengan alasan pertama. Berlaku untuk
+   *     pengajuan lewat form.
+   *   'PERINGATAN' — pengajuan TETAP dibuat; alasan yang tidak terpenuhi
+   *     dikembalikan di `peringatanSyarat`. HANYA untuk import data awal:
+   *     pinjaman historis sudah terjadi, jadi memblokirnya hanya menghalangi
+   *     pemindahan data.
+   * Dalam kedua mode syarat dinilai pada `tanggal` pengajuan, bukan hari ini.
+   */
+  modeEligibilitas?: 'TOLAK' | 'PERINGATAN';
 }
 
 /**
@@ -194,11 +206,22 @@ export async function ajukanPinjaman(input: AjukanPinjamanInput) {
     // baru dibuat saat pencairan, sesuai desain awal) — ini murni gate
     // "boleh/tidak boleh mengajukan", dijalankan SEBELUM baris
     // `pinjaman` diinsert sama sekali.
-    const cekEligibilitas = await checkEligibilitasPinjaman(db, {
+    //
+    // RC-S133.6.4 — syarat dinilai pada TANGGAL PENGAJUAN (`input.tanggal`),
+    // bukan hari ini. Untuk tanggal hari ini hasilnya sama dengan sebelumnya.
+    const cekEligibilitas = await evaluasiEligibilitasPinjaman(db, {
       anggotaId: input.anggotaId,
       jumlahDiajukan: input.jumlahPinjaman,
+      tanggal: input.tanggal,
     });
-    if (!cekEligibilitas.valid) throw new Error(cekEligibilitas.reason);
+    let peringatanSyarat: string[] = [];
+    if (!cekEligibilitas.valid) {
+      if (input.modeEligibilitas === 'PERINGATAN') {
+        peringatanSyarat = cekEligibilitas.alasan.map(alasanSebagaiPeringatan);
+      } else {
+        throw new Error(cekEligibilitas.alasan[0]);
+      }
+    }
 
     // RC-S54 item 24 & 25 — validasi tujuan & agunan, SEBELUM satu baris
     // pun ditulis. Keduanya murni data pengajuan: nol dampak pada
@@ -273,7 +296,7 @@ export async function ajukanPinjaman(input: AjukanPinjamanInput) {
       );
     }
 
-    return { id, nomorPinjaman };
+    return { id, nomorPinjaman, peringatanSyarat };
   });
 }
 
@@ -2053,6 +2076,8 @@ export async function getPinjamanDetail(pinjamanId: string) {
     tujuanDetail: (row.tujuan_detail ?? null) as string | null,
     /** RC-S72 — prefill form Edit Pinjaman; kosong = tanpa agunan. */
     agunan: await getAgunanPinjaman(db, pinjamanId),
+    /** RC-S133.6.4 (v82) — pencatatan penyelesaian ke Pengadilan/asuransi; null bila tidak ada. */
+    penyelesaian: bacaPenyelesaianDariRow(pinjamanId, row),
   };
 }
 

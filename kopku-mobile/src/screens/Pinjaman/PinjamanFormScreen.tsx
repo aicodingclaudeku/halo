@@ -226,20 +226,27 @@ export default function PinjamanFormScreen() {
     }
     let cancelled = false;
     (async () => {
+      // RC-S133.6.4 — syarat dinilai pada TANGGAL PENGAJUAN: untuk tanggal
+      // lampau, saldo dihitung per tanggal itu (sama dengan penilaian di service).
+      const sampai = tanggal && tanggal < getTanggalLokalHariIni() ? tanggal : undefined;
       const [pokok, wajib] = await Promise.all([
-        getSaldoSimpananAnggota(anggota.id, 'POKOK'),
-        getSaldoSimpananAnggota(anggota.id, 'WAJIB'),
+        getSaldoSimpananAnggota(anggota.id, 'POKOK', sampai),
+        getSaldoSimpananAnggota(anggota.id, 'WAJIB', sampai),
       ]);
       if (cancelled) return;
       const kurang: string[] = [];
       if (pokok <= 0) kurang.push('Simpanan Pokok');
       if (wajib <= 0) kurang.push('Simpanan Wajib');
-      setPeringatanSimpanan(kurang.length > 0 ? `Anggota ini belum memiliki ${kurang.join(' dan ')} — pengajuan akan ditolak.` : null);
+      setPeringatanSimpanan(
+        kurang.length > 0
+          ? `Anggota ini belum memiliki ${kurang.join(' dan ')}${sampai ? ` pada tanggal pengajuan ${tanggal}` : ''} — pengajuan akan ditolak.`
+          : null
+      );
     })();
     return () => {
       cancelled = true;
     };
-  }, [anggota]);
+  }, [anggota, tanggal]);
 
   const validate = (): boolean => {
     const e: Record<string, string> = {};

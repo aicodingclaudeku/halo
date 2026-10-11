@@ -33,6 +33,7 @@ import type {
 import type { ShuAnggotaRow, ShuKonfigurasiRow } from '@/services/ShuService';
 import type { BuktiBayarPiutangRow, BuktiBayarUtangRow, BuktiBayarSimpananRow, BuktiTarikSimpananRow, BuktiKeluarAnggotaRow } from '@/services/BuktiTransaksiService';
 import type { KlasifikasiPinjamanItem } from '@/services/LoanImpairmentService';
+import { ringkasPenyelesaian, type JalurPenyelesaian } from '@/accounting/PenyelesaianPinjaman';
 import type { KlasifikasiFiskalItem } from '@/services/KolektibilitasFiskalService';
 // KolektibilitasSomService adalah mesin aturan MURNI (tidak mengimpor
 // `@/database/db` maupun `expo-sqlite`), jadi label & urutan kategorinya
@@ -1971,6 +1972,12 @@ export function buildKolektibilitasExport(
   const rasioBermasalah = totalOutstanding > 0 ? (outstandingBermasalah / totalOutstanding) * 100 : 0;
   const totalCadanganFiskal = adaFiskal ? jumlah(daftar, (d) => d.cadanganFiskal ?? 0) : 0;
   const totalDasarFiskal = adaFiskal ? jumlah(daftar, (d) => d.dasarPencadanganFiskal ?? 0) : 0;
+  // v82 (RC-S133.6.4) — pinjaman Macet karena kriteria angka 3 (penyelesaian dicatat manual).
+  const macetAngka3 = daftar.filter((d) => d.penyelesaianBerlaku && d.penyelesaianJalur);
+  const jumlahMacetAngka3 = macetAngka3.length;
+  const rujukanMacetAngka3 = macetAngka3
+    .map((d) => `${d.nomorPinjaman} (${ringkasPenyelesaian({ jalur: d.penyelesaianJalur as JalurPenyelesaian, nomor: d.penyelesaianNomor, tanggal: d.penyelesaianTanggal })})`)
+    .join('; ');
 
   // ---- Ringkasan datar (tetap, untuk konsumen lama) ----
   const ringkasan: BarisRingkasan[] = KATEGORI_URUT.map((kat) => {
@@ -2180,8 +2187,14 @@ export function buildKolektibilitasExport(
       },
       {
         label: 'Kriteria Macet angka 3',
+        // v82 (RC-S133.6.4): kriteria ini dapat dicatat manual (Detail Pinjaman,
+        // Admin/Pengurus) dan dipakai penggolongan sejak tanggal pencatatan.
         nilai:
-          'Penyerahan ke Pengadilan Negeri / klaim asuransi kredit belum tercatat di aplikasi, sehingga kriteria ini belum diterapkan; penggolongan Macet memakai kriteria lain.',
+          'Penyerahan ke Pengadilan Negeri / klaim asuransi kredit dicatat manual oleh Admin/Pengurus di Detail Pinjaman (nomor perkara/klaim dan dokumen); ' +
+          'pinjaman yang tercatat digolongkan Macet sejak tanggal pencatatan. ' +
+          (jumlahMacetAngka3 > 0
+            ? `Pada laporan ini ${jumlahMacetAngka3} pinjaman digolongkan Macet karena kriteria ini: ${rujukanMacetAngka3}.`
+            : 'Pada laporan ini tidak ada pinjaman yang tercatat memenuhi kriteria ini.'),
       },
       { label: 'Basis nilai', nilai: 'Penyisihan & batas fiskal dihitung atas saldo pokok (outstanding); saldo piutang ditampilkan sebagai pembanding.' },
     ],

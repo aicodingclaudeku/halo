@@ -612,7 +612,8 @@ export default function KolektibilitasPiutangScreen() {
                       dari utang peminjam (huruf b). Bila tidak memenuhi keduanya, pinjaman digolongkan Macet.
                       Diragukan yang berlanjut {BULAN_DIRAGUKAN_MENJADI_MACET} bulan tanpa pelunasan, dan pinjaman yang
                       penyelesaiannya diserahkan ke Pengadilan Negeri atau diajukan ganti rugi ke asuransi kredit, juga
-                      digolongkan Macet.
+                      digolongkan Macet. Kriteria terakhir ini dicatat manual oleh Admin/Pengurus di Detail Pinjaman
+                      (nomor perkara/klaim dan dokumen) dan berlaku sejak tanggal pencatatan.
                     </Text>
                     <Text style={styles.dasarSubjudul}>
                       Juklat SOM No. 3/2025 angka 15 — taksiran piutang tak tertagih
