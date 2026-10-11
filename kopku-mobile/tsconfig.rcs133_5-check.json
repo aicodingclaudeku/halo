@@ -1,0 +1,57 @@
+{
+ "compilerOptions": {
+  "target": "ES2021",
+  "lib": [
+   "ES2021",
+   "DOM"
+  ],
+  "module": "ESNext",
+  "moduleResolution": "bundler",
+  "jsx": "react-jsx",
+  "strict": false,
+  "noEmit": true,
+  "skipLibCheck": true,
+  "types": [],
+  "paths": {
+   "@/*": [
+    "./src/*"
+   ],
+   "decimal.js": [
+    "./src/test-utils/decimalShim.ts"
+   ],
+   "expo-crypto": [
+    "./src/test-utils/expoCryptoMock.ts"
+   ],
+   "expo-secure-store": [
+    "./src/test-utils/expoSecureStoreMock.ts"
+   ]
+  }
+ },
+ "include": [
+  ".harness/rn-ambient.d.ts",
+  "app/index.tsx",
+  "src/services/UserManagementService.ts",
+  "src/services/PortalAnggotaService.ts",
+  "src/services/AuthService.ts",
+  "src/services/PermissionService.ts",
+  "src/screens/Setup/GantiPasswordScreen.tsx",
+  "src/screens/PortalAnggota/PortalAnggotaScreen.tsx",
+  "src/screens/Pengaturan/AkunAnggotaMassalScreen.tsx",
+  "src/screens/Pengaturan/UserManagementScreen.tsx",
+  "src/screens/Pengaturan/PermissionMatrixScreen.tsx",
+  "src/sync/SyncKlien.ts",
+  "src/sync/SyncServer.ts",
+  "src/sync/SyncSchema.ts",
+  "src/sync/SyncModeBacaSaja.ts",
+  "src/components/sinkron/PanelSinkronHp.tsx",
+  "src/components/sinkron/PanelSinkronDesktop.tsx",
+  "src/components/sinkron/KartuKirimData.tsx",
+  "src/components/sinkron/UiSinkron.tsx",
+  "src/desktop/AgenSinkron.tsx",
+  "src/desktop/TombolHubungkanHpSetup.web.tsx",
+  "src/desktop/shell/infoSinkron.ts",
+  "src/desktop/bridge.ts",
+  "src/navigation/RootNavigator.tsx",
+  "src/navigation/izinRute.ts"
+ ]
+}

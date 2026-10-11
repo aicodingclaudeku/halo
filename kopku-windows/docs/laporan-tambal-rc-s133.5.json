@@ -1,0 +1,254 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "dicabut": [
+  "rute AsistenClaude (stack Pengaturan)",
+  "IZIN_RUTE",
+  "KATALOG",
+  "PengaturanMenu"
+ ],
+ "dikosongkan": [
+  {
+   "berkas": "screens/Pengaturan/AsistenClaudeScreen",
+   "id": 9008
+  },
+  {
+   "berkas": "services/ClaudeService",
+   "id": 9007
+  },
+  {
+   "berkas": "components/asisten/KonektorClaudeDesktop",
+   "id": 9009
+  },
+  {
+   "berkas": "services/RingkasanDashboardService",
+   "id": 9006
+  }
+ ],
+ "modul": [
+  {
+   "berkas": "app/index.tsx",
+   "id": 890,
+   "baru": false,
+   "require": 20,
+   "reactNative": [
+    "View",
+    "StyleSheet",
+    "AppState"
+   ]
+  },
+  {
+   "berkas": "src/services/AuthService.ts",
+   "id": 821,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/UserManagementService.ts",
+   "id": 1510,
+   "baru": false,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PermissionService.ts",
+   "id": 828,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Pengaturan/PermissionMatrixScreen.tsx",
+   "id": 1543,
+   "baru": false,
+   "require": 10,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet"
+   ]
+  },
+  {
+   "berkas": "src/screens/Pengaturan/UserManagementScreen.tsx",
+   "id": 1541,
+   "baru": false,
+   "require": 14,
+   "reactNative": [
+    "View",
+    "Text",
+    "SectionList",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet",
+    "RefreshControl"
+   ]
+  },
+  {
+   "berkas": "src/sync/SyncKlien.ts",
+   "id": 1516,
+   "baru": false,
+   "require": 13,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/sync/SyncServer.ts",
+   "id": 814,
+   "baru": false,
+   "require": 15,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/sync/SyncSchema.ts",
+   "id": 796,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/sync/SyncModeBacaSaja.ts",
+   "id": 795,
+   "baru": false,
+   "require": 3,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/components/sinkron/UiSinkron.tsx",
+   "id": 853,
+   "baru": false,
+   "require": 11,
+   "reactNative": [
+    "View",
+    "Text",
+    "Pressable",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/components/sinkron/PanelSinkronDesktop.tsx",
+   "id": 813,
+   "baru": false,
+   "require": 15,
+   "reactNative": [
+    "View",
+    "Text",
+    "Image",
+    "Pressable",
+    "StyleSheet",
+    "ScrollView"
+   ]
+  },
+  {
+   "berkas": "src/desktop/TombolHubungkanHpSetup.web.tsx",
+   "id": 792,
+   "baru": false,
+   "require": 9,
+   "reactNative": [
+    "View",
+    "Text",
+    "Pressable",
+    "Modal",
+    "StyleSheet",
+    "ScrollView"
+   ]
+  },
+  {
+   "berkas": "src/desktop/shell/infoSinkron.ts",
+   "id": 900,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/sync/SyncStore.ts",
+   "id": 793,
+   "baru": false,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/desktop/BingkaiAplikasi.web.tsx",
+   "id": 889,
+   "baru": false,
+   "require": 7,
+   "reactNative": [
+    "View",
+    "Text",
+    "Image",
+    "StyleSheet",
+    "useWindowDimensions"
+   ]
+  },
+  {
+   "berkas": "src/services/PortalAnggotaService.ts",
+   "id": 9010,
+   "baru": true,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/PortalAnggota/PortalAnggotaScreen.tsx",
+   "id": 9011,
+   "baru": true,
+   "require": 10,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/screens/Setup/GantiPasswordScreen.tsx",
+   "id": 9012,
+   "baru": true,
+   "require": 10,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator",
+    "ScrollView"
+   ]
+  },
+  {
+   "berkas": "src/screens/Pengaturan/AkunAnggotaMassalScreen.tsx",
+   "id": 9013,
+   "baru": true,
+   "require": 13,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Switch"
+   ]
+  },
+  {
+   "berkas": "src/components/sinkron/KartuKirimData.tsx",
+   "id": 9014,
+   "baru": true,
+   "require": 5,
+   "reactNative": [
+    "View",
+    "Text",
+    "Pressable",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  }
+ ],
+ "sisipan": [
+  "rute AkunAnggotaMassal (stack Pengaturan)",
+  "izin AkunAnggotaMassal = r('user_management') (create)",
+  "teks menu/katalog/dashboard/bingkai sinkron (manual)"
+ ]
+}

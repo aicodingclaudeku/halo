@@ -1,0 +1,36 @@
+{
+ "compilerOptions": {
+  "target": "ES2021",
+  "lib": [
+   "ES2021"
+  ],
+  "module": "ESNext",
+  "moduleResolution": "bundler",
+  "jsx": "react-jsx",
+  "strict": false,
+  "noEmit": true,
+  "skipLibCheck": true,
+  "types": [],
+  "paths": {
+   "@/*": [
+    "./src/*"
+   ],
+   "decimal.js": [
+    "./src/test-utils/decimalShim.ts"
+   ],
+   "expo-sqlite": [
+    "./src/test-utils/expoSqliteMock.ts"
+   ],
+   "expo-crypto": [
+    "./src/test-utils/expoCryptoMock.ts"
+   ]
+  }
+ },
+ "include": [
+  ".harness/rn-ambient.d.ts",
+  "src/screens/Pengaturan/ImportDataAwalScreen.tsx",
+  "src/screens/Pengaturan/StrukturTemplateScreen.tsx",
+  "src/components/panduan/PanduanImportSlide.tsx",
+  "src/components/panduan/IlustrasiImport.tsx"
+ ]
+}

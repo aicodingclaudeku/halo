@@ -1,0 +1,60 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": [
+      "ES2021"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "decimal.js": [
+        "./src/test-utils/decimalShim.ts"
+      ],
+      "expo-sqlite": [
+        "./src/test-utils/expoSqliteMock.ts"
+      ],
+      "expo-crypto": [
+        "./src/test-utils/expoCryptoMock.ts"
+      ]
+    }
+  },
+  "include": [
+    ".harness/rn-ambient.d.ts",
+    "src/screens/Simpanan/SimpananBerjangkaHistoriScreen.tsx",
+    "src/screens/Simpanan/SimpananBerjangkaDetailScreen.tsx",
+    "src/screens/Simpanan/aksiPencairanDini.ts",
+    "src/screens/Simpanan/tampilanBerjangka.ts",
+    "src/components/simpanan/CaraKerjaBerjangka.tsx",
+    "src/utils/daftarSimpananBerjangka.ts",
+    "src/screens/Simpanan/SimpananFormScreen.tsx",
+    "src/screens/Simpanan/SimpananHistoriScreen.tsx",
+    "src/screens/Transaksi/TransaksiPenerimaanScreen.tsx",
+    "src/screens/Transaksi/TarikSimpananFormScreen.tsx",
+    "src/screens/Simpanan/KebijakanPenarikanDiniScreen.tsx",
+    "src/screens/Pengaturan/IdentitasKoperasiScreen.tsx",
+    "src/screens/Pengaturan/PengaturanScreen.tsx",
+    "src/screens/Pengaturan/KeamananScreen.tsx",
+    "src/components/form/AlurDana.tsx",
+    "src/components/form/KartuLangkah.tsx",
+    "src/components/form/KotakInfo.tsx",
+    "src/components/form/PilihanOpsi.tsx",
+    "src/components/form/RingkasanTransaksi.tsx",
+    "src/components/form/TombolUtama.tsx",
+    "src/screens/Transaksi/ModalFormScreen.tsx",
+    "src/screens/Transaksi/PenarikanBankFormScreen.tsx",
+    "src/screens/Pinjaman/PenghapusanPiutangFormScreen.tsx",
+    "src/screens/KasBank/KasBankTransaksiFormScreen.tsx",
+    "src/screens/Pengaturan/UserManagementScreen.tsx",
+    "src/screens/Pengaturan/UserFormScreen.tsx",
+    "src/components/LicenseGate.tsx",
+    "src/components/FirstRunSetup.tsx"
+  ]
+}

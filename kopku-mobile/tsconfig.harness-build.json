@@ -1,0 +1,81 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": [
+      "ES2021",
+      "DOM"
+    ],
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": [],
+    "baseUrl": ".",
+    "outDir": ".harness/out",
+    "rootDir": ".",
+    "paths": {
+      "@/*": [
+        "src/*"
+      ],
+      "expo-crypto": [
+        "src/test-utils/expoCryptoMock.ts"
+      ],
+      "expo-secure-store": [
+        "src/test-utils/expoSecureStoreMock.ts"
+      ],
+      "@noble/ed25519": [
+        "src/test-utils/nobleEd25519Mock.ts"
+      ],
+      "@noble/hashes/sha512": [
+        "src/test-utils/nobleSha512Mock.ts"
+      ],
+      "decimal.js": [
+        "src/test-utils/decimalShim.ts"
+      ]
+    }
+  },
+  "include": [
+    ".harness/ambient.d.ts",
+    "src/config/license.ts",
+    "src/config/licensePublicKeys.ts",
+    "src/security/bytes.ts",
+    "src/security/ed25519.ts",
+    "src/security/licenseToken.ts",
+    "src/security/licenseStore.ts",
+    "src/security/licenseClock.ts",
+    "src/security/deviceId.ts",
+    "src/services/LicenseService.ts",
+    "src/test-utils/expoCryptoMock.ts",
+    "src/test-utils/expoSecureStoreMock.ts",
+    "src/test-utils/nobleEd25519Mock.ts",
+    "src/test-utils/nobleSha512Mock.ts",
+    "src/test-utils/licenseTokenFixtures.ts",
+    "src/__tests__/LicenseToken.test.ts",
+    "src/__tests__/LicenseClock.test.ts",
+    "src/__tests__/LicenseService.test.ts",
+    "src/__tests__/LicenseRenewalRcS52.test.ts",
+    "src/__tests__/LicenseRouteProtection.test.ts",
+    "src/security/publicKeyRegistry.ts",
+    "src/security/ed25519SelfTest.ts",
+    "src/__tests__/LicenseCrypto.test.ts",
+    "src/__tests__/LicenseBuildConfig.test.ts",
+    "src/__tests__/ServerTokenCompat.test.ts",
+    "src/__tests__/SetupLicenseFlow.test.ts",
+    "src/__tests__/AkuntansiSakEp.test.ts",
+    "src/config/defaultCOA.ts",
+    "src/__tests__/IdentitasCompletion.test.ts",
+    "src/__tests__/SimpananUiRcS41.test.ts",
+    "src/__tests__/SourceSanity.test.ts",
+    "src/__tests__/SafeAreaHeader.test.ts",
+    "src/__tests__/EarlyWithdrawalUi.test.ts",
+    "src/__tests__/KebijakanDiniUi.test.ts",
+    "src/__tests__/KebijakanDiniNull.test.ts",
+    "src/accounting/EarlyWithdrawalPolicy.ts",
+    "src/__tests__/KebijakanDiniLifecycle.test.ts",
+    "src/__tests__/RuteTerjangkau.test.ts",
+    "src/__tests__/SetorBerjangka.test.ts",
+    "src/__tests__/HistoriBerjangkaUtuh.test.ts"
+  ]
+}

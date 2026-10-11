@@ -1,0 +1,1034 @@
+diff -ruN a/src/__tests__/AuditRekonsiliasiRcS133_6.test.ts b/src/__tests__/AuditRekonsiliasiRcS133_6.test.ts
+--- a/src/__tests__/AuditRekonsiliasiRcS133_6.test.ts	1970-01-01 07:30:00.000000000 +0730
++++ b/src/__tests__/AuditRekonsiliasiRcS133_6.test.ts	2026-10-10 13:25:37.797026486 +0800
+@@ -0,0 +1,400 @@
++import { TestDb } from './testDb';
++
++let testDb: TestDb;
++
++jest.mock('@/database/db', () => ({
++  getDb: jest.fn(async () => testDb),
++  withTransaction: jest.fn(async (fn: (db: TestDb) => Promise<unknown>) => {
++    let result: unknown;
++    await testDb.withTransactionAsync(async () => {
++      result = await fn(testDb);
++    });
++    return result;
++  }),
++}));
++
++import { buatFixtureHistoris, ACC, USER_ID, ANGGOTA_ID, saldoGl } from './historicalFixture';
++import {
++  normalkanSelPersen,
++  parseBilanganHitungan,
++  parseBerkasDataAwal,
++  parseRupiah,
++  parseSheetAset,
++  parseSheetBerjangka,
++  parseSheetPinjaman,
++} from '@/import/ExcelDataAwalParser';
++import { jalankanImportDataAwal } from '@/import/EksekusiImportDataAwal';
++import { catatDataAwalSimpanan } from '@/services/SimpananService';
++import { createJournal, reverseJournal } from '@/accounting/AccountingEngine';
++import { getArusKas, getLabaRugi, getPerubahanEkuitas, getPosisiKeuangan } from '@/reports/FinancialReports';
++import { buildPerubahanEkuitasExport } from '@/export/ReportTableBuilders';
++import { tampilanEkuitasJuklat } from '@/export/JuklatPdf';
++import { getTanggalLokalHariIni } from '@/utils/tanggal';
++
++/**
++ * RC-S133.6 — TINDAK LANJUT AUDIT REKONSILIASI (KOPKU-AUDIT-RESULTS).
++ *
++ * Mengunci perbaikan atas temuan audit yang sebelumnya hanya dibuktikan
++ * lewat skenario audit (bukan tes unit):
++ *   F-1/F-1b  impor Sumber Dana BANK
++ *   F-2       Arus Kas: porsi sukarela jurnal SIMPANAN_DATA_AWAL (+ pembaliknya)
++ *   F-3       label Posisi Keuangan sebelum tanggal distribusi SHU
++ *   F-4       Perubahan Ekuitas tahun berikutnya menyambung
++ *   B-2       sel Excel berformat persen
++ *   B-3       tenor/angsuran pecahan tidak lagi dibulatkan diam-diam
++ */
++
++const now = () => new Date().toISOString();
++
++async function tambahAkun(db: TestDb, id: string, kode: string, nama: string, kategori: string, normal: 'DEBIT' | 'KREDIT') {
++  await db.runAsync(
++    `INSERT INTO account (id, kode, nama, kategori, normal_balance, is_active, is_system, created_at, updated_at) VALUES (?,?,?,?,?,1,0,?,?)`,
++    id, kode, nama, kategori, normal, now(), now()
++  );
++}
++
++/** Periode tahun berjalan (jurnal pembalik bertanggal hari ini). */
++async function pastikanPeriodeHariIni(db: TestDb) {
++  const tahun = Number(getTanggalLokalHariIni().slice(0, 4));
++  const ada = await db.getFirstAsync<{ id: string }>(`SELECT id FROM accounting_period WHERE tahun_buku = ?`, tahun);
++  if (!ada) {
++    await db.runAsync(
++      `INSERT INTO accounting_period (id, tahun_buku, periode_mulai, periode_selesai, status) VALUES (?,?,?,?,'OPEN')`,
++      `p${tahun}`, tahun, `${tahun}-01-01`, `${tahun}-12-31`
++    );
++  }
++}
++
++// ---------------------------------------------------------------------------
++// F-1 / F-1b — impor "Transaksi baru" dengan Sumber Dana BANK
++// ---------------------------------------------------------------------------
++describe('AUDIT F-1 — impor Sumber Dana BANK', () => {
++  beforeEach(async () => {
++    testDb = await buatFixtureHistoris();
++  });
++
++  const berkas = (sumberDana: 'KAS' | 'BANK') =>
++    parseBerkasDataAwal({
++      ANGGOTA: [['Kode Anggota *', 'Nama Lengkap *', 'Tanggal Bergabung *'], ['K1', 'Budi', '2026-01-01']],
++      SIMPANAN: [
++        ['Kode Anggota', 'Tanggal', 'Simpanan Pokok', 'Simpanan Wajib', 'Simpanan Sukarela', 'Sumber Dana'],
++        ['K1', '2026-02-01', 100_000, 50_000, 25_000, sumberDana],
++      ],
++      PINJAMAN: [
++        ['Kode Anggota', 'Tanggal Pencairan', 'Jumlah Pinjaman', 'Tenor', 'Satuan Tenor', 'Metode Jasa', 'Jasa Persen', 'Sumber Dana'],
++        ['K1', '2026-03-01', 1_200_000, 12, 'BULAN', 'FLAT', 1, sumberDana],
++      ],
++    });
++  const opsi = () => ({ createdBy: USER_ID, dbRiwayat: testDb as never });
++
++  test('tepat satu rekening bank aktif → baris BANK berhasil dan memakai rekening itu', async () => {
++    const bankSebelum = await saldoGl(testDb, ACC.bank);
++    const h = await jalankanImportDataAwal(berkas('BANK'), opsi());
++    expect(h.totalGagal).toBe(0);
++    expect(h.perSheet.find((s) => s.jenis === 'SIMPANAN')).toMatchObject({ berhasil: 1, gagal: 0 });
++    expect(h.perSheet.find((s) => s.jenis === 'PINJAMAN')).toMatchObject({ berhasil: 1, gagal: 0 });
++    // +175.000 setoran simpanan, −1.200.000 pencairan — semuanya lewat akun bank.
++    expect((await saldoGl(testDb, ACC.bank)) - bankSebelum).toBe(175_000 - 1_200_000);
++    const trx = await testDb.getFirstAsync<{ bank_account_id: string | null }>(
++      `SELECT bank_account_id FROM simpanan_transaksi WHERE jenis = 'POKOK' ORDER BY created_at DESC LIMIT 1`
++    );
++    expect(trx?.bank_account_id).toBe('bank-1');
++  });
++
++  test('dua rekening bank aktif → galat jelas, dan TIDAK ada pinjaman DIAJUKAN yang tertinggal (F-1b)', async () => {
++    await tambahAkun(testDb, 'acc-bank-2', '1-1101', 'Bank Mandiri', 'ASET', 'DEBIT');
++    await testDb.runAsync(
++      `INSERT INTO bank_account (id, nama_bank, nomor_rekening, nama_pemilik, account_id, saldo_awal, aktif, created_at) VALUES ('bank-2','Bank Mandiri','999','Koperasi Uji','acc-bank-2',0,1,?)`,
++      now()
++    );
++    const h = await jalankanImportDataAwal(berkas('BANK'), opsi());
++    expect(h.perSheet.find((s) => s.jenis === 'PINJAMAN')).toMatchObject({ berhasil: 0, gagal: 1 });
++    expect(h.gagal.map((g) => g.pesan).join(' ')).toMatch(/tepat satu rekening bank aktif/);
++    const pinjaman = await testDb.getFirstAsync<{ n: number }>(
++      `SELECT COUNT(*) AS n FROM pinjaman p JOIN anggota a ON a.id = p.anggota_id WHERE a.nama_lengkap = 'Budi'`
++    );
++    expect(pinjaman?.n).toBe(0);
++  });
++
++  test('pencairan gagal di tengah (saldo bank tidak cukup) → pinjaman DIBATALKAN, bukan DIAJUKAN yatim', async () => {
++    const berkasBesar = parseBerkasDataAwal({
++      ANGGOTA: [['Kode Anggota *', 'Nama Lengkap *', 'Tanggal Bergabung *'], ['K1', 'Budi', '2026-01-01']],
++      SIMPANAN: [
++        ['Kode Anggota', 'Tanggal', 'Simpanan Pokok', 'Simpanan Wajib', 'Simpanan Sukarela', 'Sumber Dana'],
++        ['K1', '2026-02-01', 100_000, 50_000, 0, 'KAS'],
++      ],
++      PINJAMAN: [
++        ['Kode Anggota', 'Tanggal Pencairan', 'Jumlah Pinjaman', 'Tenor', 'Satuan Tenor', 'Metode Jasa', 'Jasa Persen', 'Sumber Dana'],
++        ['K1', '2026-03-01', 900_000_000, 12, 'BULAN', 'FLAT', 1, 'BANK'],
++      ],
++    });
++    const h = await jalankanImportDataAwal(berkasBesar, opsi());
++    expect(h.perSheet.find((s) => s.jenis === 'PINJAMAN')).toMatchObject({ berhasil: 0, gagal: 1 });
++    const rows = await testDb.getAllAsync<{ status: string }>(
++      `SELECT p.status FROM pinjaman p JOIN anggota a ON a.id = p.anggota_id WHERE a.nama_lengkap = 'Budi'`
++    );
++    expect(rows.map((r) => r.status)).toEqual(['DITOLAK']);
++    expect(h.gagal[0].pesan).toMatch(/tidak cukup/);
++    // Tidak ada jurnal pencairan.
++    const j = await testDb.getFirstAsync<{ n: number }>(`SELECT COUNT(*) AS n FROM journal WHERE sumber_transaksi = 'PENCAIRAN_PINJAMAN'`);
++    expect(j?.n).toBe(0);
++  });
++
++  test('tanpa rekening bank aktif → galat menyarankan KAS; jalur KAS tetap berhasil', async () => {
++    await testDb.runAsync(`UPDATE bank_account SET aktif = 0`);
++    const h = await jalankanImportDataAwal(berkas('BANK'), opsi());
++    expect(h.gagal.map((g) => g.pesan).join(' ')).toMatch(/belum ada rekening bank aktif/);
++
++    testDb = await buatFixtureHistoris();
++    const hKas = await jalankanImportDataAwal(berkas('KAS'), { createdBy: USER_ID, dbRiwayat: testDb as never });
++    expect(hKas.totalGagal).toBe(0);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// F-2 — Arus Kas: porsi sukarela jurnal SIMPANAN_DATA_AWAL
++// ---------------------------------------------------------------------------
++describe('AUDIT F-2 — Arus Kas setor simpanan gabungan', () => {
++  beforeEach(async () => {
++    testDb = await buatFixtureHistoris();
++    await pastikanPeriodeHariIni(testDb);
++  });
++
++  test('pokok+wajib = PENDANAAN, sukarela = OPERASI (sama dengan setor sukarela biasa)', async () => {
++    await catatDataAwalSimpanan({
++      anggotaId: ANGGOTA_ID, tanggal: '2026-03-01', pokok: 100_000, wajib: 50_000, sukarela: 200_000, sumberDana: 'KAS', createdBy: USER_ID,
++    });
++    const ak = await getArusKas(testDb as never, '2026-03-01', '2026-03-31');
++    expect(ak.operasi).toBe(200_000);
++    expect(ak.pendanaan).toBe(150_000);
++    expect(ak.terekonsiliasi).toBe(true);
++    expect(ak.rincian.find((r) => r.aktivitas === 'OPERASI')?.sumberTransaksi).toBe('SIMPANAN_SUKARELA');
++  });
++
++  test('jurnal pembalik dipecah dengan porsi jurnal asal → per aktivitas saling meniadakan', async () => {
++    const r = await catatDataAwalSimpanan({
++      anggotaId: ANGGOTA_ID, tanggal: '2026-03-01', pokok: 100_000, wajib: 50_000, sukarela: 200_000, sumberDana: 'KAS', createdBy: USER_ID,
++    });
++    await reverseJournal(testDb as never, r.journalId, USER_ID, 'salah input');
++    const ak = await getArusKas(testDb as never, '2026-01-02', '2099-12-31');
++    expect(ak.operasi).toBe(0);
++    expect(ak.pendanaan).toBe(0);
++    expect(ak.terekonsiliasi).toBe(true);
++  });
++
++  test('setoran tanpa sukarela tetap seluruhnya PENDANAAN (perilaku lama)', async () => {
++    await catatDataAwalSimpanan({
++      anggotaId: ANGGOTA_ID, tanggal: '2026-03-01', pokok: 100_000, wajib: 50_000, sukarela: 0, sumberDana: 'KAS', createdBy: USER_ID,
++    });
++    const ak = await getArusKas(testDb as never, '2026-03-01', '2026-03-31');
++    expect(ak.operasi).toBe(0);
++    expect(ak.pendanaan).toBe(150_000);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// F-3 & F-4 — label Posisi Keuangan dan kesinambungan Perubahan Ekuitas
++// ---------------------------------------------------------------------------
++describe('AUDIT F-3/F-4 — SHU antar-tahun', () => {
++  const ACC_SHU = 'acc-shu-berjalan';
++  const ACC_CADANGAN = 'acc-cadangan';
++
++  beforeEach(async () => {
++    testDb = await buatFixtureHistoris();
++    await tambahAkun(testDb, ACC_SHU, '3-4000', 'SHU Tahun Berjalan', 'EKUITAS', 'KREDIT');
++    await tambahAkun(testDb, ACC_CADANGAN, '3-2000', 'Cadangan', 'EKUITAS', 'KREDIT');
++    // Tahun buku 2026: pendapatan 10 jt, beban 2 jt → SHU 8 jt.
++    await createJournal(testDb as never, {
++      tanggal: '2026-06-01', sumberTransaksi: 'PENDAPATAN_LAIN', deskripsi: 'Pendapatan 2026', createdBy: USER_ID,
++      lines: [{ accountId: ACC.kas, debit: 10_000_000, kredit: 0 }, { accountId: ACC.pendapatanLain, debit: 0, kredit: 10_000_000 }],
++    });
++    await createJournal(testDb as never, {
++      tanggal: '2026-07-01', sumberTransaksi: 'BEBAN_LAIN', deskripsi: 'Beban 2026', createdBy: USER_ID,
++      lines: [{ accountId: ACC.bebanLain, debit: 2_000_000, kredit: 0 }, { accountId: ACC.kas, debit: 0, kredit: 2_000_000 }],
++    });
++    // Tahun buku 2027: pendapatan 3 jt.
++    await createJournal(testDb as never, {
++      tanggal: '2027-02-01', sumberTransaksi: 'PENDAPATAN_LAIN', deskripsi: 'Pendapatan 2027', createdBy: USER_ID,
++      lines: [{ accountId: ACC.kas, debit: 3_000_000, kredit: 0 }, { accountId: ACC.pendapatanLain, debit: 0, kredit: 3_000_000 }],
++    });
++  });
++
++  async function bagikanShu2026(tanggal: string) {
++    await testDb.runAsync(
++      `INSERT INTO shu_konfigurasi (id, tahun_buku, persen_cadangan, persen_jasa_modal, persen_jasa_usaha, persen_pendidikan,
++         persen_sosial, persen_pengurus, persen_pengawas, persen_karyawan, persen_pembangunan_daerah_kerja,
++         total_shu, status, created_at, updated_at)
++       VALUES ('shu-2026',2026,25,35,40,0,0,0,0,0,0,8000000,'DIBAGIKAN',?,?)`,
++      now(), now()
++    );
++    await createJournal(testDb as never, {
++      tanggal, sumberTransaksi: 'SHU_DISTRIBUSI', sumberId: 'shu-2026', deskripsi: 'Distribusi SHU tahun buku 2026', createdBy: USER_ID,
++      lines: [
++        { accountId: ACC_SHU, debit: 8_000_000, kredit: 0 },
++        { accountId: ACC_CADANGAN, debit: 0, kredit: 2_000_000 },
++        { accountId: ACC.simpananSukarela, debit: 0, kredit: 6_000_000 },
++      ],
++    });
++  }
++
++  test('F-4: saldo awal Perubahan Ekuitas 2027 = total ekuitas Posisi Keuangan 31-12-2026 (sebelum SHU dibagikan)', async () => {
++    const p26 = await getPosisiKeuangan(testDb as never, '2026-12-31');
++    const e27 = await getPerubahanEkuitas(testDb as never, '2027-01-01', '2027-12-31');
++    const p27 = await getPosisiKeuangan(testDb as never, '2027-12-31');
++    const lr27 = await getLabaRugi(testDb as never, '2027-01-01', '2027-12-31');
++
++    expect(e27.totalSaldoAwal).toBe(p26.totalEkuitas);
++    expect(e27.saldoAwalHasilUsaha).toBe(8_000_000);
++    expect(e27.hasilUsahaPeriodeBerjalan).toBe(lr27.hasilUsaha);
++    expect(e27.hasilUsahaPeriodeBerjalan).toBe(3_000_000);
++    expect(e27.shuDibagikanPeriode).toBe(0);
++    expect(e27.totalSaldoAkhir).toBe(p27.totalEkuitas); // tidak berubah dari perilaku lama
++  });
++
++  test('F-4: setelah SHU 2026 dibagikan pada 2027 — awal tetap menyambung, distribusi tampil terpisah', async () => {
++    await bagikanShu2026('2027-03-15');
++    const p26 = await getPosisiKeuangan(testDb as never, '2026-12-31');
++    const e26 = await getPerubahanEkuitas(testDb as never, '2026-01-01', '2026-12-31');
++    const e27 = await getPerubahanEkuitas(testDb as never, '2027-01-01', '2027-12-31');
++    const p27 = await getPosisiKeuangan(testDb as never, '2027-12-31');
++
++    expect(e26.totalSaldoAkhir).toBe(p26.totalEkuitas);
++    expect(e27.totalSaldoAwal).toBe(e26.totalSaldoAkhir); // kesinambungan antar-tahun
++    expect(e27.shuDibagikanPeriode).toBe(8_000_000);
++    expect(e27.hasilUsahaPeriodeBerjalan).toBe(3_000_000);
++    expect(e27.hasilUsahaPeriode).toBe(3_000_000); // saldo akhir baris SHU
++    expect(e27.totalSaldoAkhir).toBe(p27.totalEkuitas);
++    // Persamaan rekonsiliasi lengkap.
++    const mutasiAkun = e27.rows.reduce((t, r) => t + r.mutasi, 0);
++    expect(e27.totalSaldoAwal + mutasiAkun + (e27.hasilUsahaPeriodeBerjalan ?? 0) - (e27.shuDibagikanPeriode ?? 0)).toBe(e27.totalSaldoAkhir);
++    expect(e27.rows.find((r) => r.kode === '3-2000')?.mutasi).toBe(2_000_000);
++  });
++
++  test('F-4: tahun pertama tidak berubah (saldo awal SHU 0)', async () => {
++    const e26 = await getPerubahanEkuitas(testDb as never, '2026-01-02', '2026-12-31');
++    expect(e26.saldoAwalHasilUsaha).toBe(0);
++    expect(e26.hasilUsahaPeriodeBerjalan).toBe(8_000_000);
++    expect(e26.hasilUsahaPeriode).toBe(8_000_000);
++  });
++
++  test('F-4: ekspor tabel & PDF Juklat memakai saldo awal baris SHU', async () => {
++    await bagikanShu2026('2027-03-15');
++    const e27 = await getPerubahanEkuitas(testDb as never, '2027-01-01', '2027-12-31');
++    const ex = buildPerubahanEkuitasExport({ namaKoperasi: 'Uji', standarAkuntansi: 'SAK EP' } as never, e27);
++    const baris = ex.baris.find((b) => b[0] === e27.hasilUsahaPeriodeLabel);
++    expect(baris).toEqual([e27.hasilUsahaPeriodeLabel, 8_000_000, 3_000_000 - 8_000_000, 3_000_000]);
++    expect(ex.ringkasan?.find((r) => r.label === 'SHU dibagikan dalam periode')).toBeDefined();
++    const pdf = tampilanEkuitasJuklat([e27]);
++    const barisPdf = pdf.baris.find((b) => b.label === e27.hasilUsahaPeriodeLabel);
++    expect(barisPdf?.nilai).toEqual([8_000_000, -5_000_000, 3_000_000]);
++    expect(pdf.keterangan?.[0].judul).toMatch(/Rincian mutasi SHU/);
++  });
++
++  test('F-3: Posisi per tanggal SEBELUM jurnal distribusi → label "dicatat sesudah tanggal laporan", angka tetap', async () => {
++    await bagikanShu2026('2027-03-15');
++    const p = await getPosisiKeuangan(testDb as never, '2026-12-31');
++    expect(p.shuStatus).toBe('DIBAGIKAN');
++    expect(p.labaBerjalan).toBe(8_000_000);
++    expect(p.labaBerjalanLabel).toMatch(/sesudah tanggal laporan/);
++    expect(p.labaBerjalanLabel).not.toMatch(/perlu ditelusuri/);
++    expect(p.labaBerjalanLabel).not.toContain('belum dibagikan');
++    expect(p.isBalanced).toBe(true);
++  });
++
++  test('F-3: distribusi SUDAH tercatat lalu ada pendapatan baru di tahun yang sama → label "perlu ditelusuri" tetap', async () => {
++    await bagikanShu2026('2026-12-20');
++    await createJournal(testDb as never, {
++      tanggal: '2026-12-25', sumberTransaksi: 'PENDAPATAN_LAIN', deskripsi: 'Pendapatan terlambat', createdBy: USER_ID,
++      lines: [{ accountId: ACC.kas, debit: 1_000_000, kredit: 0 }, { accountId: ACC.pendapatanLain, debit: 0, kredit: 1_000_000 }],
++    });
++    const p = await getPosisiKeuangan(testDb as never, '2026-12-31');
++    expect(p.labaBerjalan).toBe(1_000_000);
++    expect(p.labaBerjalanLabel).toMatch(/perlu ditelusuri/);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// B-2 — sel berformat persen
++// ---------------------------------------------------------------------------
++describe('AUDIT B-2 — sel Excel berformat persen', () => {
++  test('angka bertampilan persen diganti teks persennya; sel lain & objek asal tidak berubah', () => {
++    const ws = {
++      '!ref': 'A1:D2',
++      A2: { t: 'n', v: 0.015, w: '1.50%' },
++      B2: { t: 'n', v: 0.18, z: '0%' },
++      C2: { t: 'n', v: 1_500_000, w: '1,500,000' },
++      D2: { t: 's', v: '1,5%' },
++    };
++    const hasil = normalkanSelPersen(ws) as Record<string, { t: string; v: unknown }>;
++    expect(hasil.A2).toMatchObject({ t: 's', v: '1.5%' });
++    expect(hasil.B2).toMatchObject({ t: 's', v: '18%' });
++    expect(hasil.C2).toBe(ws.C2);
++    expect(hasil.D2).toBe(ws.D2);
++    expect(ws.A2.v).toBe(0.015); // tidak memutasi sheet asal
++    const tanpaPersen = { '!ref': 'A1', A1: { t: 'n', v: 5 } };
++    expect(normalkanSelPersen(tanpaPersen)).toBe(tanpaPersen);
++  });
++
++  test('teks hasil normalisasi dibaca parser sebagai 1,5 (bukan 0,015)', () => {
++    const s = parseSheetPinjaman([
++      ['Kode Anggota', 'Tanggal Pencairan', 'Jumlah Pinjaman', 'Tenor', 'Satuan Tenor', 'Metode Jasa', 'Jasa Persen', 'Sumber Dana'],
++      ['K1', '2026-03-01', 1_200_000, 12, 'BULAN', 'FLAT', '1.5%', 'KAS'],
++    ]);
++    expect(s.galat).toEqual([]);
++    expect(s.baris[0].persentaseJasa).toBe(1.5);
++  });
++});
++
++// ---------------------------------------------------------------------------
++// B-3 — kolom hitungan pecahan
++// ---------------------------------------------------------------------------
++describe('AUDIT B-3 — tenor/angsuran pecahan ditolak, bukan dibulatkan', () => {
++  const headerPinjaman = ['Kode Anggota', 'Tanggal Pencairan', 'Jumlah Pinjaman', 'Tenor', 'Satuan Tenor', 'Metode Jasa', 'Jasa Persen', 'Sumber Dana', 'Angsuran Sudah Dibayar'];
++  const pinjaman = (tenor: unknown, dibayar: unknown = null) =>
++    parseSheetPinjaman([headerPinjaman, ['K1', '2026-03-01', 1_200_000, tenor, 'BULAN', 'FLAT', 1, 'KAS', dibayar]]);
++
++  test('parseRupiah tidak berubah; parseBilanganHitungan ketat untuk kolom hitungan', () => {
++    expect(parseRupiah('1.500,50')).toBe(1501);
++    expect(parseRupiah(2.5)).toBe(3);
++    expect(parseBilanganHitungan(12)).toBe(12);
++    expect(parseBilanganHitungan('12')).toBe(12);
++    expect(parseBilanganHitungan('12,5')).toBe(12.5); // dulu terbaca 125 lewat parseRupiah
++    expect(parseBilanganHitungan('12.5')).toBe(12.5);
++    expect(parseBilanganHitungan(2.5)).toBe(2.5);
++    expect(parseBilanganHitungan('1.000')).toBeNaN(); // ambigu untuk bilangan hitungan → ditolak
++    expect(parseBilanganHitungan('12 bulan')).toBeNaN();
++    expect(parseBilanganHitungan('')).toBeNull();
++    expect(parseBilanganHitungan(null)).toBeNull();
++  });
++
++  test('Tenor "12,5" / 2.5 ditolak; 12 diterima', () => {
++    expect(pinjaman('12,5').galat[0]?.pesan).toMatch(/Tenor harus bilangan bulat/);
++    expect(pinjaman('1.000').galat[0]?.pesan).toMatch(/Tenor harus bilangan bulat/);
++    expect(pinjaman('12').baris[0]?.tenor).toBe(12);
++    expect(pinjaman(2.5).galat[0]?.pesan).toMatch(/Tenor harus bilangan bulat/);
++    expect(pinjaman(12).galat).toEqual([]);
++    expect(pinjaman(12).baris[0].tenor).toBe(12);
++  });
++
++  test('Angsuran Sudah Dibayar pecahan ditolak', () => {
++    expect(pinjaman(12, 1.5).galat[0]?.pesan).toMatch(/Angsuran Sudah Dibayar/);
++    expect(pinjaman(12, 3).galat).toEqual([]);
++  });
++
++  test('Tenor Bulan berjangka 3,4 ditolak; Masa Manfaat aset 12,5 ditolak', () => {
++    const b = parseSheetBerjangka([
++      ['Kode Anggota', 'Tanggal Penempatan', 'Nominal', 'Tenor Bulan', 'Bunga Persen Per Tahun', 'Sumber Dana'],
++      ['K1', '2026-03-01', 1_000_000, 3.4, 5, 'KAS'],
++      ['K1', '2026-03-01', 1_000_000, 3, 5, 'KAS'],
++    ]);
++    expect(b.galat).toHaveLength(1);
++    expect(b.galat[0].pesan).toMatch(/Tenor Bulan/);
++    expect(b.baris).toHaveLength(1);
++
++    const a = parseSheetAset([
++      ['Nomor Aset', 'Nama Aset', 'Tanggal Perolehan', 'Nilai Perolehan', 'Masa Manfaat Bulan'],
++      ['AT-1', 'Laptop', '2026-01-01', 12_000_000, 12.5],
++    ]);
++    expect(a.galat[0]?.pesan).toMatch(/Masa Manfaat Bulan harus bilangan bulat/);
++  });
++});
+diff -ruN a/src/__tests__/InstallmentDateZonaWaktuAudit.test.ts b/src/__tests__/InstallmentDateZonaWaktuAudit.test.ts
+--- a/src/__tests__/InstallmentDateZonaWaktuAudit.test.ts	1970-01-01 07:30:00.000000000 +0730
++++ b/src/__tests__/InstallmentDateZonaWaktuAudit.test.ts	2026-10-10 13:07:20.636796095 +0800
+@@ -0,0 +1,22 @@
++import { calculateInstallmentDate, calculateInstallmentDates } from '@/accounting/InstallmentDate';
++
++/**
++ * AUDIT F-5 — tanggal kalender murni tidak boleh bergantung pada zona
++ * waktu perangkat. Jalankan juga dengan TZ=America/Los_Angeles.
++ */
++describe('calculateInstallmentDate — bebas zona waktu', () => {
++  test('bulanan dari 2025-01-31 (clamp akhir bulan)', () => {
++    expect(calculateInstallmentDates('2025-01-31', 4, 'BULAN')).toEqual(['2025-02-28', '2025-03-31', '2025-04-30', '2025-05-31']);
++  });
++  test('akad 2025-03-05 + 1 bulan = 2025-04-05', () => {
++    expect(calculateInstallmentDate('2025-03-05', 1, 'BULAN')).toBe('2025-04-05');
++  });
++  test('mingguan dan harian', () => {
++    expect(calculateInstallmentDate('2025-03-05', 2, 'MINGGU')).toBe('2025-03-19');
++    expect(calculateInstallmentDate('2025-12-30', 3, 'HARI')).toBe('2026-01-02');
++  });
++  test('bulan/hari di luar rentang ditolak seperti sebelumnya', () => {
++    expect(() => calculateInstallmentDate('2025-13-01', 1, 'BULAN')).toThrow();
++    expect(() => calculateInstallmentDate('2025-01-32', 1, 'BULAN')).toThrow();
++  });
++});
+diff -ruN a/src/accounting/InstallmentDate.ts b/src/accounting/InstallmentDate.ts
+--- a/src/accounting/InstallmentDate.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/accounting/InstallmentDate.ts	2026-10-10 13:07:20.636884840 +0800
+@@ -67,7 +67,20 @@
+       `Nomor angsuran "${nomorAngsuran}" tidak valid — harus bilangan bulat >= 1.`
+     );
+   }
+-  const origin = new Date(tanggalAkad);
++  // AUDIT F-5 — `new Date('YYYY-MM-DD')` dibaca sebagai 00:00 UTC, sedangkan
++  // addDays/addMonths/format bekerja pada waktu LOKAL: di zona waktu UTC-
++  // (mis. Amerika) hasilnya mundur satu hari. Tanggal kalender murni
++  // dibangun dari komponen lokalnya. Perilaku untuk masukan lain (termasuk
++  // tanggal tak lazim) sengaja tidak diubah.
++  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(tanggalAkad);
++  let origin: Date;
++  if (m) {
++    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
++    // Rentang bulan/hari di luar 1-12/1-31 ditolak seperti `new Date('YYYY-MM-DD')` lama.
++    origin = mo >= 1 && mo <= 12 && d >= 1 && d <= 31 ? new Date(y, mo - 1, d) : new Date(Number.NaN);
++  } else {
++    origin = new Date(tanggalAkad);
++  }
+   if (Number.isNaN(origin.getTime())) {
+     throw new Error(`Tanggal akad "${tanggalAkad}" bukan tanggal yang valid.`);
+   }
+diff -ruN a/src/export/JuklatPdf.ts b/src/export/JuklatPdf.ts
+--- a/src/export/JuklatPdf.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/export/JuklatPdf.ts	2026-10-10 13:12:06.785318910 +0800
+@@ -348,17 +348,31 @@
+   if (periode.length === 1) {
+     const baris: BarisJuklat[] = [{ label: 'EKUITAS', nilai: kosong(3), tingkat: 'JUDUL' }];
+     p.rows.forEach((r) => baris.push({ label: r.nama, nilai: [r.saldoAwal, r.mutasi, r.saldoAkhir], tingkat: 'RINCIAN' }));
+-    baris.push({ label: p.hasilUsahaPeriodeLabel, nilai: [0, p.hasilUsahaPeriode, p.hasilUsahaPeriode], tingkat: 'RINCIAN' });
++    // RC-S133.6 (AUDIT F-4) — saldo awal baris SHU = sisa hasil usaha belum dibagikan per H-1.
++    const awalShu = p.saldoAwalHasilUsaha ?? 0;
++    baris.push({ label: p.hasilUsahaPeriodeLabel, nilai: [awalShu, p.hasilUsahaPeriode - awalShu, p.hasilUsahaPeriode], tingkat: 'RINCIAN' });
+     baris.push({
+       label: 'Total ekuitas',
+       nilai: [p.totalSaldoAwal, p.totalSaldoAkhir - p.totalSaldoAwal, p.totalSaldoAkhir],
+       tingkat: 'SUBTOTAL',
+     });
++    const adaRincianShu = p.hasilUsahaPeriodeBerjalan !== undefined && (awalShu !== 0 || (p.shuDibagikanPeriode ?? 0) !== 0);
+     return {
+       judul: 'Laporan Perubahan Ekuitas',
+       periode: periodeJuklat([{ mulai: p.tanggalMulai, selesai: p.tanggalSelesai }]),
+       kolom: ['Saldo awal', 'Penambahan (pengurangan)', 'Saldo akhir'],
+       baris,
++      keterangan: adaRincianShu
++        ? [
++            {
++              judul: 'Rincian mutasi SHU/hasil usaha',
++              baris: [
++                `Hasil usaha periode ini: Rp ${angkaJuklat(p.hasilUsahaPeriodeBerjalan ?? 0)}`,
++                `SHU dibagikan dalam periode: Rp ${angkaJuklat(-(p.shuDibagikanPeriode ?? 0))}`,
++              ],
++            },
++          ]
++        : undefined,
+     };
+   }
+   const n = periode.length;
+diff -ruN a/src/export/ReportTableBuilders.ts b/src/export/ReportTableBuilders.ts
+--- a/src/export/ReportTableBuilders.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/export/ReportTableBuilders.ts	2026-10-10 13:12:00.597498283 +0800
+@@ -1363,7 +1363,15 @@
+   data: PerubahanEkuitasResult
+ ): DataLaporanExport {
+   const baris = data.rows.map((r) => [r.nama, r.saldoAwal, r.mutasi, r.saldoAkhir]);
+-  baris.push([data.hasilUsahaPeriodeLabel, 0, data.hasilUsahaPeriode, data.hasilUsahaPeriode]);
++  // RC-S133.6 (AUDIT F-4) — baris SHU/Hasil Usaha kini punya saldo awal
++  // (sisa belum dibagikan per H-1), sama seperti akun ekuitas lain.
++  const awalShu = data.saldoAwalHasilUsaha ?? 0;
++  baris.push([data.hasilUsahaPeriodeLabel, awalShu, data.hasilUsahaPeriode - awalShu, data.hasilUsahaPeriode]);
++  const rincianShu: { label: string; nilai: string }[] = [];
++  if (data.hasilUsahaPeriodeBerjalan !== undefined && (awalShu !== 0 || (data.shuDibagikanPeriode ?? 0) !== 0)) {
++    rincianShu.push({ label: 'Hasil usaha periode ini', nilai: formatRupiah(data.hasilUsahaPeriodeBerjalan) });
++    rincianShu.push({ label: 'SHU dibagikan dalam periode', nilai: formatRupiah(-(data.shuDibagikanPeriode ?? 0)) });
++  }
+ 
+   return {
+     judulLaporan: 'Laporan Perubahan Ekuitas',
+@@ -1376,6 +1384,7 @@
+     laporanKeuangan: { tanggalAcuan: data.tanggalSelesai, juklat: tampilanEkuitasJuklat([data]) },
+     ringkasan: [
+       { label: 'Total Saldo Awal', nilai: formatRupiah(data.totalSaldoAwal) },
++      ...rincianShu,
+       { label: 'Total Saldo Akhir', nilai: formatRupiah(data.totalSaldoAkhir) },
+     ],
+   };
+diff -ruN a/src/import/EksekusiImportDataAwal.ts b/src/import/EksekusiImportDataAwal.ts
+--- a/src/import/EksekusiImportDataAwal.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/import/EksekusiImportDataAwal.ts	2026-10-10 13:24:52.103562826 +0800
+@@ -28,7 +28,7 @@
+   KETERBATASAN_SALDO_AWAL_SIMPANAN,
+ } from '@/import/EksekusiMigrasiSimpanan';
+ import { setorSimpananBerjangka } from '@/services/SimpananBerjangkaService';
+-import { ajukanPinjaman, cairkanPinjaman, bayarAngsuran, getJadwalAngsuran } from '@/services/PinjamanService';
++import { ajukanPinjaman, cairkanPinjaman, bayarAngsuran, getJadwalAngsuran, batalkanPinjaman } from '@/services/PinjamanService';
+ import type * as SQLite from 'expo-sqlite';
+ import type { Rupiah } from '@/utils/money';
+ import { getDb } from '@/database/db';
+@@ -221,6 +221,32 @@
+ export const PESAN_JASA_TANPA_CUTOFF =
+   'Sheet "6. Jasa Dibayar" hanya dipakai untuk data saldo lama (dengan cut-off). Pada transaksi baru, jasa sudah tercatat dari pembayaran angsuran.';
+ 
++/**
++ * AUDIT F-1 — Template impor menawarkan Sumber Dana KAS/BANK, tetapi
++ * layanan hilir (catatDataAwalSimpanan / setorSimpananBerjangka /
++ * cairkanPinjaman / bayarAngsuran) mewajibkan `bankAccountId` bila sumber
++ * dana = BANK, dan eksekutor tidak pernah mengirimkannya sehingga setiap
++ * baris BANK gagal ("bankAccountId wajib diisi jika sumber dana = BANK.").
++ *
++ * Berkas impor tidak memiliki kolom rekening, jadi satu-satunya penentuan
++ * yang tidak menebak adalah: tepat SATU rekening bank aktif -> pakai itu.
++ * Nol atau lebih dari satu -> galat jelas SEBELUM tulis apa pun (supaya
++ * pinjaman tidak tertinggal berstatus DIAJUKAN).
++ */
++async function bankUntukImport(
++  db: SQLite.SQLiteDatabase,
++  sumberDana: 'KAS' | 'BANK'
++): Promise<{ bankAccountId?: string }> {
++  if (sumberDana !== 'BANK') return {};
++  const rows = await db.getAllAsync<{ id: string }>(`SELECT id FROM bank_account WHERE aktif = 1 ORDER BY id`);
++  if (rows.length === 1) return { bankAccountId: rows[0].id };
++  throw new Error(
++    rows.length === 0
++      ? 'Sumber Dana BANK memerlukan satu rekening bank aktif, tetapi belum ada rekening bank aktif. Tambahkan rekening di menu Kas & Bank, atau gunakan Sumber Dana KAS.'
++      : `Sumber Dana BANK memerlukan tepat satu rekening bank aktif, tetapi ada ${rows.length}. Berkas impor tidak memuat kolom rekening; gunakan Sumber Dana KAS atau catat lewat menu transaksi.`
++  );
++}
++
+ function pesanGalat(e: unknown): string {
+   return e instanceof Error ? e.message : 'Terjadi kesalahan yang tidak diketahui.';
+ }
+@@ -429,6 +455,7 @@
+         totalPos.SIMPANAN_WAJIB = (totalPos.SIMPANAN_WAJIB ?? 0) + r.wajib;
+         totalPos.SIMPANAN_SUKARELA = (totalPos.SIMPANAN_SUKARELA ?? 0) + r.sukarela;
+       } else {
++        const bankS = await bankUntukImport(opsi.dbMigrasi ?? (await getDb()), r.sumberDana);
+         await catatDataAwalSimpanan({
+           anggotaId: a.id,
+           tanggal: r.tanggal,
+@@ -436,6 +463,7 @@
+           wajib: r.wajib,
+           sukarela: r.sukarela,
+           sumberDana: r.sumberDana,
++          ...bankS,
+           keterangan: 'Data awal (import Excel)',
+           createdBy: opsi.createdBy,
+         });
+@@ -494,6 +522,7 @@
+       continue;
+     }
+     try {
++      const bankB = await bankUntukImport(opsi.dbMigrasi ?? (await getDb()), r.sumberDana);
+       await setorSimpananBerjangka({
+         anggotaId: a.id,
+         nominal: r.nominal,
+@@ -501,6 +530,7 @@
+         tenorBulan: r.tenorBulan,
+         sukuBungaPerTahun: r.sukuBungaPerTahun,
+         sumberDana: r.sumberDana,
++        ...bankB,
+         keterangan: 'Data awal (import Excel)',
+         createdBy: opsi.createdBy,
+       });
+@@ -651,8 +681,12 @@
+   for (const r of barisPencairanBaru) {
+     const a = anggotaUntuk('PINJAMAN', r);
+     if (!a) continue;
++    let pinjamanId: string | null = null;
+     try {
+-      const { id: pinjamanId } = await ajukanPinjaman({
++      // AUDIT F-1b — tentukan rekening SEBELUM ajukanPinjaman agar kegagalan
++      // tidak meninggalkan pinjaman DIAJUKAN yatim.
++      const bankP = await bankUntukImport(opsi.dbMigrasi ?? (await getDb()), r.sumberDana);
++      ({ id: pinjamanId } = await ajukanPinjaman({
+         anggotaId: a.id,
+         tanggal: r.tanggal,
+         jumlahPinjaman: r.jumlahPinjaman,
+@@ -664,11 +698,12 @@
+         biayaAdminNilai: 0,
+         dendaAktif: false,
+         createdBy: opsi.createdBy,
+-      } as Parameters<typeof ajukanPinjaman>[0]);
++      } as Parameters<typeof ajukanPinjaman>[0]));
+ 
+       await cairkanPinjaman({
+         pinjamanId,
+         sumberDana: r.sumberDana,
++        ...bankP,
+         approvedBy: opsi.createdBy,
+         tanggalPencairan: r.tanggal,
+       });
+@@ -692,6 +727,7 @@
+             tanggal: j.tanggalJatuhTempo,
+             nominal: sisa,
+             sumberDana: r.sumberDana,
++            ...bankP,
+             createdBy: opsi.createdBy,
+           });
+         }
+@@ -699,7 +735,33 @@
+ 
+       catatBerhasil('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`);
+     } catch (e) {
+-      catatGagal('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, e);
++      // RC-S133.6 (sisa AUDIT F-1b) — kegagalan SESUDAH ajukanPinjaman (mis.
++      // saldo kas/bank tidak cukup saat pencairan) dulu meninggalkan pinjaman
++      // berstatus DIAJUKAN beserta jadwalnya: tampil sebagai pengajuan yang
++      // menunggu, dan impor ulang baris yang sama menggandakannya. Pinjaman
++      // yang BELUM cair kini dibatalkan lewat jalur resmi (batalkanPinjaman →
++      // DITOLAK, sama dengan penolakan manual; tanpa jurnal). Pinjaman yang
++      // SUDAH cair (gagal di tengah pencatatan angsuran) tidak disentuh —
++      // pesannya menjelaskan agar baris itu tidak diimpor ulang.
++      let galat: unknown = e;
++      if (pinjamanId) {
++        const st = await (await getDb()).getFirstAsync<{ status: string; nomor_pinjaman: string | null }>(
++          'SELECT status, nomor_pinjaman FROM pinjaman WHERE id = ?',
++          pinjamanId
++        );
++        if (st && (st.status === 'DIAJUKAN' || st.status === 'DISETUJUI')) {
++          try {
++            await batalkanPinjaman({ pinjamanId, alasan: `Import data awal gagal: ${pesanGalat(e)}`, actingUserId: opsi.createdBy });
++          } catch {
++            // Tidak menutupi galat asli; pinjaman tetap DIAJUKAN dan terlihat di menu Pinjaman.
++          }
++        } else if (st) {
++          galat = new Error(
++            `${pesanGalat(e)} Pinjaman ${st.nomor_pinjaman ?? ''} SUDAH tercatat cair; lengkapi angsurannya lewat menu Pinjaman — jangan impor ulang baris ini.`
++          );
++        }
++      }
++      catatGagal('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, galat);
+     }
+     majukan();
+   }
+diff -ruN a/src/import/ExcelDataAwalParser.ts b/src/import/ExcelDataAwalParser.ts
+--- a/src/import/ExcelDataAwalParser.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/import/ExcelDataAwalParser.ts	2026-10-10 13:18:24.553442735 +0800
+@@ -209,6 +209,62 @@
+   return Math.round(negatif ? -angka : angka);
+ }
+ 
++/**
++ * RC-S133.6 (AUDIT B-3) — pembaca KOLOM HITUNGAN (Tenor, Angsuran Sudah
++ * Dibayar/Tersisa, Tenor Bulan, Masa Manfaat Bulan).
++ *
++ * Dulu kolom-kolom ini dibaca lewat `parseRupiah`, yang (a) membulatkan
++ * lebih dulu sehingga pemeriksaan `Number.isInteger` sesudahnya tidak
++ * pernah gagal (2,5 → 3) dan (b) menganggap koma dengan satu digit sebagai
++ * pemisah ribuan ("12,5" → 125). Untuk bilangan hitungan, pemisah ribuan
++ * tidak masuk akal, jadi aturannya ketat:
++ *   - angka sel apa adanya (tanpa pembulatan);
++ *   - teks "12" → 12; "12,5"/"12.5" → 12,5 (pecahan → ditolak pemanggil);
++ *   - teks lain (mis. "1.000", "12 bulan") → NaN (ditolak pemanggil).
++ * `null` hanya untuk sel kosong — pemanggil memakainya untuk "wajib diisi".
++ */
++export function parseBilanganHitungan(nilai: unknown): number | null {
++  if (nilai === null || nilai === undefined) return null;
++  if (typeof nilai === 'number') return Number.isFinite(nilai) ? nilai : Number.NaN;
++  const teks = String(nilai).trim().replace(/\s/g, '');
++  if (teks === '') return null;
++  if (/^-?\d+$/.test(teks)) return Number(teks);
++  if (/^-?\d+[.,]\d{1,2}$/.test(teks)) return Number(teks.replace(',', '.'));
++  return Number.NaN;
++}
++
++/**
++ * RC-S133.6 (AUDIT B-2) — SEL BERFORMAT PERSEN.
++ *
++ * Bila pengguna mengetik "1,5%" di Excel, Excel MENYIMPAN angka 0,015
++ * dengan format persen. Pembacaan `raw: true` lalu menyerahkan 0,015 ke
++ * parser, yang membaca kolom "Jasa Persen"/"Bunga Persen Per Tahun"
++ * sebagai angka persen apa adanya → 0,015% (100× lebih kecil), diam-diam.
++ *
++ * Fungsi ini (murni, dipanggil sebelum `sheet_to_json`) mengganti setiap
++ * sel ANGKA yang tampil sebagai persen (teks tampilan `w` diakhiri "%",
++ * atau format `z` memuat "%") dengan teks persennya, mis. "1.5%". Parser
++ * persen yang sudah ada membaca teks itu sebagai 1,5 — sama dengan bila
++ * pengguna mengetik "1,5" di sel berformat biasa. Sel lain tidak disentuh;
++ * objek sheet asli tidak diubah (salinan dangkal hanya bila ada perubahan).
++ */
++export function normalkanSelPersen<T extends object>(sheet: T): T {
++  let salinan: Record<string, unknown> | null = null;
++  const asal = sheet as unknown as Record<string, unknown>;
++  for (const alamat of Object.keys(asal)) {
++    if (alamat.startsWith('!')) continue;
++    const sel = asal[alamat] as { t?: unknown; v?: unknown; w?: unknown; z?: unknown } | null | undefined;
++    if (!sel || typeof sel !== 'object' || sel.t !== 'n' || typeof sel.v !== 'number' || !Number.isFinite(sel.v)) continue;
++    const tampil = typeof sel.w === 'string' ? sel.w.trim() : '';
++    const format = typeof sel.z === 'string' ? sel.z : '';
++    if (!tampil.endsWith('%') && !format.includes('%')) continue;
++    const persen = Number((sel.v * 100).toPrecision(12));
++    if (!salinan) salinan = { ...asal };
++    salinan[alamat] = { t: 's', v: `${persen}%`, w: `${persen}%` };
++  }
++  return (salinan ?? sheet) as T;
++}
++
+ function duaDigit(n: number): string {
+   return String(n).padStart(2, '0');
+ }
+@@ -695,7 +751,7 @@
+     if (jumlah <= 0) return 'Jumlah Pinjaman harus lebih besar dari 0.';
+ 
+     const rawTenor = ambil('Tenor');
+-    const tenor = parseRupiah(rawTenor);
++    const tenor = parseBilanganHitungan(rawTenor);
+     if (tenor === null) return 'Tenor wajib diisi (jumlah periode angsuran).';
+     if (!Number.isInteger(tenor) || tenor < 1) return 'Tenor harus bilangan bulat minimal 1.';
+ 
+@@ -749,7 +805,7 @@
+     const rawDibayar = ambil('Angsuran Sudah Dibayar');
+     let angsuranSudahDibayar = 0;
+     if (!selKosong(rawDibayar)) {
+-      const n = parseRupiah(rawDibayar);
++      const n = parseBilanganHitungan(rawDibayar);
+       if (n === null || !Number.isInteger(n) || n < 0) {
+         return `Angsuran Sudah Dibayar "${teks(rawDibayar)}" harus bilangan bulat 0 atau lebih.`;
+       }
+@@ -772,7 +828,7 @@
+     const rawTersisa = ambil('Angsuran Tersisa');
+     let angsuranTersisa: number | undefined;
+     if (!selKosong(rawTersisa)) {
+-      const n = parseRupiah(rawTersisa);
++      const n = parseBilanganHitungan(rawTersisa);
+       if (n === null || !Number.isInteger(n) || n < 1) {
+         return `Angsuran Tersisa "${teks(rawTersisa)}" harus bilangan bulat minimal 1.`;
+       }
+@@ -846,7 +902,7 @@
+ 
+     const rawTenor = ambil('Tenor Bulan');
+     if (selKosong(rawTenor)) return 'Tenor Bulan wajib diisi — pilih 3, 6, atau 12.';
+-    const tenor = parseRupiah(rawTenor);
++    const tenor = parseBilanganHitungan(rawTenor);
+     if (tenor !== 3 && tenor !== 6 && tenor !== 12) {
+       return `Tenor Bulan "${teks(rawTenor)}" tidak sah — hanya 3, 6, atau 12.`;
+     }
+@@ -883,7 +939,7 @@
+     if (nilaiPerolehan === null) return 'Nilai Perolehan wajib diisi.';
+     if (nilaiPerolehan <= 0) return 'Nilai Perolehan harus lebih besar dari 0.';
+ 
+-    const masa = parseRupiah(ambil('Masa Manfaat Bulan'));
++    const masa = parseBilanganHitungan(ambil('Masa Manfaat Bulan'));
+     if (masa === null) return 'Masa Manfaat Bulan wajib diisi.';
+     if (!Number.isInteger(masa) || masa <= 0) return 'Masa Manfaat Bulan harus bilangan bulat minimal 1.';
+ 
+diff -ruN a/src/reports/FinancialReports.ts b/src/reports/FinancialReports.ts
+--- a/src/reports/FinancialReports.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/reports/FinancialReports.ts	2026-10-10 13:14:10.357184177 +0800
+@@ -332,10 +332,28 @@
+     labaBerjalanLabel = 'SHU Tahun Berjalan (sudah dihitung, menunggu pembagian setelah RAT)';
+   } else {
+     // DIBAGIKAN
+-    labaBerjalanLabel =
+-      labaBerjalan === 0
+-        ? `SHU Tahun Buku ${tahunBuku} (sudah dibagikan — telah dialokasikan ke Cadangan/Ekuitas Lainnya/Simpanan Anggota)`
+-        : `Laba Tahun Berjalan Setelah Distribusi SHU ${tahunBuku} (transaksi pendapatan/beban baru tercatat setelah SHU dibagikan — perlu ditelusuri)`;
++    if (labaBerjalan === 0) {
++      labaBerjalanLabel = `SHU Tahun Buku ${tahunBuku} (sudah dibagikan — telah dialokasikan ke Cadangan/Ekuitas Lainnya/Simpanan Anggota)`;
++    } else {
++      // RC-S133.6 (AUDIT F-3) — status DIBAGIKAN di shu_konfigurasi adalah
++      // status HARI INI, sedangkan laporan ini per `asOfDate`. Bila jurnal
++      // distribusi tahun buku ini bertanggal SESUDAH tanggal laporan, sisa
++      // hasil usaha per tanggal itu memang belum dialokasikan — bukan
++      // "transaksi baru setelah distribusi yang perlu ditelusuri".
++      // Angka tidak berubah; hanya label yang mengikuti tanggal laporan.
++      const distribusi = await db.getFirstAsync<{ n: number }>(
++        `SELECT COUNT(*) AS n FROM journal
++         WHERE sumber_transaksi = 'SHU_DISTRIBUSI' AND status IN ('POSTED','REVERSED')
++           AND reversal_of_id IS NULL AND tanggal <= ?
++           AND (sumber_id IS NULL OR sumber_id IN (SELECT id FROM shu_konfigurasi WHERE tahun_buku = ?))`,
++        asOfDate,
++        tahunBuku
++      );
++      labaBerjalanLabel =
++        (distribusi?.n ?? 0) === 0
++          ? `SHU Tahun Buku ${tahunBuku} (pembagiannya dicatat sesudah tanggal laporan ini)`
++          : `Laba Tahun Berjalan Setelah Distribusi SHU ${tahunBuku} (transaksi pendapatan/beban baru tercatat setelah SHU dibagikan — perlu ditelusuri)`;
++    }
+   }
+ 
+   const totalAsetPosted = sum(aset.map((r) => r.saldo));
+@@ -1041,9 +1059,19 @@
+   rows: PerubahanEkuitasRow[];
+   totalSaldoAwal: Rupiah;
+   totalMutasi: Rupiah;
+-  hasilUsahaPeriode: Rupiah; // SHU/laba periode berjalan, ditambahkan sbg baris terpisah — SUDAH dinetralkan thd distribusi SHU (lihat komentar di bawah)
++  hasilUsahaPeriode: Rupiah; // SALDO AKHIR baris SHU/Hasil Usaha (= labaBerjalan Posisi Keuangan per tanggalSelesai) — SUDAH dinetralkan thd distribusi SHU (lihat komentar di bawah)
+   hasilUsahaPeriodeLabel: string; // label status SHU, konsisten dengan getPosisiKeuangan().labaBerjalanLabel
+   totalSaldoAkhir: Rupiah;   // termasuk hasilUsahaPeriode
++  /**
++   * RC-S133.6 (AUDIT F-4) — baris SHU/Hasil Usaha diperlakukan seperti akun
++   * ekuitas lain: saldoAwalHasilUsaha + hasilUsahaPeriodeBerjalan −
++   * shuDibagikanPeriode = hasilUsahaPeriode (saldo akhir baris itu).
++   * totalSaldoAwal SUDAH termasuk saldoAwalHasilUsaha, sehingga sama dengan
++   * total ekuitas Posisi Keuangan per H-1 tanggalMulai.
++   */
++  saldoAwalHasilUsaha?: Rupiah;      // sisa hasil usaha belum dibagikan per H-1 tanggalMulai
++  hasilUsahaPeriodeBerjalan?: Rupiah; // hasil usaha periode ini (= LHU periode)
++  shuDibagikanPeriode?: Rupiah;       // SHU yang dibagikan (jurnal distribusi) dalam periode
+ }
+ 
+ export async function getPerubahanEkuitas(
+@@ -1106,11 +1134,39 @@
+     rows.push({ kode: acc.kode, nama: acc.nama, saldoAwal, mutasi: saldoAkhir - saldoAwal, saldoAkhir });
+   }
+ 
+-  const posisiAkhir = await getPosisiKeuangan(db, tanggalSelesai);
++  const [posisiAwal, posisiAkhir] = await Promise.all([
++    getPosisiKeuangan(db, tanggalAwal),
++    getPosisiKeuangan(db, tanggalSelesai),
++  ]);
+   const hasilUsahaPeriode = posisiAkhir.labaBerjalan;
+   const hasilUsahaPeriodeLabel = posisiAkhir.labaBerjalanLabel;
+ 
+-  const totalSaldoAwal = sum(rows.map((r) => r.saldoAwal));
++  // RC-S133.6 (AUDIT F-4) — KESINAMBUNGAN ANTAR-TAHUN, TANPA closing entry.
++  //
++  // Dulu baris "SHU/Hasil Usaha" selalu bersaldo awal 0 dan totalSaldoAwal
++  // hanya menjumlah akun ekuitas permanen. Karena aplikasi tidak menutup
++  // akun pendapatan/beban, SHU tahun lalu yang belum dibagikan per tanggal
++  // awal laporan HILANG dari saldo awal lalu muncul lagi sebagai "hasil
++  // usaha periode" — saldo awal tahun N+1 ≠ ekuitas akhir tahun N (selisih
++  // persis SHU yang belum dibagikan), dan "hasil usaha periode" ≠ LHU.
++  //
++  // Sekarang baris itu diperlakukan seperti akun ekuitas lain:
++  //   saldo awal  = sisa hasil usaha belum dibagikan per H-1 (Posisi
++  //                 Keuangan per tanggal itu — sumber yang SAMA)
++  //   + hasil usaha periode berjalan (= LHU periode)
++  //   − SHU yang dibagikan dalam periode (mutasi akun kliring 3-4000)
++  //   = saldo akhir (= labaBerjalan Posisi Keuangan per tanggalSelesai).
++  // Jurnal, saldo akun, dan Posisi Keuangan TIDAK berubah; totalSaldoAkhir
++  // tetap identik dengan Posisi Keuangan.
++  const saldoKliring = (tb: typeof trialAwal): number => {
++    const row = tb.rows.find((r) => r.kode === SHU_BERJALAN_ACCOUNT_KODE);
++    return row ? row.kredit - row.debit : 0;
++  };
++  const saldoAwalHasilUsaha = posisiAwal.labaBerjalan;
++  const shuDibagikanPeriode = saldoKliring(trialAwal) - saldoKliring(trialAkhir);
++  const hasilUsahaPeriodeBerjalan = hasilUsahaPeriode - saldoAwalHasilUsaha + shuDibagikanPeriode;
++
++  const totalSaldoAwal = sum(rows.map((r) => r.saldoAwal)) + saldoAwalHasilUsaha;
+   const totalMutasi = sum(rows.map((r) => r.mutasi));
+   const totalSaldoAkhir = sum(rows.map((r) => r.saldoAkhir)) + hasilUsahaPeriode;
+ 
+@@ -1123,6 +1179,9 @@
+     hasilUsahaPeriode,
+     hasilUsahaPeriodeLabel,
+     totalSaldoAkhir,
++    saldoAwalHasilUsaha,
++    hasilUsahaPeriodeBerjalan,
++    shuDibagikanPeriode,
+   };
+ }
+ 
+@@ -1254,9 +1313,63 @@
+       tanggalSelesai
+     );
+ 
++    // AUDIT F-2 — `catatDataAwalSimpanan` (impor "Transaksi baru" & setor
++    // simpanan gabungan) membukukan pokok+wajib+sukarela dalam SATU jurnal
++    // bersumber SIMPANAN_DATA_AWAL yang seluruhnya diklasifikasikan
++    // PENDANAAN. Padahal sejak RC-S104 simpanan sukarela = OPERASI (setor
++    // sukarela biasa lewat menu manual sudah OPERASI), sehingga Arus Kas
++    // hasil impor berbeda dari input manual untuk data yang sama. Bagian
++    // sukarela diambil dari buku pembantu simpanan_transaksi (jurnal yang
++    // sama) dan disajikan sebagai SIMPANAN_SUKARELA/OPERASI; sisanya tetap
++    // SIMPANAN_DATA_AWAL/PENDANAAN. Total kas tidak berubah.
++    //
++    // RC-S133.6 — jurnal PEMBALIK (reverseJournal: sumber_transaksi sama,
++    // `reversal_of_id` = jurnal asal, gerak kas NEGATIF) dipecah dengan
++    // porsi sukarela jurnal ASAL-nya, supaya pasangan asal+pembalik saling
++    // meniadakan per aktivitas (bukan Operasi +S / Pendanaan −S).
++    const sukarelaPerJurnal = new Map<string, number>();
++    const jurnalDataAwal = [...new Set(entries.filter((x) => x.sumber_transaksi === 'SIMPANAN_DATA_AWAL').map((x) => x.journal_id))];
++    if (jurnalDataAwal.length > 0) {
++      const ph = jurnalDataAwal.map(() => '?').join(',');
++      const asalRows = await db.getAllAsync<{ id: string; asal: string }>(
++        `SELECT id, COALESCE(reversal_of_id, id) AS asal FROM journal WHERE id IN (${ph})`,
++        ...jurnalDataAwal
++      );
++      const asalIds = [...new Set(asalRows.map((r) => r.asal))];
++      const phAsal = asalIds.map(() => '?').join(',');
++      const baris = asalIds.length
++        ? await db.getAllAsync<{ journal_id: string; n: number }>(
++            `SELECT journal_id, SUM(nominal) AS n FROM simpanan_transaksi
++             WHERE jenis = 'SUKARELA' AND tipe = 'SETOR' AND journal_id IN (${phAsal})
++             GROUP BY journal_id`,
++            ...asalIds
++          )
++        : [];
++      const sukarelaAsal = new Map<string, number>(baris.map((b): [string, number] => [b.journal_id, b.n]));
++      for (const r of asalRows) {
++        const n = sukarelaAsal.get(r.asal) ?? 0;
++        if (n > 0) sukarelaPerJurnal.set(r.id, n);
++      }
++    }
++
+     for (const e of entries) {
+       const netMovement = e.debit - e.kredit; // kas bertambah jika debit > kredit
+       if (netMovement === 0) continue;
++      if (e.sumber_transaksi === 'SIMPANAN_DATA_AWAL') {
++        const porsiSukarela = sukarelaPerJurnal.get(e.journal_id) ?? 0;
++        if (porsiSukarela > 0) {
++          // Bertanda sama dengan gerak kas: positif untuk setoran, negatif untuk pembaliknya.
++          const bagianSukarela = Math.sign(netMovement) * Math.min(Math.abs(netMovement), porsiSukarela);
++          operasi += bagianSukarela;
++          rincian.push({ aktivitas: 'OPERASI', sumberTransaksi: 'SIMPANAN_SUKARELA', deskripsi: e.deskripsi, jumlah: bagianSukarela });
++          const sisa = netMovement - bagianSukarela;
++          if (sisa !== 0) {
++            pendanaan += sisa;
++            rincian.push({ aktivitas: 'PENDANAAN', sumberTransaksi: e.sumber_transaksi, deskripsi: e.deskripsi, jumlah: sisa });
++          }
++          continue;
++        }
++      }
+       // RC-S133.4.5 — SALDO AWAL BUKAN ARUS KAS. Jurnal saldo awal
+       // (dan koreksinya) yang bertanggal di dalam periode adalah posisi
+       // kas pembukaan koperasi yang mulai memakai aplikasi, bukan uang
+diff -ruN a/src/screens/Laporan/PerubahanEkuitasScreen.tsx b/src/screens/Laporan/PerubahanEkuitasScreen.tsx
+--- a/src/screens/Laporan/PerubahanEkuitasScreen.tsx	2026-10-09 01:19:27.000000000 +0800
++++ b/src/screens/Laporan/PerubahanEkuitasScreen.tsx	2026-10-10 13:12:22.656623011 +0800
+@@ -197,21 +197,38 @@
+                     <SelNilai style={[tabelUi.nilaiTebal, r.saldoAkhir < 0 && tabelUi.nilaiNegatif]}>{formatRupiah(r.saldoAkhir)}</SelNilai>
+                   </View>
+                 ))}
++                {/* RC-S133.6 (AUDIT F-4) — baris SHU kini punya saldo awal (sisa
++                    hasil usaha belum dibagikan per H-1), sehingga saldo awal
++                    tahun ini = ekuitas akhir tahun lalu. */}
+                 <View style={[tabelUi.baris, data.rows.length % 2 === 1 && tabelUi.barisGenap]}>
+                   <Text style={[tabelUi.label, tabelUi.kolomAkun]}>{data.hasilUsahaPeriodeLabel}</Text>
+-                  <SelNilai style={tabelUi.nilaiRedup}>-</SelNilai>
+-                  <SelNilai style={data.hasilUsahaPeriode < 0 && tabelUi.nilaiNegatif}>{formatRupiah(data.hasilUsahaPeriode)}</SelNilai>
++                  {(data.saldoAwalHasilUsaha ?? 0) === 0 ? (
++                    <SelNilai style={tabelUi.nilaiRedup}>-</SelNilai>
++                  ) : (
++                    <SelNilai style={(data.saldoAwalHasilUsaha ?? 0) < 0 && tabelUi.nilaiNegatif}>{formatRupiah(data.saldoAwalHasilUsaha ?? 0)}</SelNilai>
++                  )}
++                  <SelNilai style={data.hasilUsahaPeriode - (data.saldoAwalHasilUsaha ?? 0) < 0 && tabelUi.nilaiNegatif}>
++                    {formatRupiah(data.hasilUsahaPeriode - (data.saldoAwalHasilUsaha ?? 0))}
++                  </SelNilai>
+                   <SelNilai style={[tabelUi.nilaiTebal, data.hasilUsahaPeriode < 0 && tabelUi.nilaiNegatif]}>{formatRupiah(data.hasilUsahaPeriode)}</SelNilai>
+                 </View>
+ 
+                 <View style={tabelUi.total}>
+                   <Text style={[tabelUi.labelTebal, tabelUi.kolomAkun]}>Total</Text>
+                   <SelNilai style={tabelUi.nilaiTebal}>{formatRupiah(data.totalSaldoAwal)}</SelNilai>
+-                  <SelNilai style={tabelUi.nilaiTebal}>{formatRupiah(data.totalMutasi + data.hasilUsahaPeriode)}</SelNilai>
++                  <SelNilai style={tabelUi.nilaiTebal}>{formatRupiah(data.totalSaldoAkhir - data.totalSaldoAwal)}</SelNilai>
+                   <SelNilai style={tabelUi.nilaiUtama}>{formatRupiah(data.totalSaldoAkhir)}</SelNilai>
+                 </View>
+               </TabelGeser>
+ 
++              {data.hasilUsahaPeriodeBerjalan !== undefined &&
++                ((data.saldoAwalHasilUsaha ?? 0) !== 0 || (data.shuDibagikanPeriode ?? 0) !== 0) && (
++                  <Text style={styles.catatanShu} testID="rincian-mutasi-shu">
++                    Mutasi SHU/hasil usaha: hasil usaha periode ini {formatRupiah(data.hasilUsahaPeriodeBerjalan)}
++                    {(data.shuDibagikanPeriode ?? 0) !== 0 ? `, SHU dibagikan ${formatRupiah(-(data.shuDibagikanPeriode ?? 0))}` : ''}.
++                  </Text>
++                )}
++
+               <RekonsiliasiBanner selisih={selisihSekarang} label="Rekonsiliasi ke Posisi Keuangan" />
+             </>
+           )}
+@@ -344,6 +361,7 @@
+   modeChipText: { fontSize: 13, color: colors.text, fontWeight: '700' },
+   modeChipTextActive: { color: colors.white },
+   errorText: { color: colors.danger, textAlign: 'center', marginTop: 24 },
++  catatanShu: { fontSize: 12, color: colors.textMuted, marginTop: spacing.sm, lineHeight: 18 },
+   warnBanner: { flexDirection: 'row', gap: spacing.sm, alignItems: 'flex-start', backgroundColor: colors.warningBg, borderWidth: 1, borderColor: colors.warningBorder, borderRadius: radius.sm, padding: spacing.md, marginBottom: spacing.sm },
+   warnBannerText: { flex: 1, fontSize: 12, color: colors.text, lineHeight: 17 },
+   validationBanner: {
+diff -ruN a/src/services/ImportDataAwalService.ts b/src/services/ImportDataAwalService.ts
+--- a/src/services/ImportDataAwalService.ts	2026-10-09 01:19:27.000000000 +0800
++++ b/src/services/ImportDataAwalService.ts	2026-10-10 13:13:06.137285101 +0800
+@@ -9,6 +9,7 @@
+   parseBerkasDataAwal,
+   cocokkanJenisSheet,
+   cocokkanSheetSaldoAwalAkun,
++  normalkanSelPersen,
+ } from '@/import/ExcelDataAwalParser';
+ import type { JenisTemplateDataAwal } from '@/import/TemplateDataAwal';
+ import { bangunWorkbookTemplate } from '@/import/TemplateWorkbook';
+@@ -101,7 +102,7 @@
+     if (cocokkanSheetSaldoAwalAkun(nama)) {
+       const wsA = wb.Sheets[nama];
+       if (wsA && !hasil.SALDO_AWAL_AKUN) {
+-        hasil.SALDO_AWAL_AKUN = XLSX.utils.sheet_to_json<unknown[]>(wsA, { header: 1, raw: true, defval: null });
++        hasil.SALDO_AWAL_AKUN = XLSX.utils.sheet_to_json<unknown[]>(normalkanSelPersen(wsA), { header: 1, raw: true, defval: null });
+       }
+       continue;
+     }
+@@ -109,7 +110,8 @@
+     if (!jenis || hasil[jenis]) continue;
+     const ws = wb.Sheets[nama];
+     if (!ws) continue;
+-    hasil[jenis] = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true, defval: null });
++    // RC-S133.6 (AUDIT B-2) — sel berformat persen dibaca sebagai teks persennya.
++    hasil[jenis] = XLSX.utils.sheet_to_json<unknown[]>(normalkanSelPersen(ws), { header: 1, raw: true, defval: null });
+   }
+   return hasil;
+ }

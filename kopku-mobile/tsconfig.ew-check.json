@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitReturns": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": [],
+    "paths": {
+      "@/*": ["./src/*"],
+      "expo-sqlite": ["./src/test-utils/expoSqliteMock.ts"],
+      "expo-crypto": ["./src/test-utils/expoCryptoMock.ts"]
+    }
+  },
+  "include": [
+    ".harness/ambient.d.ts",
+    "src/accounting/EarlyWithdrawalPolicy.ts",
+    "src/accounting/EarlyWithdrawalCalculation.ts",
+    "src/services/SimpananBerjangkaEarlyWithdrawalService.ts"
+  ]
+}

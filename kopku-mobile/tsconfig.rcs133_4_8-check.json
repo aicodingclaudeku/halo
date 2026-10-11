@@ -1,0 +1,37 @@
+{
+ "compilerOptions": {
+  "target": "ES2021",
+  "lib": [
+   "ES2021",
+   "DOM"
+  ],
+  "module": "ESNext",
+  "moduleResolution": "bundler",
+  "jsx": "react-jsx",
+  "strict": false,
+  "noEmit": true,
+  "skipLibCheck": true,
+  "types": [],
+  "paths": {
+   "@/*": [
+    "./src/*"
+   ],
+   "decimal.js": [
+    "./src/test-utils/decimalShim.ts"
+   ],
+   "expo-crypto": [
+    "./src/test-utils/expoCryptoMock.ts"
+   ],
+   "expo-secure-store": [
+    "./src/test-utils/expoSecureStoreMock.ts"
+   ]
+  }
+ },
+ "include": [
+  ".harness/rn-ambient.d.ts",
+  "src/screens/Pengaturan/ImportDataAwalScreen.tsx",
+  "src/screens/Dashboard/DashboardScreen.tsx",
+  "src/screens/Dashboard/DashboardScreen.web.tsx",
+  "src/desktop/bridge.ts"
+ ]
+}

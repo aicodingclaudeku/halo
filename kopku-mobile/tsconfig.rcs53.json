@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2021",
+    "lib": ["ES2021", "DOM"],
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "strict": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": [],
+    "baseUrl": ".",
+    "outDir": ".harness/build3",
+    "rootDir": ".",
+    "declaration": false,
+    "paths": {
+      "@/*": ["src/*"],
+      "expo-crypto": ["src/test-utils/expoCryptoMock.ts"],
+      "expo-secure-store": ["src/test-utils/expoSecureStoreMock.ts"],
+      "expo-sqlite": ["src/test-utils/expoSqliteMock.ts"],
+      "expo-file-system": ["src/test-utils/expoSqliteMock.ts"],
+      "expo-file-system/legacy": ["src/test-utils/expoSqliteMock.ts"],
+      "expo-task-manager": ["src/test-utils/expoBackgroundMock.ts"],
+      "expo-background-task": ["src/test-utils/expoBackgroundMock.ts"],
+      "@noble/ed25519": ["src/test-utils/nobleEd25519Mock.ts"],
+      "@noble/hashes/sha512": ["src/test-utils/nobleSha512Mock.ts"],
+      "decimal.js": [".harness/decimalHarness.ts"],
+      "date-fns": [".harness/dateFnsShim.ts"]
+    }
+  },
+  "include": [
+    ".harness/ambient.d.ts",
+    ".harness/rn-ambient.d.ts",
+    ".harness/decimalHarness.ts",
+    ".harness/dateFnsShim.ts",
+    ".harness/testDb.ts",
+    "src/**/*.ts"
+  ],
+  "exclude": ["src/**/*.tsx"]
+}

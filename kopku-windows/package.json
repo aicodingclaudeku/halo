@@ -1,0 +1,118 @@
+{
+  "name": "kopku-desktop",
+  "productName": "KOPKU Desktop",
+  "version": "1.0.18",
+  "description": "KOPKU Desktop untuk Windows — source Electron + UI yang sudah di-build (renderer/). UI berasal dari source aplikasi KOPKU (src/, app/).",
+  "author": "KOPKU",
+  "private": true,
+  "main": "electron/entry.js",
+  "scripts": {
+    "prestart": "node scripts/pasang-menu-lan-wa.js",
+    "start": "electron .",
+    "dev": "set KOPKU_DEV=1&& electron .",
+    "lengkapi:aset": "node scripts/lengkapi-aset-renderer.js",
+    "predist:win": "node scripts/pasang-menu-lan-wa.js",
+    "dist:win": "electron-builder --win nsis zip --x64 --publish never",
+    "postdist:win": "node scripts/verifikasi-fuse.js \"dist/win-unpacked/KOPKU Desktop.exe\"",
+    "dist:win-portable": "electron-builder --win portable --x64 --publish never",
+    "predist:mac": "node scripts/pasang-menu-lan-wa.js",
+    "dist:mac": "electron-builder --mac --x64 --arm64 --publish never",
+    "verifikasi": "python scripts/verifikasi-installer.py",
+    "test:lan": "node --test --test-concurrency=1 \"test/lan/*.test.js\"",
+    "test:mcp": "node --test --test-concurrency=1 \"test/mcp/*.test.js\"",
+    "test:keamanan": "node --test --test-concurrency=1 \"test/keamanan/*.test.js\"",
+    "pasang:menu-lan-wa": "node scripts/pasang-menu-lan-wa.js"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.0.12",
+    "esbuild": "^0.25.0",
+    "resedit": "^2.0.3",
+    "pe-library": "^1.0.1"
+  },
+  "build": {
+    "appId": "id.koperasi.finance.desktop",
+    "productName": "KOPKU Desktop",
+    "copyright": "KOPKU",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "renderer/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signAndEditExecutable": true,
+      "artifactName": "KOPKU-Desktop-${version}-Windows-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "KOPKU Desktop",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "KOPKU-Desktop-${version}-Setup.${ext}",
+      "include": "installer/firewall.nsh",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "language": "1057"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.finance",
+      "icon": "build/icon.png",
+      "identity": null,
+      "hardenedRuntime": false,
+      "artifactName": "KOPKU-Desktop-${version}-macOS-${arch}.${ext}",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "KOPKU Desktop menerima sinkronisasi dari aplikasi KOPKU di HP melalui Wi-Fi lokal."
+      }
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://koperasikufinanace.my.id/downloads/windows/"
+      }
+    ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true
+    }
+  }
+}

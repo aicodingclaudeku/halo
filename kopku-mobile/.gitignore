@@ -1,0 +1,21 @@
+# RC-S73.1 — artifact verifikasi perangkat: JANGAN di-commit ke source rilis
+# (logcat, database uji, APK, hasil JSON). Simpan terpisah sebagai arsip audit.
+rc-s73-out/
+*.apk
+*.aab
+koperasi.db
+rc-s73-logcat.txt
+rc-s73-db-checks.txt
+node_modules/
+
+# RC-S110 — arsip sumber yang dibuat untuk dikirim ke pengguna
+# (`git archive` dari HEAD). Isinya repo ini sendiri, jadi mengommitnya
+# akan menggandakan seluruh source ke dalam riwayat git setiap kali ZIP
+# dibuat. Sama seperti *.apk/*.aab di atas: artefak keluaran, bukan source.
+*.zip
+
+# KOPKU Desktop (hasil build)
+desktop/node_modules/
+desktop/renderer/
+desktop/dist/
+desktop/test/e2e/.out/

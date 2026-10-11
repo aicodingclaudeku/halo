@@ -1,0 +1,107 @@
+{
+ "berkas": "terkoreksi.xlsx",
+ "cutOff": "2026-10-01",
+ "siapDiimpor": true,
+ "peringatan": [
+  {
+   "kunci": "ringkasan-pinjaman",
+   "tingkat": "INFO",
+   "judul": "Ringkasan 72 pinjaman (estimasi sebelum import)",
+   "pesan": "Pokok awal Rp308.988.390 · Sisa pokok (piutang) Rp258.883.762 · Sisa jasa terjadwal Rp47.138.964 · Sisa angsuran (pokok + jasa) Rp306.022.726. 72 baris memakai Satuan Jasa TAHUN (sudah dibagi 12)."
+  },
+  {
+   "kunci": "tanpa-sheet7",
+   "tingkat": "INFO",
+   "judul": "Saldo Kas & akun lain belum ada di berkas",
+   "pesan": "Sheet \"7. Saldo Awal Akun\" tidak ada atau belum berisi saldo akun. Setelah import, isi Kas/Bank, pendapatan & beban tahun berjalan, cadangan, dan utang di menu Saldo Awal Akun sampai \"Saldo Awal Belum Sesuai\" Rp0."
+  }
+ ],
+ "estimasiSebelumImport": {
+  "jumlah": 72,
+  "pokokAwal": 308988390,
+  "sisaPokok": 258883762,
+  "sisaJasa": 47138964,
+  "jasaMelebihiPokok": 0
+ },
+ "import": {
+  "gagal": 0,
+  "contohGagal": [],
+  "perSheet": [
+   [
+    "ANGGOTA",
+    116,
+    0
+   ],
+   [
+    "SIMPANAN",
+    116,
+    0
+   ],
+   [
+    "BERJANGKA",
+    0,
+    0
+   ],
+   [
+    "PINJAMAN",
+    72,
+    0
+   ],
+   [
+    "ASET",
+    0,
+    0
+   ],
+   [
+    "JASA",
+    2,
+    0
+   ]
+  ]
+ },
+ "dashboard": {
+  "anggotaAktif": 116,
+  "totalAnggota": 116,
+  "totalSimpanan": 166486465,
+  "simpananPokok": 11600000,
+  "simpananWajib": 74207648,
+  "simpananSukarela": 80678817,
+  "totalPinjaman": 308988390,
+  "pinjamanAktifCount": 72,
+  "piutangPokok": 258883762,
+  "sisaJasaTerjadwal": 47138964,
+  "sisaAngsuran": 306022726,
+  "tunggakan": 37245051,
+  "piutang": 306022726
+ },
+ "kueriLamaSisaAngsuran": 306022726,
+ "claude": {
+  "status": {
+   "model": "claude-sonnet-5-5",
+   "sertakanRingkasan": true,
+   "adaKunci": true,
+   "kunciTersamar": "sk-ant-…xxxx"
+  },
+  "url": "https://api.anthropic.com/v1/messages",
+  "header": [
+   "content-type",
+   "x-api-key",
+   "anthropic-version",
+   "anthropic-dangerous-direct-browser-access"
+  ],
+  "model": "claude-sonnet-5-5",
+  "konteksMemuatSisaPokok": true,
+  "cuplikanKonteks": [
+   "<data_koperasi>",
+   "Data koperasi per 2026-10-01 — Koperasi Uji Piutang, tahun buku 2026:",
+   "- Anggota aktif: 116 dari 116 anggota",
+   "- Total simpanan anggota: Rp166.486.465 (pokok Rp11.600.000, wajib Rp74.207.648, sukarela Rp80.678.817)",
+   "- Total pokok pinjaman (akad, aktif + lunas): Rp308.988.390; pinjaman aktif: 72",
+   "- Piutang berjalan (sisa POKOK pinjaman aktif): Rp258.883.762",
+   "- Jasa terjadwal yang belum dibayar (belum tentu jatuh tempo): Rp47.138.964",
+   "- Sisa angsuran (pokok + jasa): Rp306.022.726",
+   "- Tunggakan (angsuran lewat jatuh tempo, belum dibayar): Rp37.245.051"
+  ],
+  "jawab": "Jawaban uji."
+ }
+}
