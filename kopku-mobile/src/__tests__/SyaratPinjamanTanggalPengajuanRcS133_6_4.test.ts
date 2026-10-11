@@ -294,6 +294,7 @@ describe('RC-S133.6.4 §1 — pratinjau import: pemeriksaan syarat pinjaman pada
     expect(p[0].pesan).toMatch(/Simpanan Pokok dan Simpanan Wajib/);
     expect(p[0].pesan).toMatch(/TETAP diimpor/);
     expect(p[0].pesan).not.toMatch(/ditolak\./);
+    expect(p[0].pesan).not.toMatch(/\.\./); // tanpa titik ganda
   });
 
   test('simpanan sudah ada pada/sebelum tanggal pinjaman -> hanya INFO', () => {

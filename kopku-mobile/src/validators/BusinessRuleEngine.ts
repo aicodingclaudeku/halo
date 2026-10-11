@@ -259,5 +259,6 @@ export function alasanSebagaiPeringatan(reason: string): string {
     .replace(/^Pengajuan pinjaman ditolak: /, '')
     .replace(/ — pengajuan pinjaman baru ditolak\.$/, '.')
     .replace(/ — hanya anggota AKTIF yang bisa melakukan transaksi baru\.$/, '.');
-  return netral.charAt(0).toUpperCase() + netral.slice(1);
+  const kalimat = netral.charAt(0).toUpperCase() + netral.slice(1);
+  return /[.!?]$/.test(kalimat) ? kalimat : `${kalimat}.`;
 }

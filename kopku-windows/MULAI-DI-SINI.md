@@ -1,6 +1,14 @@
-# KOPKU Desktop 1.0.18 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.19 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.19 (source KOPKU RC-S133.6.4 — skema database v82)
+- **Syarat pinjaman dinilai pada tanggal pengajuan, bukan hari ini.** Pengajuan bertanggal lampau memakai saldo simpanan, sisa pinjaman berjalan, dan tunggakan **pada tanggal itu**. Untuk tanggal hari ini hasilnya tidak berubah. **Form pengajuan tetap menolak**; **Import Data Awal hanya memperingatkan** (pinjaman historis sudah terjadi, jadi tidak ditolak): hasil pengecekan tampil di pratinjau, di hasil import, dan di **Riwayat Import** (baris bertanda kuning).
+- **Pencatatan penyelesaian ke Pengadilan Negeri / klaim asuransi** (kriteria Macet angka 3, SOM 12.1): Detail Pinjaman › kartu *Penyelesaian Pengadilan / Asuransi*. Dicatat **manual oleh Admin/Pengurus** (jalur, tanggal, nomor perkara/klaim, dokumen), masuk audit log, dapat diubah/dibatalkan. Pinjaman yang tercatat digolongkan **Macet sejak tanggal pencatatan** di Kolektibilitas Piutang dan export. Tidak membuat jurnal.
+- **Pembaruan database v81 → v82 otomatis** saat 1.0.19 pertama dibuka (hanya menambah enam kolom di tabel pinjaman). Sebelumnya dibuat salinan `pra-migrasi-v81-ke-v82-<waktu>.db`; bila salinan gagal dibuat, pembaruan dibatalkan dan data tidak diubah.
+- **HP dan desktop harus sama-sama versi baru** (APK dari source RC-S133.6.4): sinkron menolak versi skema berbeda. Perbarui keduanya dalam satu waktu.
+- **Tidak diubah (menunggu dasar tertulis):** penempatan masa angsuran 1 bulan dan 4–5 bulan pada penggolongan kolektibilitas. Mohon konfirmasi tertulis pengawas/pengurus.
+- `renderer/` = bundle 1.0.18 + tambalan source **KOPKU RC-S133.6.4** (`scripts/tambal-renderer-rc-s133.6.4.js`, laporan `docs/laporan-tambal-rc-s133.6.4.json`). Rincian: `docs/RC-S133.6.4_SYARAT_PINJAMAN_PENYELESAIAN_V82.md`.
 
 ## Yang baru di 1.0.18 (source KOPKU RC-S133.6.3 — skema database TETAP v81)
 - **Export Kolektibilitas Piutang (PDF/Excel/CSV) diperbaiki & dirapikan.** Format Rupiah kini jatuh di kolom yang benar (Saldo Piutang, Saldo Pokok, Angsuran Terbayar, Nilai Agunan, Nilai Penyisihan — dulu salah kolom). PDF A4 tidak lagi memotong kolom: isinya dibagi menjadi Ringkasan, Rekap per Kolektibilitas, Rincian per Pinjaman, Dasar Penggolongan, Batasan Fiskal (PMK 74/2024), Rincian Fiskal per Pinjaman, serta Dasar & Catatan. Excel: teks panjang dibungkus, tinggi baris menyesuaikan.

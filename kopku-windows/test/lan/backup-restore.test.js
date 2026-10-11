@@ -2,7 +2,7 @@
 /**
  * Backup & restore KOPKU existing tetap berjalan saat LAN Server Mode aktif:
  *  - createBackup / restoreBackup = service ASLI (format .kdb terenkripsi);
- *  - koperasi.db hasil restore tetap schema v81 (DIPERBARUI 1.0.17; sebelumnya v80) dan dibaca API LAN;
+ *  - koperasi.db hasil restore tetap schema v82 (DIPERBARUI 1.0.19; sebelumnya v81) dan dibaca API LAN;
  *  - kopku-server.db (sesi, audit, log WhatsApp) terpisah dan tidak ikut
  *    tertimpa/terhapus oleh restore.
  */
@@ -39,7 +39,7 @@ test('backup → transaksi LAN → restore → API membaca data hasil restore; s
   await R('backup').restoreBackup(target.uri, K.s.users.admin);
   K.srv.api._statusCache = null;
   const d = await K.R_db();
-  assert.equal((await d.getFirstAsync('SELECT version FROM schema_meta')).version, 81); // DIPERBARUI 1.0.17 / RC-S133.6.2: skema v81
+  assert.equal((await d.getFirstAsync('SELECT version FROM schema_meta')).version, 82); // DIPERBARUI 1.0.19 / RC-S133.6.4: skema v82 (sebelumnya v81)
   const cari = async (nama) => (await A.req('GET', '/api/anggota?cari=' + encodeURIComponent(nama))).body.data.baris.length;
   assert.equal(await cari('Sebelum Backup'), 1);
   assert.equal(await cari('Sesudah Backup'), 0, 'data setelah backup hilang sesuai restore');

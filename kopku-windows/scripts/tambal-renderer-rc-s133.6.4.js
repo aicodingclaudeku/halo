@@ -59,7 +59,10 @@ const PENANDA_DEFAULT = {
   'screens/Pengaturan/RiwayatImportScreen': ['Nama berkas tidak tercatat', 'Log Per Baris'],
   'screens/Laporan/PosisiKeuanganScreen': ['Laporan Posisi Keuangan', 'opsi-saldo-awal-draf'],
   'screens/Laporan/HistoryTransaksiDetailScreen': ['Transaksi tidak ditemukan. Data mungkin sudah dihapus', 'Rincian Jurnal'],
-  'screens/Laporan/KolektibilitasPiutangScreen': ['Batasan Fiskal Cadangan Piutang', 'Rincian per Pinjaman'],
+  // 1.0.19: penanda lama ('Batasan Fiskal…') kini juga ada di ReportTableBuilders; pakai teks khas layar.
+  'screens/Laporan/KolektibilitasPiutangScreen': ['Juklat SOM No. 3/2025 angka 15', 'Cadangan risiko: Lancar'],
+  'screens/Pinjaman/PinjamanDetailScreen': ['Pinjaman tidak ditemukan. Data mungkin sudah dihapus atau ID tidak valid.', 'Batalkan Pinjaman'],
+  'screens/Pinjaman/PinjamanFormScreen': ['Tanggal Pengajuan *', 'Tujuan Pinjaman'],
 };
 const P = bangunPeta(teks, srcLama, PENANDA_DEFAULT);
 if (P.konflik.length) throw new Error('Peta modul bertentangan:\n' + P.konflik.join('\n'));

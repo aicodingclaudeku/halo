@@ -1075,7 +1075,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports,"__esModule", { value: true });
-exports.DATABASE_NAME=void 0;
+exports.KOLOM_PENYELESAIAN_V82=exports.DATABASE_NAME=void 0;
 exports.getSqliteDirectory=getSqliteDirectory;
 exports.getDatabaseFilePath=getDatabaseFilePath;
 exports.configureDatabaseConnection=configureDatabaseConnection;
@@ -1104,6 +1104,7 @@ exports.migrasiV75=migrasiV75;
 exports.cadangkanSebelumMigrasi=cadangkanSebelumMigrasi;
 exports.namaSalinanPraMigrasi=namaSalinanPraMigrasi;
 exports.migrasiV81=migrasiV81;
+exports.migrasiV82=migrasiV82;
 exports.migrasiV74=migrasiV74;
 const SQLite = __importStar(require("expo-sqlite"));
 const FileSystem = __importStar(require("expo-file-system/legacy")); // SDK 54: API lama (documentDirectory, getInfoAsync, dst.) sekarang di path /legacy
@@ -3713,6 +3714,9 @@ async function runMigrations(db) {
             if (currentVersion < 81) {
                 await migrasiV81(db, tambahKolomJikaBelumAda);
             }
+            if (currentVersion < 82) {
+                await migrasiV82(db, tambahKolomJikaBelumAda);
+            }
             // PHASE 2E — versi HANYA dinaikkan di sini, yaitu setelah SELURUH
             // blok migrasi di atas selesai tanpa exception. Kalau ada satu saja
             // yang melempar, baris ini tidak pernah dijalankan: percobaan
@@ -4899,6 +4903,34 @@ async function migrasiV81(db, tambahKolom) {
         await tambahKolom('import_data_awal_riwayat', 'total_dilewati', 'INTEGER NOT NULL DEFAULT 0');
     }
 }
+/**
+ * v82 (RC-S133.6.4) — pencatatan penyelesaian pinjaman ke Pengadilan Negeri /
+ * klaim asuransi (kriteria Macet angka 3 SOM 12.1). ADITIF MURNI & IDEMPOTEN:
+ * enam kolom `penyelesaian_*` pada `pinjaman`, semuanya NULL. Tidak ada baris
+ * yang diubah, tidak ada tabel dibangun ulang, tidak ada jurnal. Salinan
+ * database dibuat lebih dulu oleh `cadangkanSebelumMigrasi`.
+ */
+exports.KOLOM_PENYELESAIAN_V82=[
+    { nama: 'penyelesaian_jalur', tipe: "TEXT CHECK (penyelesaian_jalur IN ('PENGADILAN','ASURANSI'))" },
+    { nama: 'penyelesaian_tanggal', tipe: 'TEXT' },
+    { nama: 'penyelesaian_nomor', tipe: 'TEXT' },
+    { nama: 'penyelesaian_dokumen', tipe: 'TEXT' },
+    { nama: 'penyelesaian_alasan', tipe: 'TEXT' },
+    { nama: 'penyelesaian_oleh', tipe: 'TEXT' },
+];
+async function migrasiV82(db, tambahKolom) {
+    for (const k of exports.KOLOM_PENYELESAIAN_V82) {
+        await tambahKolom('pinjaman', k.nama, k.tipe);
+    }
+    // `tambahKolom` menelan galat (agar aman diulang). Karena versi skema baru
+    // dinaikkan setelah blok ini, pastikan keenam kolom benar-benar ada —
+    // kalau tidak, gagal keras supaya percobaan berikutnya mengulang.
+    const ada = new Set((await db.getAllAsync(`PRAGMA table_info(pinjaman)`)).map((c) => c.name));
+    const hilang = exports.KOLOM_PENYELESAIAN_V82.filter((k) => !ada.has(k.nama)).map((k) => k.nama);
+    if (hilang.length > 0) {
+        throw new Error(`[migrasi v82] kolom pinjaman belum lengkap: ${hilang.join(', ')}.`);
+    }
+}
 async function migrasiV74(db) {
     const ddl = potongDdlTabel(schema_1.CREATE_TABLES_SQL, [
         'import_data_awal_riwayat',
@@ -4991,7 +5023,12 @@ exports.CREATE_TABLES_SQL=exports.SCHEMA_VERSION=void 0;
 // mencegah import ganda walau nama berkas berubah dan melanjutkan import
 // yang gagal sebagian; (b) jejak koreksi transaksi dari History (tabel BARU
 // koreksi_transaksi). Aditif murni; sebelum migrasi dibuat salinan database.
-exports.SCHEMA_VERSION=81;
+// RC-S133.6.4 — v82: pencatatan MANUAL penyelesaian pinjaman ke Pengadilan
+// Negeri / klaim asuransi kredit (kriteria Macet angka 3 SOM 12.1): enam kolom
+// penyelesaian_* pada `pinjaman` (semuanya NULL untuk data lama). Aditif murni
+// lewat ADD COLUMN; sebelum migrasi dibuat salinan database. HP & desktop harus
+// sama-sama v82 (sinkron menolak versi skema berbeda).
+exports.SCHEMA_VERSION=82;
 exports.CREATE_TABLES_SQL=`
 PRAGMA foreign_keys = ON;
 
@@ -5807,7 +5844,20 @@ CREATE TABLE IF NOT EXISTS pinjaman (
   -- (§R/§T, instrumen sudah dihentikan/dilunasi/dihapusbukukan).
   eir_measurement_status TEXT NOT NULL CHECK (eir_measurement_status IN (
     'EIR_NOT_MIGRATED','NOT_APPLICABLE','MEASURED','PENDING_RESTRUCTURING_EIR_REVIEW','DERECOGNIZED'
-  )) DEFAULT 'EIR_NOT_MIGRATED'
+  )) DEFAULT 'EIR_NOT_MIGRATED',
+  -- v82 (RC-S133.6.4) — PENYELESAIAN KE PENGADILAN NEGERI / KLAIM ASURANSI.
+  -- Kriteria Macet angka 3 (SOM 12.1): penyelesaian pinjaman sudah diserahkan
+  -- ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan
+  -- asuransi kredit. Dicatat MANUAL oleh Admin/Pengurus (nomor perkara/klaim
+  -- dan dokumen tidak mungkin ditebak otomatis); setiap pencatatan,
+  -- perubahan, dan pembatalan masuk audit_log. NULL = tidak ada (seluruh
+  -- pinjaman lama). Pencatatan ini TIDAK membuat jurnal.
+  penyelesaian_jalur TEXT CHECK (penyelesaian_jalur IN ('PENGADILAN','ASURANSI')),
+  penyelesaian_tanggal TEXT,          -- tanggal diserahkan / diajukan (YYYY-MM-DD); Macet berlaku sejak tanggal ini
+  penyelesaian_nomor TEXT,            -- nomor perkara (PENGADILAN) / nomor klaim (ASURANSI)
+  penyelesaian_dokumen TEXT,          -- dokumen bukti (mis. nomor/nama surat gugatan, surat klaim)
+  penyelesaian_alasan TEXT,           -- keterangan / alasan pencatatan
+  penyelesaian_oleh TEXT              -- app_user.id pencatat terakhir (tanpa FK: jejak peristiwa)
 );
 
 -- ============================================================
@@ -9997,7 +10047,7 @@ __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{v
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.toTanggalLokal=n,e.getTanggalLokalHariIni=o,e.getPeriodeLokalSekarang=function(){return o().slice(0,7)};var t=r(d[0]);function n(t){return`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`}function o(){return n((0,t.getWaktuSekarang)())}},918,[882]);
 __d(function(g,r,i,_a,m,_e,d){"use strict";function e(e){return e&&e.__esModule?e:{default:e}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return _}});var t=r(d[0]),a=e(r(d[1])),o=e(r(d[2])),n=e(r(d[3])),l=e(r(d[4])),s=e(r(d[5])),c=e(r(d[6])),u=e(r(d[7])),f=r(d[8]),p=r(d[9]),h=r(d[10]),b=r(d[11]),x=r(d[12]),y=e(r(d[13])),k=e(r(d[14])),j=r(d[15]),C=r(d[16]),T=r(d[17]),v=r(d[18]),A=r(d[19]);const S=[{value:null,label:'Semua'},{value:'AKTIF',label:'Aktif'},{value:'TIDAK_AKTIF',label:'Tidak Aktif'},{value:'KELUAR',label:'Keluar'},{value:'MENINGGAL',label:'Meninggal'}];function _(){const e=(0,j.useSafeAreaInsets)(),u=(0,p.useNavigation)(),_=(0,b.useAppStore)(e=>e.koperasi),[I,w]=(0,t.useState)(''),[L,R]=(0,t.useState)(null),[W,M]=(0,t.useState)([]),[D,B]=(0,t.useState)(!0),[H,U]=(0,t.useState)(null),O=(0,t.useCallback)(async(e,t)=>{B(!0),U(null);try{const a=await(0,h.listAnggota)({search:e,status:t??void 0,semuaData:!0});M(a)}catch(e){U(e instanceof Error?e.message:'Gagal memuat data anggota.')}finally{B(!1)}},[]);(0,t.useEffect)(()=>{const e=setTimeout(()=>O(I,L),250);return()=>clearTimeout(e)},[I,L,O]),(0,t.useEffect)(()=>u.addListener('focus',()=>O(I,L)),[u,O,I,L]);const E=(0,v.ringkasDaftarAnggota)(W.map(e=>e.status));return(0,t.useLayoutEffect)(()=>{u.setOptions({headerRight:()=>(0,A.jsx)(y.default,{variant:"header",data:_&&W.length>0?(0,x.buildDaftarAnggotaExport)({namaKoperasi:_.nama,standarAkuntansi:_.standarAkuntansi},W,(0,T.getTanggalLokalHariIni)()):null})})},[u,_,W]),(0,A.jsxs)(a.default,{style:z.container,children:[(0,A.jsxs)(a.default,{style:z.kop,children:[(0,A.jsx)(o.default,{style:z.kopJudul,children:v.JUDUL_MODUL_ANGGOTA}),(0,A.jsx)(o.default,{style:z.kopSub,children:v.SUBJUDUL_MODUL_ANGGOTA}),!D&&!H&&(0,A.jsx)(o.default,{style:z.kopHitung,children:E.teks})]}),(0,A.jsxs)(a.default,{style:z.alatBaris,children:[(0,A.jsx)(k.default,{wrapStyle:z.search,placeholder:"Cari nama, nomor anggota, atau NIK...",value:I,onChangeText:w}),(0,A.jsx)(l.default,{horizontal:!0,showsHorizontalScrollIndicator:!1,contentContainerStyle:z.filterRow,keyboardShouldPersistTaps:"handled",children:S.map(e=>(0,A.jsx)(s.default,{style:[z.filterChip,L===e.value&&z.filterChipActive],onPress:()=>R(e.value),accessibilityRole:"button",accessibilityState:{selected:L===e.value},children:(0,A.jsx)(o.default,{style:[z.filterChipText,L===e.value&&z.filterChipTextActive],children:e.label})},e.label))})]}),D&&(0,A.jsx)(c.default,{style:z.center}),!D&&H&&(0,A.jsxs)(a.default,{style:z.center,children:[(0,A.jsx)(f.Ionicons,{name:"cloud-offline-outline",size:32,color:C.colors.danger}),(0,A.jsx)(o.default,{style:z.errorText,children:H}),(0,A.jsx)(s.default,{onPress:()=>O(I,L),accessibilityRole:"button",children:(0,A.jsx)(o.default,{style:z.retry,children:"Coba lagi"})})]}),!D&&!H&&0===W.length&&(0,A.jsxs)(a.default,{style:z.center,children:[(0,A.jsx)(f.Ionicons,{name:"people-outline",size:32,color:C.colors.textMuted}),(0,A.jsx)(o.default,{style:z.emptyJudul,children:"Belum ada anggota"}),(0,A.jsx)(o.default,{style:z.emptyText,children:I.trim()||L?'Tidak ada yang cocok dengan pencarian atau penyaring ini.':'Tekan tombol + di pojok kanan bawah untuk menambah anggota baru.'})]}),!D&&!H&&W.length>0&&(0,A.jsx)(n.default,{data:W,keyExtractor:e=>e.id,contentContainerStyle:z.daftar,renderItem:({item:e,index:t})=>{const n=(0,v.nadaStatusAnggota)(e.status);return(0,A.jsxs)(s.default,{style:z.kartu,onPress:()=>u.navigate('AnggotaDetail',{anggotaId:e.id}),accessibilityRole:"button",children:[(0,A.jsx)(o.default,{style:z.nomorUrut,children:t+1}),(0,A.jsx)(a.default,{style:[z.avatar,z[`avatar_${n}`]],children:(0,A.jsx)(o.default,{style:z.avatarTeks,children:(0,v.inisialNama)(e.namaLengkap)})}),(0,A.jsxs)(a.default,{style:z.rowIsi,children:[(0,A.jsx)(o.default,{style:z.nama,numberOfLines:1,children:e.namaLengkap}),(0,A.jsx)(o.default,{style:z.sub,numberOfLines:1,children:e.nomorAnggota})]}),(0,A.jsx)(a.default,{style:[z.lencana,z[`lencana_${n}`]],children:(0,A.jsx)(o.default,{style:[z.lencanaTeks,z[`lencanaTeks_${n}`]],children:(0,v.labelStatusAnggota)(e.status)})}),(0,A.jsx)(f.Ionicons,{name:"chevron-forward",size:16,color:C.colors.textMuted})]})}}),(0,A.jsx)(s.default,{style:[z.fab,{bottom:24+e.bottom}],onPress:()=>u.navigate('AnggotaForm'),accessibilityLabel:"Tambah Anggota",accessibilityRole:"button",children:(0,A.jsx)(f.Ionicons,{name:"add",size:28,color:C.colors.white})})]})}const z=u.default.create({container:{flex:1,backgroundColor:C.colors.background},kop:{backgroundColor:C.colors.surface,borderBottomWidth:1,borderBottomColor:C.colors.border,paddingHorizontal:C.spacing.lg,paddingVertical:C.spacing.md},kopJudul:{fontSize:15,fontWeight:'800',color:C.colors.primary,letterSpacing:.3},kopSub:{fontSize:11.5,color:C.colors.textMuted,lineHeight:17,marginTop:4},kopHitung:{fontSize:11.5,color:C.colors.text,fontWeight:'700',marginTop:C.spacing.sm},alatBaris:{paddingLeft:C.spacing.md,paddingTop:C.spacing.md,gap:C.spacing.sm},search:{marginRight:C.spacing.md},filterRow:{flexDirection:'row',gap:8,paddingRight:C.spacing.md},filterChip:{paddingHorizontal:C.spacing.md,paddingVertical:6,borderRadius:C.radius.pill,borderWidth:1,borderColor:C.colors.border,backgroundColor:C.colors.surface},filterChipActive:{backgroundColor:C.colors.primary,borderColor:C.colors.primary},filterChipText:{fontSize:12,color:C.colors.text,fontWeight:'600'},filterChipTextActive:{color:C.colors.white},center:{flex:1,alignItems:'center',justifyContent:'center',padding:C.spacing.xl,gap:C.spacing.sm},errorText:{color:C.colors.danger,textAlign:'center'},retry:{color:C.colors.primary,fontWeight:'700'},emptyJudul:{fontSize:14,fontWeight:'700',color:C.colors.text},emptyText:{color:C.colors.textMuted,textAlign:'center',lineHeight:18},daftar:{padding:C.spacing.md,paddingBottom:96},kartu:{flexDirection:'row',alignItems:'center',gap:10,backgroundColor:C.colors.surface,borderWidth:1,borderColor:C.colors.border,borderRadius:C.radius.md,paddingVertical:10,paddingHorizontal:C.spacing.md,marginBottom:C.spacing.sm},nomorUrut:{minWidth:28,textAlign:'center',fontSize:12,fontWeight:'700',color:C.colors.textMuted,fontVariant:['tabular-nums']},avatar:{width:36,height:36,borderRadius:18,alignItems:'center',justifyContent:'center'},avatar_aktif:{backgroundColor:C.colors.primary},avatar_netral:{backgroundColor:C.colors.textMuted},avatar_peringatan:{backgroundColor:C.colors.warning},avatar_berhenti:{backgroundColor:C.colors.danger},avatarTeks:{fontSize:13,fontWeight:'800',color:C.colors.white},rowIsi:{flex:1,minWidth:0},nama:{fontSize:14.5,fontWeight:'700',color:C.colors.text},sub:{fontSize:12,color:C.colors.textMuted,marginTop:2,fontVariant:['tabular-nums']},lencana:{paddingHorizontal:8,paddingVertical:3,borderRadius:C.radius.pill},lencana_aktif:{backgroundColor:C.colors.primaryLight},lencana_netral:{backgroundColor:C.colors.background,borderWidth:1,borderColor:C.colors.border},lencana_peringatan:{backgroundColor:C.colors.warningBg},lencana_berhenti:{backgroundColor:C.colors.dangerBg},lencanaTeks:{fontSize:10,fontWeight:'800'},lencanaTeks_aktif:{color:C.colors.primary},lencanaTeks_netral:{color:C.colors.textMuted},lencanaTeks_peringatan:{color:C.colors.warning},lencanaTeks_berhenti:{color:C.colors.danger},fab:{position:'absolute',right:20,bottom:24,width:56,height:56,borderRadius:28,backgroundColor:C.colors.primary,alignItems:'center',justifyContent:'center',elevation:4}})},919,[11,81,232,279,287,477,475,19,678,119,920,794,921,931,954,13,772,918,955,6]);
 __d(function(g,_r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.listAnggota=async function(n={}){const t=await(0,a.getDb)(),s=[],r=[];if(n.search){s.push('(nama_lengkap LIKE ? OR nomor_anggota LIKE ? OR nik LIKE ?)');const a=`%${n.search}%`;r.push(a,a,a)}n.status&&(s.push('status = ?'),r.push(n.status));const u=s.length?`WHERE ${s.join(' AND ')}`:'';if(n.semuaData){return(await t.getAllAsync(`SELECT * FROM anggota ${u} ORDER BY nama_lengkap ASC`,...r)).map(o)}const l=n.limit??50,c=n.offset??0;return(await t.getAllAsync(`SELECT * FROM anggota ${u} ORDER BY nama_lengkap ASC LIMIT ? OFFSET ?`,...r,l,c)).map(o)},e.getAnggotaById=async function(n){const t=await(0,a.getDb)(),s=await t.getFirstAsync('SELECT * FROM anggota WHERE id = ?',n);return s?o(s):null},e.createAnggota=async function(o,r){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,o,'anggota','create');const u=(0,n.newId)(),c=await l(a),E=(new Date).toISOString();return await a.runAsync("INSERT INTO anggota\n        (id, nomor_anggota, nik, nama_lengkap, jenis_kelamin, tempat_lahir, tanggal_lahir, alamat,\n         nomor_hp, pekerjaan, tanggal_bergabung, status, foto_uri, catatan, created_at, updated_at)\n       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",u,c,r.nik??null,r.namaLengkap,r.jenisKelamin??null,r.tempatLahir??null,r.tanggalLahir??null,r.alamat??null,r.nomorHp??null,r.pekerjaan??null,r.tanggalBergabung,r.status??'AKTIF',r.fotoUri??null,r.catatan??null,E,E),await s(a,o,'CREATE',u,{nomorAnggota:c,namaLengkap:r.namaLengkap}),Object.assign({id:u,nomorAnggota:c,status:r.status??'AKTIF'},r)})},e.updateAnggotaStatus=async function(n,o,r){const u=await(0,a.getDb)();await(0,t.requirePermission)(u,n,'anggota','edit'),await u.runAsync('UPDATE anggota SET status = ?, updated_at = ? WHERE id = ?',r,(new Date).toISOString(),o),await s(u,n,'UPDATE',o,{status:r})},e.updateAnggota=async function(n,o,r){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,n,'anggota','edit'),await a.runAsync("UPDATE anggota SET\n         nik = ?, nama_lengkap = ?, jenis_kelamin = ?, tempat_lahir = ?, tanggal_lahir = ?,\n         alamat = ?, nomor_hp = ?, pekerjaan = ?, tanggal_bergabung = ?, status = ?,\n         foto_uri = ?, catatan = ?, updated_at = ?\n       WHERE id = ?",r.nik??null,r.namaLengkap,r.jenisKelamin??null,r.tempatLahir??null,r.tanggalLahir??null,r.alamat??null,r.nomorHp??null,r.pekerjaan??null,r.tanggalBergabung,r.status,r.fotoUri??null,r.catatan??null,(new Date).toISOString(),o),await s(a,n,'UPDATE',o,{namaLengkap:r.namaLengkap,status:r.status})})},e.deleteAnggota=async function(n,o){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,n,'anggota','edit');const r=await a.getFirstAsync('SELECT COUNT(*) as cnt FROM simpanan_transaksi WHERE anggota_id = ?',o),u=await a.getFirstAsync('SELECT COUNT(*) as cnt FROM pinjaman WHERE anggota_id = ?',o);if((r?.cnt??0)>0||(u?.cnt??0)>0)throw new Error('Anggota ini sudah mempunyai transaksi simpanan/pinjaman dan tidak bisa dihapus. Ubah status menjadi "Keluar" atau "Tidak Aktif" sebagai gantinya.');const l=await a.getFirstAsync('SELECT username FROM app_user WHERE anggota_id = ? LIMIT 1',o);if(l)throw new Error(`Anggota ini ditautkan ke akun login "${l.username}". Ubah atau nonaktifkan akun itu di Pengaturan \u203a User Management sebelum menghapus anggota.`);await a.runAsync('DELETE FROM anggota WHERE id = ?',o),await s(a,n,'DELETE',o)})},e.getHistoriTransaksiAnggota=async function(n,t={}){const s=await(0,a.getDb)(),o=t.limit??50,r=t.offset??0,u=await s.getAllAsync("SELECT id, tanggal, jenis, tipe, nominal, nomor_transaksi\n     FROM simpanan_transaksi WHERE anggota_id = ? ORDER BY tanggal DESC LIMIT ? OFFSET ?",n,o,r),l=await s.getAllAsync("SELECT ap.id, ap.tanggal, p.nomor_pinjaman, ap.nominal, aj.nomor_angsuran\n     FROM angsuran_pembayaran ap\n     JOIN pinjaman p ON p.id = ap.pinjaman_id\n     LEFT JOIN angsuran_jadwal aj ON aj.id = ap.jadwal_id\n     WHERE p.anggota_id = ? ORDER BY ap.tanggal DESC LIMIT ? OFFSET ?",n,o,r);return[...u.map(a=>({id:a.id,tanggal:a.tanggal,jenis:`Simpanan ${a.jenis}`,tipe:a.tipe,nominal:a.nominal,nomorReferensi:a.nomor_transaksi})),...l.map(a=>({id:a.id,tanggal:a.tanggal,jenis:'Angsuran Pinjaman',tipe:`Angsuran ke-${a.nomor_angsuran??'-'}`,nominal:a.nominal,nomorReferensi:a.nomor_pinjaman}))].sort((a,n)=>a.tanggal<n.tanggal?1:-1).slice(0,o)};var a=_r(d[0]),n=_r(d[1]),t=_r(d[2]);async function s(a,t,s,o,r){const u=new Date;await a.runAsync("INSERT INTO audit_log (id, user_id, tanggal, waktu, action, entity, entity_id, data_sesudah, created_at)\n     VALUES (?,?,?,?,?,?,?,?,?)",(0,n.newId)(),t,u.toISOString().slice(0,10),u.toISOString().slice(11,19),s,'anggota',o,r?JSON.stringify(r):null,u.toISOString())}function o(a){return{id:a.id,nomorAnggota:a.nomor_anggota,nik:a.nik,namaLengkap:a.nama_lengkap,jenisKelamin:a.jenis_kelamin??null,tempatLahir:a.tempat_lahir,tanggalLahir:a.tanggal_lahir,alamat:a.alamat,nomorHp:a.nomor_hp,pekerjaan:a.pekerjaan,tanggalBergabung:a.tanggal_bergabung,status:a.status,fotoUri:a.foto_uri,catatan:a.catatan}}const r='A',u=5;async function l(a){const n=await a.getFirstAsync("SELECT MAX(CAST(SUBSTR(nomor_anggota, LENGTH(?) + 1) AS INTEGER)) as maxNum\n     FROM anggota WHERE nomor_anggota GLOB ?",r,`${r}[0-9]*`),t=n?.maxNum??0,s='ANGGOTA';await a.runAsync("INSERT INTO sequence_counter (seq_key, last_value) VALUES (?, ?)\n     ON CONFLICT(seq_key) DO UPDATE SET last_value = MAX(sequence_counter.last_value, excluded.last_value)",s,t),await a.runAsync("UPDATE sequence_counter SET last_value = last_value + 1 WHERE seq_key = ?",s);const o=await a.getFirstAsync("SELECT last_value FROM sequence_counter WHERE seq_key = ?",s),l=(o?.last_value??t+1).toString().padStart(u,'0');return`${r}${l}`}},920,[778,785,828]);
-__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/utils/money":return _$r(910);case "@/reports/KomposisiPendapatanLhu":return _$r(922);case "@/reports/LpeaPlan":return _$r(923);case "@/config/ociPolicy":return _$r(924);case "@/services/KolektibilitasSomService":return _$r(925);case "@/utils/tanggal":return _$r(918);case "@/utils/reportPeriod":return _$r(926);case "@/utils/rentangHistori":return _$r(927);case "./JuklatPdf":return _$r(928);case "@/reports/UrutanPenyajianPosisiKeuangan":return _$r(930);case "@/reports/ArusKasJuklat":return _$r(929);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/utils/money":return _$r(910);case "@/reports/KomposisiPendapatanLhu":return _$r(922);case "@/reports/LpeaPlan":return _$r(923);case "@/config/ociPolicy":return _$r(924);case "@/accounting/PenyelesaianPinjaman":return _$r(9018);case "@/services/KolektibilitasSomService":return _$r(925);case "@/utils/tanggal":return _$r(918);case "@/utils/reportPeriod":return _$r(926);case "@/utils/rentangHistori":return _$r(927);case "./JuklatPdf":return _$r(928);case "@/reports/UrutanPenyajianPosisiKeuangan":return _$r(930);case "@/reports/ArusKasJuklat":return _$r(929);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
 exports.buildDaftarAnggotaExport=buildDaftarAnggotaExport;
@@ -10040,6 +10090,7 @@ const KomposisiPendapatanLhu_1 = require("@/reports/KomposisiPendapatanLhu");
 // value ke builder export — pola yang sama dengan KolektibilitasSomService.
 const LpeaPlan_1 = require("@/reports/LpeaPlan");
 const ociPolicy_1 = require("@/config/ociPolicy");
+const PenyelesaianPinjaman_1 = require("@/accounting/PenyelesaianPinjaman");
 // KolektibilitasSomService adalah mesin aturan MURNI (tidak mengimpor
 // `@/database/db` maupun `expo-sqlite`), jadi label & urutan kategorinya
 // BOLEH diimpor sebagai value ke builder export — tidak seperti
@@ -11630,6 +11681,12 @@ function buildKolektibilitasExport(info, periodeLabel, daftar, opsi = {}) {
     const rasioBermasalah = totalOutstanding > 0 ? (outstandingBermasalah / totalOutstanding) * 100 : 0;
     const totalCadanganFiskal = adaFiskal ? jumlah(daftar, (d) => d.cadanganFiskal ?? 0) : 0;
     const totalDasarFiskal = adaFiskal ? jumlah(daftar, (d) => d.dasarPencadanganFiskal ?? 0) : 0;
+    // v82 (RC-S133.6.4) — pinjaman Macet karena kriteria angka 3 (penyelesaian dicatat manual).
+    const macetAngka3 = daftar.filter((d) => d.penyelesaianBerlaku && d.penyelesaianJalur);
+    const jumlahMacetAngka3 = macetAngka3.length;
+    const rujukanMacetAngka3 = macetAngka3
+        .map((d) => `${d.nomorPinjaman} (${(0, PenyelesaianPinjaman_1.ringkasPenyelesaian)({ jalur: d.penyelesaianJalur, nomor: d.penyelesaianNomor, tanggal: d.penyelesaianTanggal })})`)
+        .join('; ');
     // ---- Ringkasan datar (tetap, untuk konsumen lama) ----
     const ringkasan = KATEGORI_URUT.map((kat) => {
         const items = daftar.filter((d) => d.kolektibilitas === kat);
@@ -11823,7 +11880,13 @@ function buildKolektibilitasExport(info, periodeLabel, daftar, opsi = {}) {
             },
             {
                 label: 'Kriteria Macet angka 3',
-                nilai: 'Penyerahan ke Pengadilan Negeri / klaim asuransi kredit belum tercatat di aplikasi, sehingga kriteria ini belum diterapkan; penggolongan Macet memakai kriteria lain.',
+                // v82 (RC-S133.6.4): kriteria ini dapat dicatat manual (Detail Pinjaman,
+                // Admin/Pengurus) dan dipakai penggolongan sejak tanggal pencatatan.
+                nilai: 'Penyerahan ke Pengadilan Negeri / klaim asuransi kredit dicatat manual oleh Admin/Pengurus di Detail Pinjaman (nomor perkara/klaim dan dokumen); ' +
+                    'pinjaman yang tercatat digolongkan Macet sejak tanggal pencatatan. ' +
+                    (jumlahMacetAngka3 > 0
+                        ? `Pada laporan ini ${jumlahMacetAngka3} pinjaman digolongkan Macet karena kriteria ini: ${rujukanMacetAngka3}.`
+                        : 'Pada laporan ini tidak ada pinjaman yang tercatat memenuhi kriteria ini.'),
             },
             { label: 'Basis nilai', nilai: 'Penyisihan & batas fiskal dihitung atas saldo pokok (outstanding); saldo piutang ditampilkan sebagai pembanding.' },
         ],
@@ -11981,11 +12044,335 @@ function buildUtangExport(info, daftar) {
     };
 }
 
-},921,[910,922,923,924,925,918,926,927,928,930,929]);
+},921,[910,922,923,924,9018,925,918,926,927,928,930,929]);
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.hitungKomposisiPendapatanLhu=function(n,t){const s=n+t;if(s<=0)return{totalPendapatanDasar:s,persenPartisipasiAnggota:null,persenHasilInvestasi:null};const o=n=>Math.round(n/s*1e3)/10;return{totalPendapatanDasar:s,persenPartisipasiAnggota:o(n),persenHasilInvestasi:o(t)}},e.formatPersenKomposisi=function(n){return null===n?'\u2014':`${n.toFixed(1).replace('.',',')}%`}},922,[]);
 __d(function(g,r,i,a,m,_e,d){"use strict";Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"URUTAN_KOMPONEN_PEA",{enumerable:!0,get:function(){return A}}),Object.defineProperty(_e,"LABEL_KOMPONEN_PEA",{enumerable:!0,get:function(){return s}}),Object.defineProperty(_e,"HURUF_BUKU_PEMBANTU",{enumerable:!0,get:function(){return o}}),Object.defineProperty(_e,"LABEL_KELOMPOK_PEA",{enumerable:!0,get:function(){return l}}),Object.defineProperty(_e,"KELOMPOK_DARI_KOMPONEN",{enumerable:!0,get:function(){return P}}),Object.defineProperty(_e,"ARAH_SELISIH",{enumerable:!0,get:function(){return N}}),Object.defineProperty(_e,"HARI_PER_BULAN_PRORATA",{enumerable:!0,get:function(){return b}}),_e.hitungPeaBaris=_,_e.hitungPeaKomponen=p,Object.defineProperty(_e,"MINGGU_PER_BULAN_PRORATA",{enumerable:!0,get:function(){return f}}),_e.tarifPinjamanKePerBulan=function(n,e){switch(e){case'BULAN':return n;case'MINGGU':return n*f;case'HARI':return n*b;default:throw new Error(`[LPEA] Satuan tenor '${e}' belum punya konversi ke per bulan.`)}},_e.tarifTahunanKePerBulan=function(n){return n/12},_e.parameterLpeaKosong=function(n){return{tahunBuku:n,tarifLuarJasaPinjaman:null,tarifLuarJasaProvisi:null,tarifLuarTabungan:null,tarifLuarSimpananBerjangka:null,tarifKoperasiJasaProvisi:null,tarifKoperasiTabungan:null,sumberAcuan:null,diperbaruiPada:null}},Object.defineProperty(_e,"PARAMETER_DIBUTUHKAN",{enumerable:!0,get:function(){return I}}),Object.defineProperty(_e,"LABEL_PARAMETER_LPEA",{enumerable:!0,get:function(){return S}}),_e.parameterKurang=B,_e.susunHasilKomponen=function(n,e,A,l){const N=B(n,A),b=(0,u.roundToRupiah)(e.reduce((n,e)=>n.plus(e.basis),new t.default(0))),_={komponen:n,huruf:o[n],label:s[n],kelompok:P[n],totalBasis:b,jumlahBaris:e.length,parameterKurang:N,tarifLuarPersenPerBulan:c(n,A),tarifKoperasiPersenPerBulan:l};return N.length>0?Object.assign({},_,{status:'BELUM_DAPAT_DIHITUNG',nilai:0}):0===e.length?Object.assign({},_,{status:'TIDAK_ADA_TRANSAKSI',nilai:0}):Object.assign({},_,{status:'DIHITUNG',nilai:p(n,e)})},_e.tarifLuarUntuk=c,_e.rakitLaporanLpea=function(n){const{komponen:e,bagianShu:t}=n,u=n=>e.filter(e=>e.kelompok===n&&'DIHITUNG'===e.status).reduce((n,e)=>n+e.nilai,0),A=u('PENGHEMATAN_BEBAN_PINJAMAN'),s=u('KELEBIHAN_BALAS_JASA_SIMPANAN'),o=A+s,l=t.sudahDibagikan?t.totalBagianAnggota:0,P=e.filter(n=>'BELUM_DAPAT_DIHITUNG'===n.status),N=[];for(const n of P){const e=n.parameterKurang.map(n=>S[n]??String(n)).join(', ');N.push(`${n.label} (buku pembantu ${n.huruf}) belum dapat dihitung \u2014 parameter belum diisi: ${e}.`)}t.sudahDibagikan||N.push(`Pembagian SHU tahun buku ${t.tahunBuku} belum diproses, sehingga belum ada manfaat pembagian SHU yang boleh dilaporkan. SHU yang baru dihitung atau baru disahkan RAT TIDAK dihitung sebagai manfaat ekonomi anggota.`);return Object.assign({},n,{subtotalPenghematanBebanPinjaman:A,subtotalKelebihanBalasJasaSimpanan:s,jumlahPeaPelayanan:o,jumlahPeaAnggota:o+l,totalBelumLengkap:P.length>0,keterbatasan:N})},Object.defineProperty(_e,"LABEL_STATUS_KOMPONEN",{enumerable:!0,get:function(){return k}}),Object.defineProperty(_e,"KETERBATASAN_STRUKTURAL",{enumerable:!0,get:function(){return E}});var n,e=r(d[0]),t=(n=e)&&n.__esModule?n:{default:n},u=r(d[1]);const A=['JASA_PINJAMAN','JASA_PROVISI','TABUNGAN','SIMPANAN_BERJANGKA'],s={JASA_PINJAMAN:'Partisipasi jasa pinjaman',JASA_PROVISI:'Partisipasi jasa provisi',TABUNGAN:'Partisipasi tabungan',SIMPANAN_BERJANGKA:'Partisipasi simpanan berjangka'},o={JASA_PINJAMAN:'A',JASA_PROVISI:'B',TABUNGAN:'C',SIMPANAN_BERJANGKA:'D'},l={PENGHEMATAN_BEBAN_PINJAMAN:'Penghematan Beban Pinjaman Anggota',KELEBIHAN_BALAS_JASA_SIMPANAN:'Kelebihan Balas Jasa Simpanan Anggota'},P={JASA_PINJAMAN:'PENGHEMATAN_BEBAN_PINJAMAN',JASA_PROVISI:'PENGHEMATAN_BEBAN_PINJAMAN',TABUNGAN:'KELEBIHAN_BALAS_JASA_SIMPANAN',SIMPANAN_BERJANGKA:'KELEBIHAN_BALAS_JASA_SIMPANAN'},N={JASA_PINJAMAN:'LUAR_MINUS_KOPERASI',JASA_PROVISI:'LUAR_MINUS_KOPERASI',TABUNGAN:'KOPERASI_MINUS_LUAR',SIMPANAN_BERJANGKA:'KOPERASI_MINUS_LUAR'},b=30;function _(n,e){const u=new t.default(e.tarifKoperasiPersenPerBulan),A=new t.default(e.tarifLuarPersenPerBulan);let s=('LUAR_MINUS_KOPERASI'===N[n]?A.minus(u):u.minus(A)).div(100).mul(e.basis);return void 0!==e.hariProrata&&(s=s.mul(e.hariProrata).div(b)),s}function p(n,e){const A=e.reduce((e,t)=>e.plus(_(n,t)),new t.default(0));return(0,u.roundToRupiah)(A)}const f=4;const I={JASA_PINJAMAN:['tarifLuarJasaPinjaman'],JASA_PROVISI:['tarifLuarJasaProvisi','tarifKoperasiJasaProvisi'],TABUNGAN:['tarifLuarTabungan','tarifKoperasiTabungan'],SIMPANAN_BERJANGKA:['tarifLuarSimpananBerjangka']},S={tarifLuarJasaPinjaman:'Jasa pinjaman rata-rata di lembaga keuangan lain',tarifLuarJasaProvisi:'Provisi rata-rata di lembaga keuangan lain',tarifLuarTabungan:'Bunga tabungan rata-rata di lembaga keuangan lain',tarifLuarSimpananBerjangka:'Bunga simpanan berjangka rata-rata di lembaga keuangan lain',tarifKoperasiJasaProvisi:'Provisi yang dipungut koperasi',tarifKoperasiTabungan:'Bunga tabungan yang diberikan koperasi'};function B(n,e){return I[n].filter(n=>{const t=e[n];return null==t||!Number.isFinite(t)})}function c(n,e){switch(n){case'JASA_PINJAMAN':return e.tarifLuarJasaPinjaman;case'JASA_PROVISI':return e.tarifLuarJasaProvisi;case'TABUNGAN':return e.tarifLuarTabungan;case'SIMPANAN_BERJANGKA':return e.tarifLuarSimpananBerjangka}}const k={DIHITUNG:'Dihitung',BELUM_DAPAT_DIHITUNG:'Belum dapat dihitung',TIDAK_ADA_TRANSAKSI:'Tidak ada transaksi'},E=['Aplikasi tidak memungut provisi pinjaman, sehingga tarif provisi koperasi harus diisi manual bila koperasi memungutnya di luar aplikasi.','Simpanan pokok/wajib/sukarela pada aplikasi ini tidak berbunga, sehingga bunga tabungan yang diberikan koperasi harus diisi manual bila koperasi memberikannya.','Basis tabungan memakai saldo simpanan sukarela pada akhir periode; naskah memakai metode saldo terendah, yang memerlukan pencatatan saldo harian.','Manfaat lain menurut butir 5.8 angka 4 huruf d (mis. biaya transaksi kredit yang murah, persyaratan kredit yang ringan) bersifat kualitatif dan tidak dikuantifikasi di laporan ini.']},923,[911,910]);
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"SUMBER_JURNAL_REVALUASI_ASET_TETAP",{enumerable:!0,get:function(){return t}}),Object.defineProperty(e,"SUMBER_JURNAL_OCI",{enumerable:!0,get:function(){return n}}),Object.defineProperty(e,"KODE_AKUN_SURPLUS_REVALUASI",{enumerable:!0,get:function(){return u}}),Object.defineProperty(e,"AKUN_OCI",{enumerable:!0,get:function(){return A}}),Object.defineProperty(e,"LABEL_KELOMPOK_OCI",{enumerable:!0,get:function(){return o}});const t='REVALUASI_ASET_TETAP',n=[t],u='3-6000',A=[{kode:u,labelLaporan:'Surplus revaluasi aset tetap',kelompok:'TIDAK_DIREKLASIFIKASI'}],o={TIDAK_DIREKLASIFIKASI:'Pos yang tidak akan direklasifikasi ke laba rugi',DIREKLASIFIKASI:'Pos yang akan direklasifikasi ke laba rugi'}},924,[]);
-__d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"KOLEKTIBILITAS_SOM_URUT",{enumerable:!0,get:function(){return t}}),Object.defineProperty(e,"LABEL_KOLEKTIBILITAS_SOM",{enumerable:!0,get:function(){return u}}),Object.defineProperty(e,"KATEGORI_BERMASALAH_SOM",{enumerable:!0,get:function(){return A}}),e.isPinjamanBermasalah=function(n){return A.includes(n)},Object.defineProperty(e,"PERSENTASE_PENYISIHAN_SOM",{enumerable:!0,get:function(){return s}}),Object.defineProperty(e,"RASIO_ANGSURAN_MINIMUM_DIRAGUKAN",{enumerable:!0,get:function(){return o}}),Object.defineProperty(e,"RASIO_AGUNAN_MINIMUM_DIRAGUKAN",{enumerable:!0,get:function(){return l}}),Object.defineProperty(e,"BULAN_DIRAGUKAN_MENJADI_MACET",{enumerable:!0,get:function(){return k}}),Object.defineProperty(e,"AMBANG_SOM",{enumerable:!0,get:function(){return M}}),Object.defineProperty(e,"AMBANG_SOM_TANPA_ANGSURAN",{enumerable:!0,get:function(){return N}}),e.kelompokMasaAngsuran=b,e.masaAngsuranBulanDariSatuanTenor=function(n){return'HARI'===n?.03333333333333333:'MINGGU'===n?.23333333333333334:1},e.bulanPenuhAntara=function(n,t){const u=new Date(`${n}T00:00:00`),A=new Date(`${t}T00:00:00`);if(Number.isNaN(u.getTime())||Number.isNaN(A.getTime()))return 0;if(A<=u)return 0;let s=12*(A.getFullYear()-u.getFullYear())+(A.getMonth()-u.getMonth());A.getDate()<u.getDate()&&(s-=1);return Math.max(0,s)},e.klasifikasikanSom=function(n){const t=b(n.masaAngsuranBulan),u=Math.max(0,n.angsuranTerbayar),A=Math.max(0,n.totalKewajibanKontraktual),c=Math.max(0,n.nilaiAgunan),h=Math.max(0,n.sisaUtang),_=A>0?u/A*100:0,f=h>0?c/h*100:0,p=(n,u,A=0)=>({kategori:n,persentasePenyisihan:s[n],kelompokMasaAngsuran:t,rasioAngsuranPersen:_,rasioAgunanPersen:f,bulanSejakDiragukan:A,dasarPenggolongan:u});if(n.diserahkanKePengadilanAtauAsuransi)return p('MACET','Macet \u2014 penyelesaian sudah diserahkan ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan asuransi kredit (SOM 12.1 kriteria Macet angka 3).');let L,T,R;if('TANPA_ANGSURAN'===n.polaPengembalian)if(n.sudahJatuhTempo){const t=Math.max(0,Math.floor(n.bulanSejakJatuhTempo));T=N.setelahJatuhTempoBatasAtasBulan,L=t<=T?1:2,R=`pinjaman tanpa angsuran sudah jatuh tempo ${t} bulan dan belum dibayar`}else{const t=Math.max(0,Math.floor(n.bulanTunggakanJasa));T=N.jasaBatasAtasBulan,L=B(t,N.jasaLewatBulan,T),R=`pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${t} bulan`}else{const u=M[t],A=Math.max(0,Math.floor(n.bulanTunggakanPokok)),s=Math.max(0,Math.floor(n.bulanTunggakanJasa)),o=B(A,u.pokokLewatBulan,u.pokokBatasAtasBulan),l=B(s,u.jasaLewatBulan,u.jasaBatasAtasBulan);l>o?(L=l,T=u.jasaBatasAtasBulan,R=`tunggakan bunga ${s} bulan`):(L=o,T=u.pokokBatasAtasBulan,R=`tunggakan pokok ${A} bulan`)}if(0===L)return p('LANCAR',`Lancar \u2014 ${R}, belum melampaui ambang Kurang Lancar.`);if(1===L)return p('KURANG_LANCAR',`Kurang Lancar \u2014 ${R} (ambang Kurang Lancar SOM untuk masa angsuran ini).`);const U='TANPA_ANGSURAN'===n.polaPengembalian&&n.sudahJatuhTempo?Math.max(0,Math.floor(n.bulanSejakJatuhTempo)):Math.max(Math.floor(Math.max(0,n.bulanTunggakanPokok)),Math.floor(Math.max(0,n.bulanTunggakanJasa))),j=Math.max(0,U-T),S=_>=o,I=f>=l;if(!S&&!I)return p('MACET',`Macet \u2014 ${R} (melewati ambang Kurang Lancar); angsuran terbayar baru ${_.toFixed(1)}% dari kewajiban (minimal ${o}%) dan agunan hanya ${f.toFixed(1)}% dari sisa utang (minimal ${l}%) \u2014 tidak memenuhi kriteria Diragukan (SOM 12.1 kriteria Macet angka 1).`,j);if(j>=k)return p('MACET',`Macet \u2014 sudah ${j} bulan digolongkan Diragukan tanpa pelunasan, melampaui ${k} bulan (SOM 12.1 kriteria Macet angka 2).`,j);const P=S?`angsuran terbayar ${_.toFixed(1)}% dari kewajiban, minimal ${o}% (SOM 12.1 kriteria Diragukan huruf a)`:`agunan bernilai ${f.toFixed(1)}% dari sisa utang, minimal ${l}% (SOM 12.1 kriteria Diragukan huruf b)`;return p('DIRAGUKAN',`Diragukan \u2014 ${R} (melewati ambang Kurang Lancar) namun ${P}.`,j)},e.hitungPenyisihanSom=function(t,u){return(0,n.roundToRupiah)(Math.max(0,t)*s[u]/100)};var n=r(d[0]);const t=['LANCAR','KURANG_LANCAR','DIRAGUKAN','MACET'],u={LANCAR:'Lancar',KURANG_LANCAR:'Kurang Lancar',DIRAGUKAN:'Diragukan',MACET:'Macet'},A=['KURANG_LANCAR','DIRAGUKAN','MACET'];const s={LANCAR:0,KURANG_LANCAR:50,DIRAGUKAN:75,MACET:100},o=75,l=100,k=21,M={KURANG_DARI_1_BULAN:{pokokLewatBulan:1,pokokBatasAtasBulan:2,jasaLewatBulan:1,jasaBatasAtasBulan:3},SATU_SAMPAI_3_BULAN:{pokokLewatBulan:3,pokokBatasAtasBulan:6,jasaLewatBulan:3,jasaBatasAtasBulan:6},ENAM_BULAN_ATAU_LEBIH:{pokokLewatBulan:6,pokokBatasAtasBulan:12,jasaLewatBulan:3,jasaBatasAtasBulan:6}},N={jasaLewatBulan:3,jasaBatasAtasBulan:6,setelahJatuhTempoBatasAtasBulan:3};function b(n){return n<1?'KURANG_DARI_1_BULAN':n>=6?'ENAM_BULAN_ATAU_LEBIH':'SATU_SAMPAI_3_BULAN'}function B(n,t,u){return n<=t?0:n<=u?1:2}},925,[910]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/utils/money":return _$r(910);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.AMBANG_SOM_TANPA_ANGSURAN=exports.AMBANG_SOM=exports.BULAN_DIRAGUKAN_MENJADI_MACET=exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN=exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN=exports.PERSENTASE_PENYISIHAN_SOM=exports.KATEGORI_BERMASALAH_SOM=exports.LABEL_KOLEKTIBILITAS_SOM=exports.KOLEKTIBILITAS_SOM_URUT=void 0;
+exports.isPinjamanBermasalah=isPinjamanBermasalah;
+exports.kelompokMasaAngsuran=kelompokMasaAngsuran;
+exports.masaAngsuranBulanDariSatuanTenor=masaAngsuranBulanDariSatuanTenor;
+exports.bulanPenuhAntara=bulanPenuhAntara;
+exports.klasifikasikanSom=klasifikasikanSom;
+exports.hitungPenyisihanSom=hitungPenyisihanSom;
+const money_1 = require("@/utils/money");
+exports.KOLEKTIBILITAS_SOM_URUT=[
+    'LANCAR',
+    'KURANG_LANCAR',
+    'DIRAGUKAN',
+    'MACET',
+];
+exports.LABEL_KOLEKTIBILITAS_SOM={
+    LANCAR: 'Lancar',
+    KURANG_LANCAR: 'Kurang Lancar',
+    DIRAGUKAN: 'Diragukan',
+    MACET: 'Macet',
+};
+/**
+ * Kategori PINJAMAN BERMASALAH menurut SOM. Naskah angka 12.2 A.1.a
+ * menyebutnya eksplisit: "menggolongkan pinjaman bermasalah sesuai
+ * dengan tingkat kolektibilitasnya yaitu: pinjaman kurang lancar,
+ * pinjaman diragukan dan pinjaman macet". Tidak ada kategori antara
+ * Lancar dan Kurang Lancar, jadi batas bermasalah jatuh tepat di
+ * Kurang Lancar.
+ */
+exports.KATEGORI_BERMASALAH_SOM=['KURANG_LANCAR', 'DIRAGUKAN', 'MACET'];
+function isPinjamanBermasalah(kategori) {
+    return exports.KATEGORI_BERMASALAH_SOM.includes(kategori);
+}
+/**
+ * Persentase taksiran piutang tak tertagih (cadangan risiko) per
+ * kategori — Juklat SOM 2025 angka 15, hal. 86.
+ *
+ * Naskah memberi contoh perhitungan dengan persentase berikut:
+ *   Pinjaman lancar          0%   x Rp300.000.000 = Rp0
+ *   Pinjaman kurang lancar  50%   x Rp100.000.000 = Rp50.000.000
+ *   Pinjaman diragukan      75%   x Rp 75.000.000 = Rp56.250.000
+ *   Pinjaman macet         100%   x Rp 25.000.000 = Rp25.000.000
+ *
+ * ANGKA INI JAUH BERBEDA dari batasan FISKAL PMK 74/2024 baris Koperasi
+ * Simpan Pinjam (0,5% / 10% / 50% / 100%) — dan perbedaan itu WAJAR
+ * serta memang dimaksudkan: SOM mengatur kehati-hatian PENCADANGAN
+ * KOPERASI, sedangkan PMK 74 mengatur BATAS MAKSIMUM yang boleh
+ * dikurangkan dari penghasilan bruto untuk tujuan PAJAK. Cadangan buku
+ * SOM lazim jauh MELEBIHI batas fiskal, dan selisihnya adalah koreksi
+ * fiskal positif di SPT Badan. Lihat `KolektibilitasFiskalService.ts`.
+ *
+ * Lancar 0% BERARTI tidak ada pencadangan atas pinjaman lancar menurut
+ * SOM. Ini disengaja mengikuti naskah, dan merupakan perbedaan penting
+ * dari PMK 74 yang tetap mengakui 0,5% untuk kategori Lancar.
+ */
+exports.PERSENTASE_PENYISIHAN_SOM={
+    LANCAR: 0,
+    KURANG_LANCAR: 50,
+    DIRAGUKAN: 75,
+    MACET: 100,
+};
+/**
+ * Kriteria Diragukan huruf a — "angsurannya bernilai sekurang-kurangnya
+ * 75% dari utang peminjam termasuk bunganya".
+ */
+exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN=75;
+/**
+ * Kriteria Diragukan huruf b — "agunannya masih bernilai
+ * sekurang-kurangnya 100% dari utang peminjam".
+ */
+exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN=100;
+/** Kriteria Macet angka 2 — "dalam jangka waktu 21 bulan sejak digolongkan diragukan". */
+exports.BULAN_DIRAGUKAN_MENJADI_MACET=21;
+/**
+ * Tabel ambang Kurang Lancar per kelompok masa angsuran — Juklat SOM
+ * 2025 angka 12.1 butir 1). SATU-SATUNYA tempat angka ambang ini
+ * ditulis di seluruh aplikasi.
+ */
+exports.AMBANG_SOM={
+    KURANG_DARI_1_BULAN: {
+        // Pokok: melampaui 1 bulan, belum melampaui 2 bulan.
+        pokokLewatBulan: 1,
+        pokokBatasAtasBulan: 2,
+        // Bunga: melampaui 1 bulan, belum melampaui 3 bulan.
+        jasaLewatBulan: 1,
+        jasaBatasAtasBulan: 3,
+    },
+    SATU_SAMPAI_3_BULAN: {
+        // Pokok: melampaui 3 bulan, belum melampaui 6 bulan.
+        pokokLewatBulan: 3,
+        pokokBatasAtasBulan: 6,
+        // Bunga: melampaui 3 bulan, belum melampaui 6 bulan (kelompok
+        // "masa angsuran lebih dari 1 bulan").
+        jasaLewatBulan: 3,
+        jasaBatasAtasBulan: 6,
+    },
+    ENAM_BULAN_ATAU_LEBIH: {
+        // Pokok: melampaui 6 bulan, belum melampaui 12 bulan.
+        pokokLewatBulan: 6,
+        pokokBatasAtasBulan: 12,
+        // Kriteria bunga SOM hanya membedakan masa angsuran "kurang dari 1
+        // bulan" vs "lebih dari 1 bulan" — tidak ada baris tersendiri untuk
+        // 6 bulanan, jadi ambang bunganya sama dengan kelompok di atas.
+        jasaLewatBulan: 3,
+        jasaBatasAtasBulan: 6,
+    },
+};
+/** Ambang Kurang Lancar untuk pinjaman TANPA ANGSURAN — angka 12.1 butir 1) sub 2. */
+exports.AMBANG_SOM_TANPA_ANGSURAN={
+    /** Belum jatuh tempo — tunggakan bunga: melampaui 3 bulan, belum melampaui 6 bulan. */
+    jasaLewatBulan: 3,
+    jasaBatasAtasBulan: 6,
+    /** Sudah jatuh tempo & belum dibayar — belum melampaui 3 bulan. */
+    setelahJatuhTempoBatasAtasBulan: 3,
+};
+/**
+ * Kelompok masa angsuran dari panjang interval antar angsuran (bulan).
+ *
+ * Masa angsuran 1 bulan dan 4-5 bulan tidak disebut naskah dan
+ * ditempatkan di kelompok `SATU_SAMPAI_3_BULAN` — lihat komentar header
+ * "DUA CELAH NASKAH & KEPUTUSANNYA" untuk alasan lengkapnya. INI
+ * SATU-SATUNYA tempat penempatan itu diputuskan.
+ */
+function kelompokMasaAngsuran(masaAngsuranBulan) {
+    if (masaAngsuranBulan < 1)
+        return 'KURANG_DARI_1_BULAN';
+    if (masaAngsuranBulan >= 6)
+        return 'ENAM_BULAN_ATAU_LEBIH';
+    return 'SATU_SAMPAI_3_BULAN';
+}
+/**
+ * Panjang interval antar angsuran dalam BULAN, dari satuan tenor
+ * pinjaman. Jadwal angsuran aplikasi ini dibuat dengan interval TEPAT
+ * 1 satuan tenor per angsuran (lihat `calculateInstallmentDate` di
+ * `@/accounting/InstallmentDate`), jadi satuan tenor ADALAH masa
+ * angsurannya — tidak perlu diterka dari selisih tanggal jadwal.
+ *
+ * Nilai pecahan dipakai apa adanya (tidak dibulatkan ke 0 atau 1):
+ * yang dibutuhkan `kelompokMasaAngsuran` hanya "kurang dari 1 bulan"
+ * atau tidak, dan 1/30 serta 7/30 keduanya jelas kurang dari 1.
+ */
+function masaAngsuranBulanDariSatuanTenor(satuanTenor) {
+    if (satuanTenor === 'HARI')
+        return 1 / 30;
+    if (satuanTenor === 'MINGGU')
+        return 7 / 30;
+    return 1; // 'BULAN'
+}
+/**
+ * Jumlah BULAN PENUH yang sudah terlewati antara dua tanggal ISO
+ * (yyyy-MM-dd). Ditulis di sini, bukan memakai `date-fns`, supaya
+ * berkas ini tetap bebas dependency (lihat komentar header).
+ *
+ * "Bulan penuh" berarti tanggal harinya diperhitungkan: 15 Jan -> 14
+ * Feb = 0 bulan, 15 Jan -> 15 Feb = 1 bulan. Inilah bacaan yang benar
+ * untuk kalimat "melampaui 3 bulan" — yang dimaksud tunggakan yang
+ * usianya lebih dari 3 bulan KALENDER, bukan 90 hari.
+ */
+function bulanPenuhAntara(dariIso, keIso) {
+    const dari = new Date(`${dariIso}T00:00:00`);
+    const ke = new Date(`${keIso}T00:00:00`);
+    if (Number.isNaN(dari.getTime()) || Number.isNaN(ke.getTime()))
+        return 0;
+    if (ke <= dari)
+        return 0;
+    let bulan = (ke.getFullYear() - dari.getFullYear()) * 12 + (ke.getMonth() - dari.getMonth());
+    // Belum sampai tanggal yang sama di bulan tujuan -> bulan terakhir belum penuh.
+    if (ke.getDate() < dari.getDate())
+        bulan -= 1;
+    return Math.max(0, bulan);
+}
+function tingkatTunggakan(bulan, lewatBulan, batasAtasBulan) {
+    // "melampaui X bulan" = bulan > X. "belum melampaui Y bulan" = bulan <= Y.
+    if (bulan <= lewatBulan)
+        return 0;
+    if (bulan <= batasAtasBulan)
+        return 1;
+    return 2;
+}
+/**
+ * Penggolongan kualitas pinjaman menurut Juklat SOM 3/2025 angka 12.1.
+ *
+ * URUTAN PENILAIAN mengikuti struktur naskahnya, bukan urutan yang
+ * paling mudah ditulis:
+ *   1. Kriteria Macet angka 3 (pengadilan/asuransi kredit) —
+ *      mengesampingkan seluruh penilaian tunggakan, angsuran & agunan.
+ *   2. Tingkat tunggakan terhadap ambang Kurang Lancar, diambil yang
+ *      TERBURUK di antara dimensi pokok & bunga (pinjaman tidak menjadi
+ *      lebih sehat karena salah satu komponennya tertagih).
+ *   3. Belum melampaui batas bawah -> LANCAR. Di dalam rentang ->
+ *      KURANG_LANCAR.
+ *   4. Melewati batas atas Kurang Lancar -> DIRAGUKAN bila SALAH SATU
+ *      kriteria Diragukan terpenuhi (angsuran terbayar >= 75% kewajiban
+ *      kontraktual, ATAU agunan >= 100% sisa utang); selain itu MACET
+ *      (kriteria Macet angka 1).
+ *   5. DIRAGUKAN yang sudah >= 21 bulan -> MACET (kriteria Macet angka 2).
+ *
+ * CATATAN PENAFSIRAN: naskah membungkus kedua kriteria Diragukan dengan
+ * penilaian kualitatif "masih dapat diselamatkan" / "tidak dapat
+ * diselamatkan". Penilaian itu adalah pertimbangan pengurus dan TIDAK
+ * ADA datanya di aplikasi, jadi yang diuji di sini hanya bagian yang
+ * TERUKUR: rasio 75% angsuran dan rasio 100% agunan. Akibatnya
+ * penggolongan ini bisa lebih ringan daripada penilaian pengurus yang
+ * menyimpulkan pinjaman tidak dapat diselamatkan meski rasionya
+ * memenuhi — itu keputusan yang memang harus dibuat manusia, dan
+ * `dasarPenggolongan` di bawah menyebutkan rasionya supaya pengurus
+ * bisa menilai ulang.
+ */
+function klasifikasikanSom(input) {
+    const kelompok = kelompokMasaAngsuran(input.masaAngsuranBulan);
+    const angsuranTerbayar = Math.max(0, input.angsuranTerbayar);
+    const totalKewajiban = Math.max(0, input.totalKewajibanKontraktual);
+    const nilaiAgunan = Math.max(0, input.nilaiAgunan);
+    const sisaUtang = Math.max(0, input.sisaUtang);
+    // Penyebut 0 -> rasio 0, BUKAN NaN atau Infinity.
+    const rasioAngsuranPersen = totalKewajiban > 0 ? (angsuranTerbayar / totalKewajiban) * 100 : 0;
+    const rasioAgunanPersen = sisaUtang > 0 ? (nilaiAgunan / sisaUtang) * 100 : 0;
+    const hasil = (kategori, dasarPenggolongan, bulanSejakDiragukan = 0) => ({
+        kategori,
+        persentasePenyisihan: exports.PERSENTASE_PENYISIHAN_SOM[kategori],
+        kelompokMasaAngsuran: kelompok,
+        rasioAngsuranPersen,
+        rasioAgunanPersen,
+        bulanSejakDiragukan,
+        dasarPenggolongan,
+    });
+    if (input.diserahkanKePengadilanAtauAsuransi) {
+        return hasil('MACET', 'Macet — penyelesaian sudah diserahkan ke Pengadilan Negeri atau diajukan permohonan ganti rugi ke perusahaan asuransi kredit (SOM 12.1 kriteria Macet angka 3)' +
+            (input.rujukanPenyelesaian ? ` — ${input.rujukanPenyelesaian}.` : '.'));
+    }
+    // ---- Tingkat tunggakan & batas atas Kurang Lancar yang berlaku ----
+    let tingkat;
+    let batasAtasBulan;
+    let uraianTunggakan;
+    if (input.polaPengembalian === 'TANPA_ANGSURAN') {
+        if (input.sudahJatuhTempo) {
+            const bulan = Math.max(0, Math.floor(input.bulanSejakJatuhTempo));
+            batasAtasBulan = exports.AMBANG_SOM_TANPA_ANGSURAN.setelahJatuhTempoBatasAtasBulan;
+            // "telah jatuh tempo dan belum dibayar tetapi belum melampaui 3
+            // bulan" — jatuh tempo yang baru terlewati (0 bulan) sudah masuk
+            // Kurang Lancar, karena pinjamannya memang sudah harus lunas.
+            tingkat = bulan <= batasAtasBulan ? 1 : 2;
+            uraianTunggakan = `pinjaman tanpa angsuran sudah jatuh tempo ${bulan} bulan dan belum dibayar`;
+        }
+        else {
+            const bulan = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+            batasAtasBulan = exports.AMBANG_SOM_TANPA_ANGSURAN.jasaBatasAtasBulan;
+            tingkat = tingkatTunggakan(bulan, exports.AMBANG_SOM_TANPA_ANGSURAN.jasaLewatBulan, batasAtasBulan);
+            uraianTunggakan = `pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${bulan} bulan`;
+        }
+    }
+    else {
+        const ambang = exports.AMBANG_SOM[kelompok];
+        const bulanPokok = Math.max(0, Math.floor(input.bulanTunggakanPokok));
+        const bulanJasa = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+        const tingkatPokok = tingkatTunggakan(bulanPokok, ambang.pokokLewatBulan, ambang.pokokBatasAtasBulan);
+        const tingkatJasa = tingkatTunggakan(bulanJasa, ambang.jasaLewatBulan, ambang.jasaBatasAtasBulan);
+        // Dimensi TERBURUK yang menentukan. Saat seri, pokok dipakai sebagai
+        // penjelasannya — pokok adalah eksposur yang dicadangkan.
+        if (tingkatJasa > tingkatPokok) {
+            tingkat = tingkatJasa;
+            batasAtasBulan = ambang.jasaBatasAtasBulan;
+            uraianTunggakan = `tunggakan bunga ${bulanJasa} bulan`;
+        }
+        else {
+            tingkat = tingkatPokok;
+            batasAtasBulan = ambang.pokokBatasAtasBulan;
+            uraianTunggakan = `tunggakan pokok ${bulanPokok} bulan`;
+        }
+    }
+    if (tingkat === 0) {
+        return hasil('LANCAR', `Lancar — ${uraianTunggakan}, belum melampaui ambang Kurang Lancar.`);
+    }
+    if (tingkat === 1) {
+        return hasil('KURANG_LANCAR', `Kurang Lancar — ${uraianTunggakan} (ambang Kurang Lancar SOM untuk masa angsuran ini).`);
+    }
+    // ---- Melewati batas atas Kurang Lancar: Diragukan atau Macet ----
+    //
+    // Lama "sudah digolongkan Diragukan" DITURUNKAN, tidak disimpan:
+    // tunggakan melewati batas atas Kurang Lancar tepat pada saat usia
+    // tunggakan = batasAtasBulan, jadi lamanya = usia tunggakan sekarang
+    // dikurangi batas atas itu. Kalau ada pembayaran yang melunasi
+    // angsuran tertua, usia tunggakan otomatis mengecil (yang dihitung
+    // adalah angsuran tertua yang MASIH outstanding) dan hitungan 21
+    // bulan ikut mundur — persis bunyi "belum ada pelunasan".
+    const usiaTunggakan = input.polaPengembalian === 'TANPA_ANGSURAN' && input.sudahJatuhTempo
+        ? Math.max(0, Math.floor(input.bulanSejakJatuhTempo))
+        : Math.max(Math.floor(Math.max(0, input.bulanTunggakanPokok)), Math.floor(Math.max(0, input.bulanTunggakanJasa)));
+    const bulanSejakDiragukan = Math.max(0, usiaTunggakan - batasAtasBulan);
+    const angsuranMemenuhi = rasioAngsuranPersen >= exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN;
+    const agunanMemenuhi = rasioAgunanPersen >= exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN;
+    if (!angsuranMemenuhi && !agunanMemenuhi) {
+        return hasil('MACET', `Macet — ${uraianTunggakan} (melewati ambang Kurang Lancar); angsuran terbayar baru ${rasioAngsuranPersen.toFixed(1)}% dari kewajiban (minimal ${exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN}%) dan agunan hanya ${rasioAgunanPersen.toFixed(1)}% dari sisa utang (minimal ${exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN}%) — tidak memenuhi kriteria Diragukan (SOM 12.1 kriteria Macet angka 1).`, bulanSejakDiragukan);
+    }
+    if (bulanSejakDiragukan >= exports.BULAN_DIRAGUKAN_MENJADI_MACET) {
+        return hasil('MACET', `Macet — sudah ${bulanSejakDiragukan} bulan digolongkan Diragukan tanpa pelunasan, melampaui ${exports.BULAN_DIRAGUKAN_MENJADI_MACET} bulan (SOM 12.1 kriteria Macet angka 2).`, bulanSejakDiragukan);
+    }
+    const alasanDiragukan = angsuranMemenuhi
+        ? `angsuran terbayar ${rasioAngsuranPersen.toFixed(1)}% dari kewajiban, minimal ${exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN}% (SOM 12.1 kriteria Diragukan huruf a)`
+        : `agunan bernilai ${rasioAgunanPersen.toFixed(1)}% dari sisa utang, minimal ${exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN}% (SOM 12.1 kriteria Diragukan huruf b)`;
+    return hasil('DIRAGUKAN', `Diragukan — ${uraianTunggakan} (melewati ambang Kurang Lancar) namun ${alasanDiragukan}.`, bulanSejakDiragukan);
+}
+/**
+ * Taksiran piutang tak tertagih (cadangan risiko) BUKU atas satu
+ * pinjaman = saldo POKOK outstanding x persentase kategori SOM.
+ *
+ * Dasarnya saldo POKOK (bukan pokok + bunga): pencadangan adalah
+ * estimasi kerugian atas EKSPOSUR yang sudah dikeluarkan koperasi,
+ * sementara bunga yang belum tertagih belum pernah menjadi kas —
+ * mencadangkannya berarti mencadangkan pendapatan yang belum diakui.
+ * Keputusan ini sudah berlaku sebelum peralihan ke SOM dan TIDAK
+ * berubah. Contoh angka 15 naskah pun memakai nilai pinjaman per
+ * kategori, bukan pinjaman ditambah bunga.
+ *
+ * Agunan TIDAK dikurangkan di sini: pengurangan agunan adalah aturan
+ * FISKAL PMK 74/2024, bukan aturan pencadangan SOM. Lihat
+ * `KolektibilitasFiskalService.hitungCadanganFiskal()`.
+ */
+function hitungPenyisihanSom(saldoPokok, kategori) {
+    return (0, money_1.roundToRupiah)((Math.max(0, saldoPokok) * exports.PERSENTASE_PENYISIHAN_SOM[kategori]) / 100);
+}
+
+},925,[910]);
 __d(function(g,r,i,a,_m,e,_d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"NAMA_BULAN",{enumerable:!0,get:function(){return t}}),e.lastDayOfMonth=n,e.formatTanggalIndonesia=o,e.resolveReportPeriodFromDate=function(t,n){const u=n.find(n=>t>=n.periodeMulai&&t<=n.periodeSelesai);return{mulai:u?u.periodeMulai:`${t.slice(0,4)}-01-01`,selesai:t,label:o(t)}},e.geserPeriodeSetahunKeBelakang=function(t){const u=t=>{const[u,o,s]=t.split('-').map(Number),l=u-1,c=n(l,o),m=Math.min(s,c);return`${l}-${String(o).padStart(2,'0')}-${String(m).padStart(2,'0')}`};return{mulai:u(t.mulai),selesai:u(t.selesai)}};const t=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];function n(t,n){return new Date(t,n,0).getDate()}const u=t;function o(t){const[n,o,s]=t.split('-').map(Number);return`${s} ${u[o-1]} ${n}`}},926,[]);
 __d(function(g,_r,i,a,_m,e,_d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"OPSI_RENTANG_HISTORI",{enumerable:!0,get:function(){return t}}),e.tanggalMulaiRentang=u,e.saringHistoriPerRentang=function(n,t,r){const l=u(t,r);return null===l?[...n]:n.filter(n=>n.tanggal.slice(0,10)>=l&&n.tanggal.slice(0,10)<=r)},e.judulRentangHistori=function(n){return'SEMUA'===n?'Keseluruhan':`${r[n]} Bulan Terakhir`},e.periodeRentangHistori=function(t,r){const l=u(t,r);return null===l?'Seluruh transaksi':`${(0,n.formatTanggalIndonesia)(l)} s.d. ${(0,n.formatTanggalIndonesia)(r)}`};var n=_r(_d[0]);const t=[{kunci:'3_BULAN',label:'3 Bulan'},{kunci:'6_BULAN',label:'6 Bulan'},{kunci:'12_BULAN',label:'12 Bulan'},{kunci:'SEMUA',label:'Semua'}],r={'3_BULAN':3,'6_BULAN':6,'12_BULAN':12};function u(n,t){if('SEMUA'===n)return null;const[u,l,o]=t.split('-').map(Number),s=12*u+(l-1)-r[n],c=Math.floor(s/12),f=s%12+1,_=new Date(Date.UTC(c,f,0)).getUTCDate(),U=n=>String(n).padStart(2,'0');return`${c}-${U(f)}-${U(Math.min(o,_))}`}},927,[926]);
 __d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/reports/ArusKasJuklat":return _$r(929);case "@/reports/UrutanPenyajianPosisiKeuangan":return _$r(930);case "@/reports/KomposisiPendapatanLhu":return _$r(922);case "@/utils/reportPeriod":return _$r(926);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
@@ -12836,8 +13223,709 @@ __d(function(g,_r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.getTotalSaldoKas=u,e.getTotalSaldoBank=l,e.getPendingDisbursement=s,e.checkLiquiditasPencairan=async function(n,t){const[E,k,y,A,S]=await Promise.all([u(n),l(n),(0,c.getPolicyValue)('RESERVED_LIQUIDITY'),(0,c.getPolicyValue)('MINIMUM_CASH_RESERVE'),s(n,t.excludePinjamanId)]);return(0,o.checkLiquiditySufficient)({kas:E,bank:k,reservedLiquidity:y,minimumCashReserve:A,pendingDisbursement:S,jumlahDiajukan:t.jumlahDiajukan})},e.checkSaldoAkunCukup=async function(t,c){const u=await(0,n.getAccountBalance)(t,c.accountId);return(0,o.checkSaldoCukup)({saldoTersedia:u,nominalKeluar:c.nominalKeluar,namaRekening:c.namaRekening})};var n=r(d[0]),t=r(d[1]),c=r(d[2]),o=r(d[3]);async function u(c){let o=0;for(const u of[{type:'KAS_UMUM',role:'DEFAULT'},{type:'KAS_KECIL',role:'DEFAULT'}])try{const l=await(0,t.resolveAccountId)(c,u.type,u.role);o+=await(0,n.getAccountBalance)(c,l)}catch{}return o}async function l(t){const c=await t.getAllAsync("SELECT account_id FROM bank_account WHERE aktif = 1");let o=0;for(const u of c)o+=await(0,n.getAccountBalance)(t,u.account_id);return o}async function s(n,t){const c=await n.getFirstAsync("SELECT COALESCE(SUM(jumlah_pinjaman), 0) as total FROM pinjaman WHERE status = 'DISETUJUI' AND id != ?",t??'');return c?.total??0}},962,[958,959,963,966]);
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.getPolicyValue=b,e.getAllPolicies=async function(){const n=Object.keys(l),u=await Promise.all(n.map(async n=>[n,await b(n)]));return Object.fromEntries(u)},e.setPolicyValue=async function(u,t){if(!Number.isFinite(t)||t<0)throw new Error(`Nilai kebijakan "${u}" harus berupa angka >= 0.`);const s=await(0,n.getDb)(),l=(new Date).toISOString();await s.runAsync("INSERT INTO app_config (key, value, updated_at) VALUES (?,?,?)\n     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",`${k}${u}`,String(t),l)},e.kolektibilitasMencapaiBoundary=function(n,u){return c[n]>=c[u]},e.getNonAccrualMinKolektibilitas=async function(){const u=await(0,n.getDb)(),t=await u.getFirstAsync("SELECT value FROM app_config WHERE key = ?",y),s=t?.value;return s&&o.includes(s)?s:p},e.setNonAccrualMinKolektibilitas=async function(u){if(!o.includes(u))throw new Error(`Kolektibilitas "${u}" tidak valid.`);const t=await(0,n.getDb)(),s=(new Date).toISOString();await t.runAsync("INSERT INTO app_config (key, value, updated_at) VALUES (?,?,?)\n     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",y,u,s)},e.getNonAccrualMinHariTunggakan=async function(){const t=await(0,n.getDb)(),s=await t.getFirstAsync("SELECT value FROM app_config WHERE key = ?",A),l=Number(s?.value);return Number.isFinite(l)&&l>=0?Math.floor(l):u.HARI_MINIMUM_NON_ACCRUAL_DEFAULT},e.setNonAccrualMinHariTunggakan=async function(u){if(!Number.isFinite(u)||u<0)throw new Error(`Ambang hari non-accrual "${u}" tidak valid \u2014 harus bilangan >= 0.`);const t=await(0,n.getDb)(),s=(new Date).toISOString();await t.runAsync("INSERT INTO app_config (key, value, updated_at) VALUES (?,?,?)\n     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",A,String(Math.floor(u)),s)},e.getKebijakanAkuntansiNarasi=function(){return[{area:'basis_akuntansi',judul:'Dasar Penyusunan',narasi:`Laporan keuangan disusun berdasarkan ${s.NAMA_STANDAR_AKUNTANSI} dengan basis akrual \u2014 seluruh transaksi dicatat lewat jurnal berpasangan (double-entry) saat terjadi, bukan basis kas murni, kecuali dinyatakan lain secara eksplisit di bawah.`,sumberKode:'AccountingEngine.createJournal'},{area:'periode_pelaporan',judul:'Periode Pelaporan',narasi:'Tahun buku koperasi mengikuti tahun kalender (1 Januari s.d. 31 Desember).',sumberKode:'AccountingEngine.getOrCreatePeriodeUntukTanggal'},{area:'mata_uang',judul:'Mata Uang Pelaporan',narasi:'Seluruh nominal disajikan dalam Rupiah (Rp), dicatat sebagai bilangan bulat tanpa desimal.',sumberKode:'schema.ts (komentar header: "semua nominal disimpan sebagai INTEGER")'},{area:'kas_setara_kas',judul:'Kas dan Setara Kas',narasi:'Kas dan setara kas terdiri atas Kas Umum dan saldo rekening bank aktif milik koperasi.',sumberKode:'FinancialReports.getArusKas (kasBankAccounts)'},{area:'piutang',judul:'Piutang Pinjaman Anggota',narasi:'Piutang pinjaman anggota diakui sebesar nilai pokok yang dicairkan, dan diukur selanjutnya sebesar saldo pokok dan jasa yang belum tertagih dari jadwal angsuran.',sumberKode:'PinjamanService, LoanImpairmentService.getKlasifikasiPinjamanAktif'},{area:'penyisihan_piutang',judul:'Penyisihan Piutang Tak Tertagih (Impairment)',narasi:'Penyisihan piutang tak tertagih ditentukan berdasarkan kolektibilitas 5 kategori sesuai usia tunggakan angsuran (Lancar 0 hari: 0,5%; Dalam Perhatian 1-90 hari: 5%; Kurang Lancar 91-120 hari: 15%; Diragukan 121-180 hari: 50%; Macet >180 hari: 100%), dihitung dari saldo pokok outstanding. Penyisihan dicatat sebagai kontra-aset dan tidak mengurangi piutang bruto \u2014 pengurangan piutang bruto hanya terjadi melalui penghapusan (write-off) setelah RAT untuk piutang berkolektibilitas Macet.',sumberKode:'LoanImpairmentService.ts'},{area:'aset_tetap',judul:'Aset Tetap',narasi:'Aset tetap dicatat sebesar biaya perolehan dan disusutkan menggunakan metode garis lurus berdasarkan taksiran masa manfaat dan nilai residu. Aset tetap yang nilai wajarnya dapat diukur andal dapat diukur dengan model revaluasi (SAK EP Bab 17): nilai tercatat = nilai revaluasi dikurangi akumulasi penyusutan sesudahnya; kenaikan diakui di penghasilan komprehensif lain sebagai surplus revaluasi (ekuitas), kecuali sebesar pemulihan penurunan yang dahulu diakui di laba rugi; penurunan dibebankan ke surplus revaluasi aset yang sama lebih dahulu, sisanya ke laba rugi. Penyusutan sesudah revaluasi dihitung dari nilai revaluasi atas sisa masa manfaat.',sumberKode:'AsetService.beliAset, PenyusutanService.hitungPenyusutanBulanan, PenyesuaianNilaiWajarService (REVALUASI_ASET_TETAP)'},{area:'penyusutan',judul:'Penyusutan Aset Tetap',narasi:'Penyusutan dihitung bulanan dengan metode garis lurus: (nilai perolehan - nilai residu) / masa manfaat dalam bulan. Proses penyusutan dijalankan manual per periode oleh pengguna (aplikasi berjalan offline, bukan proses otomatis di latar belakang).',sumberKode:'PenyusutanService.prosesPenyusutanAset'},{area:'bunga_utang',judul:'Akrual Bunga Utang Koperasi',narasi:"Bunga atas utang koperasi (bank/pihak lain) diakui secara akrual setiap bulan: Beban Bunga didebit dan Utang Bunga dikredit, tanpa melibatkan kas. Periodisasi memakai kebijakan BULAN PENUH (WHOLE_MONTH): tidak ada prorata harian. Sebuah bulan hanya diakru apabila utang sudah berlaku sejak tanggal 1 bulan tersebut \u2014 utang yang mulai di tengah bulan baru diakru mulai bulan berikutnya. Sebaliknya, pelunasan di tengah bulan tidak mengurangi akrual bulan berjalan; bulan berikutnya tidak lagi diakru. Tarif kontraktual dinyatakan per tahun atau per bulan (basis bunga); tarif tahunan dikonversi menjadi bulanan dengan pembagi 12. Dasar perhitungan untuk bunga FLAT adalah pokok kontraktual, sedangkan untuk bunga EFEKTIF adalah saldo pokok terutang pada awal periode. Utang yang basis bunganya belum ditentukan, atau yang jenis bunganya \"Lainnya\", tidak diakru otomatis dan dilaporkan sebagai pengecualian untuk ditinjau manual.",sumberKode:'UtangBungaAccrualService.ts (KEBIJAKAN_PERIODE_AKRUAL_BUNGA_UTANG, rateBulanan, periodePertamaEligible)'},{area:'aset_tak_berwujud',judul:'Aset Tak Berwujud',narasi:'Aset tak berwujud (mis. lisensi perangkat lunak, hak paten/merek) dicatat sebesar biaya perolehan, terpisah dari aset tetap berwujud.',sumberKode:'AsetService.beliAset (jenisAset: TAK_BERWUJUD)'},{area:'amortisasi',judul:'Amortisasi Aset Tak Berwujud',narasi:'Aset tak berwujud dengan umur manfaat terbatas diamortisasi dengan metode garis lurus, mekanisme dan formula yang sama dengan penyusutan aset tetap.',sumberKode:'PenyusutanService.prosesPenyusutanAset (mapping AMORTISASI_ASET_TAK_BERWUJUD)'},{area:'investasi',judul:'Investasi',narasi:'Investasi (penyertaan pada koperasi lain/usaha lain, penempatan pada bank umum berupa tabungan/giro/deposito, properti investasi, serta penyertaan pada unit usaha internal untuk histori lama) dicatat sebesar biaya perolehan (metode biaya). Properti investasi yang nilai wajarnya dapat diukur andal tanpa biaya atau upaya berlebihan diukur dengan model nilai wajar (SAK EP Bab 16): perubahan nilai wajar diakui di laba rugi (pendapatan/beban lain) dan properti tersebut tidak lagi disusutkan sejak penilaian nilai wajar pertama.',sumberKode:'InvestasiService.catatInvestasi'},{area:'impairment_investasi',judul:'Penurunan Nilai Investasi',narasi:'Karena investasi tidak memiliki harga pasar/kuotasi yang dapat diobservasi, penurunan nilai investasi TIDAK dihitung otomatis oleh sistem. Penurunan nilai dievaluasi berdasarkan indikator kualitatif (mis. kesulitan keuangan signifikan pada entitas tujuan investasi, penurunan berkelanjutan kinerja usaha, perubahan merugikan pada lingkungan usaha entitas tujuan) dan nilai kerugian ditentukan berdasarkan penilaian pengurus atas informasi terbaik yang tersedia, dicatat sebagai beban dan penyisihan (kontra-aset) pada saat evaluasi. Penurunan nilai investasi bersifat permanen \u2014 tidak dapat dipulihkan (reversal) melalui laporan hasil usaha, konsisten dengan tidak adanya bukti objektif yang andal untuk membuktikan pemulihan nilai instrumen ekuitas tanpa kuotasi pasar.',sumberKode:'InvestasiImpairmentService.catatImpairmentInvestasi'},{area:'utang',judul:'Utang',narasi:"Utang bank/pihak lain/usaha diakui sebesar nilai pokok yang diterima/timbul dan berkurang sebesar pembayaran pokok. Pengakuan beban bunga mengikuti kebijakan Akrual Bunga Utang Koperasi: bunga diakui secara akrual otomatis setiap bulan (Beban Bunga / Utang Bunga). Pembayaran bunga yang sebelumnya sudah diakrual merupakan pelunasan Utang Bunga dan tidak diakui lagi sebagai beban. Bagian pembayaran bunga yang belum pernah diakrual diakui sebagai beban pada saat pembayaran, sebesar transaksi aktual. Akrual atau penyesuaian manual hanya dipakai sebagai mekanisme pengecualian dan pengendalian (mis. koreksi setelah reversal), bukan cara pencatatan rutin.",sumberKode:'UtangService.bayarUtang (bagiPembayaranBunga), UtangBungaAccrualService (akrual otomatis), UtangService.penyesuaianManualBungaUtang \u2014 hanya pengecualian'},{area:'simpanan_anggota',judul:'Simpanan Anggota',narasi:'Simpanan Pokok dan Simpanan Wajib diklasifikasikan sebagai bagian Ekuitas (setoran modal anggota yang tidak dapat ditarik selama keanggotaan berlangsung). Simpanan Sukarela diklasifikasikan sebagai Liabilitas (dapat ditarik sewaktu-waktu oleh anggota).',sumberKode:'defaultCOA.ts (kategori akun 3-1000/3-1100 EKUITAS, 2-1200 LIABILITAS)'},{area:'ekuitas',judul:'Ekuitas',narasi:'Ekuitas terdiri atas Simpanan Pokok, Simpanan Wajib, Cadangan, Ekuitas Lainnya, dan SHU/Laba Tahun Berjalan yang belum dialokasikan. SHU tahun buku yang telah dibagikan dialokasikan ke Cadangan, Ekuitas Lainnya, dan Simpanan Sukarela anggota sesuai konfigurasi persentase yang ditetapkan.',sumberKode:'FinancialReports.getPosisiKeuangan, ShuService.bagikanSHU'},{area:'pendapatan',judul:'Pengakuan Pendapatan',narasi:'Pendapatan jasa pinjaman diakui pada saat angsuran diterima dari anggota. Pendapatan yang diterima di muka diakui bertahap sebagai pendapatan sesuai jangka waktu manfaatnya.',sumberKode:'PinjamanService (ANGSURAN_JASA), PendapatanDimukaService'},{area:'beban',judul:'Pengakuan Beban',narasi:'Beban pada umumnya diakui pada saat terjadi/dibayar. Beban penyusutan, amortisasi, penyisihan piutang, imbalan kerja, dan bunga utang dapat diakui secara akrual sebelum pembayaran kas, sesuai penjelasan masing-masing area di atas.',sumberKode:'BebanFormScreen, PenyusutanService, LoanImpairmentService, ImbalanKerjaService, UtangService'},{area:'shu',judul:'Sisa Hasil Usaha (SHU)',narasi:'SHU dihitung dari hasil usaha (pendapatan dikurangi beban) periode berjalan, dan didistribusikan ke Cadangan, Jasa Modal, Jasa Usaha, Pendidikan, Sosial, Pengurus, Pengawas, Karyawan, Pembangunan Daerah Kerja, dan Ekuitas Lainnya sesuai persentase yang ditetapkan koperasi, setelah disahkan dalam Rapat Anggota Tahunan (RAT).',sumberKode:'ShuCalculator.hitungRingkasanSHU, ShuService.bagikanSHU'},{area:'imbalan_kerja',judul:'Imbalan Kerja',narasi:'Imbalan kerja (mis. THR, bonus) yang dibayar tunai langsung diakui sebagai beban pada saat dibayar. Apabila imbalan kerja telah menjadi kewajiban pada periode berjalan namun belum dibayar, kewajiban tersebut diakrual secara manual. Koperasi belum menerapkan perhitungan aktuaria untuk imbalan pasca-kerja.',sumberKode:'ImbalanKerjaService.akruiImbalanKerja'},{area:'biaya_pinjaman',judul:'Biaya Pinjaman',narasi:"Biaya pinjaman (bunga atas utang bank/pihak lain) diakui sebagai beban pada periode terjadinya melalui akrual bunga otomatis bulanan, sebagaimana dijelaskan pada kebijakan Akrual Bunga Utang Koperasi. Koperasi tidak mengkapitalisasi biaya pinjaman ke nilai perolehan aset.",sumberKode:'UtangBungaAccrualService (akrual otomatis), UtangService.bayarUtang (penyelesaian)'}]};var n=r(d[0]),u=r(d[1]),t=r(d[2]),s=r(d[3]);const l={MINIMUM_CASH_RESERVE:0,RESERVED_LIQUIDITY:0,MAX_PINJAMAN_PER_ANGGOTA:0,MAX_OUTSTANDING_PER_ANGGOTA:0,OVERDUE_LIMIT_HARI:0,MAX_TUNGGAKAN_AKTIF:0,MINIMUM_SALDO_SIMPANAN_PINJAMAN:0},k='policy.';async function b(u){const t=await(0,n.getDb)(),s=await t.getFirstAsync("SELECT value FROM app_config WHERE key = ?",`${k}${u}`);if(!s)return l[u];const b=Number(s.value);return Number.isFinite(b)?b:l[u]}const p='DIRAGUKAN',o=t.KOLEKTIBILITAS_URUT,c={LANCAR:0,KURANG_LANCAR:1,DIRAGUKAN:2,MACET:3};const y='policy.NON_ACCRUAL_MIN_KOLEKTIBILITAS';const A='policy.NON_ACCRUAL_MIN_HARI_TUNGGAKAN'},963,[778,964,965,783]);
 __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"HARI_MINIMUM_NON_ACCRUAL_DEFAULT",{enumerable:!0,get:function(){return n}}),e.getAccrualStatus=t,e.isNonAccrual=function(u,o=n){return'NON_ACCRUAL'===t(u,o)},e.alasanNonAccrual=function(n,t){return`Non-accrual (kebijakan koperasi: tunggakan >= ${t} hari) \u2014 tunggakan ${Math.floor(n)} hari, jasa periode ini tidak diakui sebagai pendapatan.`};const n=90;function t(t,u=n){return(Number.isFinite(t)?Math.floor(t):0)>=u?'NON_ACCRUAL':'ACCRUAL'}},964,[]);
-__d(function(g,_r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"KOLEKTIBILITAS_LABEL",{enumerable:!0,get:function(){return k}}),Object.defineProperty(e,"KOLEKTIBILITAS_URUT",{enumerable:!0,get:function(){return p}}),Object.defineProperty(e,"PERSENTASE_CADANGAN",{enumerable:!0,get:function(){return j}}),e.hitungCadangan=_,e.getKlasifikasiPinjamanAktif=h,e.getKolektibilitasAnggota=async function(a,n,t){const u=t??(0,s.getTanggalLokalHariIni)(),r=await h(a,{tanggalLaporan:u,statusAnggota:'SEMUA',anggotaId:n});if(0===r.length)return{anggotaId:n,tanggalLaporan:u,tanpaPinjamanAktif:!0,kolektibilitas:null,hariTunggakan:0,tanggalJatuhTempoTertunggak:null,jumlahPinjamanAktif:0,totalOutstanding:0,totalPokok:0,totalCadangan:0,rincian:[]};const o=r.reduce((a,n)=>p.indexOf(n.kolektibilitas)>p.indexOf(a)?n.kolektibilitas:a,'LANCAR'),l=r.reduce((a,n)=>Math.max(a,n.hariTunggakan),0),k=r.map(a=>a.tanggalJatuhTempoTertunggak).filter(a=>!!a).sort()[0]??null;return{anggotaId:n,tanggalLaporan:u,tanpaPinjamanAktif:!1,kolektibilitas:o,hariTunggakan:l,tanggalJatuhTempoTertunggak:k,jumlahPinjamanAktif:r.length,totalOutstanding:r.reduce((a,n)=>a+n.saldoPiutang,0),totalPokok:r.reduce((a,n)=>a+n.saldoPokok,0),totalCadangan:r.reduce((a,n)=>a+n.nilaiCadangan,0),rincian:r}},e.getTotalPenyisihanTarget=A,e.sesuaikanPenyisihanPiutang=async function(a){return(0,n.withTransaction)(async n=>{await(0,r.requirePermission)(n,a.createdBy,'pinjaman','edit');const s=await A(n,a.tanggal),l=await(0,u.resolveAccountId)(n,'PENYISIHAN_PIUTANG','KREDIT_PENYISIHAN'),k=await(0,t.getAccountBalance)(n,l,a.tanggal),p=s-k;if(0===p)return{targetPenyisihan:s,saldoPenyisihanSebelumnya:k,delta:0,journalId:null};const j=await(0,u.resolveAccountId)(n,'PENYISIHAN_PIUTANG','DEBIT_BEBAN'),_=new Date(a.tanggal).getFullYear(),h=await(0,o.nextSequence)(n,'PSH',_),b=p>0?[{accountId:j,debit:p,kredit:0},{accountId:l,debit:0,kredit:p}]:[{accountId:l,debit:-p,kredit:0},{accountId:j,debit:0,kredit:-p}],{journalId:c}=await(0,t.createJournal)(n,{tanggal:a.tanggal,sumberTransaksi:'PENYISIHAN_PIUTANG',nomorReferensi:h,deskripsi:`Penyesuaian penyisihan piutang tak tertagih (${p>0?'tambah':'lepas'} ${Math.abs(p)}) - ${h}`,createdBy:a.createdBy,lines:b});return{targetPenyisihan:s,saldoPenyisihanSebelumnya:k,delta:p,journalId:c}})},e.getRingkasanAging=async function(a={}){const t=await(0,n.getDb)(),u=await h(t,a);return p.map(a=>{const n=u.filter(n=>n.kolektibilitas===a);return{kategori:a,jumlahPinjaman:n.length,totalOutstanding:n.reduce((a,n)=>a+n.saldoPokok,0),totalCadangan:n.reduce((a,n)=>a+n.nilaiCadangan,0)}})},e.ringkasKualitasPinjaman=function(a){const n=a.reduce((a,n)=>a+n.saldoPokok,0),t=a.filter(a=>a.bermasalah),u=t.reduce((a,n)=>a+n.saldoPokok,0);return{jumlahPinjaman:a.length,totalOutstanding:n,outstandingBermasalah:u,jumlahPinjamanBermasalah:t.length,rasioBermasalahPersen:n>0?u/n*100:0,totalCadangan:a.reduce((a,n)=>a+n.nilaiCadangan,0),perKategori:p.map(n=>{const t=a.filter(a=>a.kolektibilitas===n);return{kategori:n,jumlahPinjaman:t.length,totalOutstanding:t.reduce((a,n)=>a+n.saldoPokok,0),totalCadangan:t.reduce((a,n)=>a+n.nilaiCadangan,0)}})}},e.listPinjamanMacetUntukPenghapusan=async function(a={}){const t=await(0,n.getDb)(),u=(0,s.getTanggalLokalHariIni)(),r=(await h(t,{tanggalLaporan:u,statusAnggota:'SEMUA'})).filter(a=>'MACET'===a.kolektibilitas);if(0===r.length)return[];const o=r.map(a=>a.pinjamanId),l=await t.getAllAsync(`SELECT p.id, p.nomor_pinjaman, p.anggota_id, a.nama_lengkap, p.jumlah_pinjaman, p.tenor, p.satuan_tenor, p.status, p.tanggal_jatuh_tempo\n     FROM pinjaman p JOIN anggota a ON a.id = p.anggota_id\n     WHERE p.id IN (${o.map(()=>'?').join(',')})\n     ${a.search?'AND (p.nomor_pinjaman LIKE ? OR a.nama_lengkap LIKE ?)':''}\n     ORDER BY p.nomor_pinjaman ASC`,...o,...a.search?[`%${a.search}%`,`%${a.search}%`]:[]),k=new Map(r.map(a=>[a.pinjamanId,a]));return l.map(a=>({id:a.id,nomorPinjaman:a.nomor_pinjaman,anggotaId:a.anggota_id,namaAnggota:a.nama_lengkap,jumlahPinjaman:a.jumlah_pinjaman,sisaPiutang:k.get(a.id).saldoPiutang,tenor:a.tenor,satuanTenor:a.satuan_tenor,status:a.status,tanggalJatuhTempo:a.tanggal_jatuh_tempo,hariTunggakan:k.get(a.id).hariTunggakan}))};var a=_r(d[0]),n=_r(d[1]),t=_r(d[2]),u=_r(d[3]),r=_r(d[4]),o=_r(d[5]),s=_r(d[6]),l=_r(d[7]);const k=l.LABEL_KOLEKTIBILITAS_SOM,p=l.KOLEKTIBILITAS_SOM_URUT,j=l.PERSENTASE_PENYISIHAN_SOM;function _(a,n){return(0,l.hitungPenyisihanSom)(a,n)}async function h(n,t={}){const u=t.tanggalLaporan??(0,s.getTanggalLokalHariIni)(),r=t.statusAnggota??'AKTIF',o=["p.status = 'AKTIF'"];'AKTIF'===r?o.push("a.status = 'AKTIF'"):'TIDAK_AKTIF'===r&&o.push("a.status != 'AKTIF'");const k=[];t.anggotaId&&(o.push("p.anggota_id = ?"),k.push(t.anggotaId));const p=`${(0,a.sqlJadwalCurrent)('aj')} AND aj.tanggal_jatuh_tempo <= ?`;return(await n.getAllAsync(`SELECT p.id as pinjaman_id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status as status_anggota,\n            p.satuan_tenor, p.tanggal_jatuh_tempo,\n            COALESCE(SUM(aj.total - aj.pokok_terbayar - aj.jasa_terbayar), 0) as saldo_piutang,\n            COALESCE(SUM(aj.pokok - aj.pokok_terbayar), 0) as saldo_pokok,\n            COALESCE(SUM(aj.jasa - aj.jasa_terbayar), 0) as saldo_jasa,\n            -- Kriteria Diragukan SOM huruf a: "angsurannya bernilai\n            -- sekurang-kurangnya 75% dari utang peminjam TERMASUK\n            -- BUNGANYA". Pembilang = angsuran pokok + bunga yang sudah\n            -- DIBAYAR; penyebut = kewajiban KONTRAKTUAL pokok + bunga\n            -- sepanjang jadwal. Denda SENGAJA tidak ikut keduanya: denda\n            -- bukan bagian dari "utang peminjam termasuk bunganya", dan\n            -- memasukkannya akan mengecilkan rasio kemajuan pembayaran\n            -- justru pada pinjaman yang menunggak.\n            COALESCE(SUM(aj.pokok_terbayar + aj.jasa_terbayar), 0) as angsuran_terbayar,\n            COALESCE(SUM(aj.pokok + aj.jasa), 0) as kewajiban_kontraktual,\n            -- Jumlah angsuran KONTRAKTUAL pinjaman ini, dipakai membedakan\n            -- pengembalian dengan angsuran vs tanpa angsuran (sekali bayar\n            -- di jatuh tempo).\n            --\n            -- SENGAJA menghitung SELURUH baris jadwal yang bukan obsolete\n            -- (JOIN sudah memfilternya) \u2014 TERMASUK baris LUNAS. Kalau hanya\n            -- baris CURRENT yang dihitung, pinjaman 12 angsuran yang 11\n            -- angsurannya sudah lunas akan tersisa 1 baris current dan\n            -- salah dikenali sebagai pinjaman tanpa angsuran, sehingga\n            -- ambang SOM yang dipakai ikut salah.\n            COUNT(aj.id) as jumlah_angsuran_kontraktual,\n            MIN(CASE WHEN ${p} THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_tertua,\n            -- Usia tunggakan POKOK dan JASA dipisah: SOM menetapkan ambang\n            -- yang berbeda untuk tunggakan pokok dan tunggakan jasa, jadi\n            -- keduanya harus dihitung dari baris yang benar-benar masih\n            -- menunggak komponen tersebut.\n            MIN(CASE WHEN ${p} AND (aj.pokok - aj.pokok_terbayar) > 0\n                     THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_pokok_tertua,\n            MIN(CASE WHEN ${p} AND (aj.jasa - aj.jasa_terbayar) > 0\n                     THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_jasa_tertua,\n            MAX(CASE WHEN ${p}\n                     THEN julianday(?) - julianday(aj.tanggal_jatuh_tempo) ELSE 0 END) as hari_max,\n            -- Nilai agunan sebagai SUBQUERY berkorelasi, bukan JOIN kedua:\n            -- men-JOIN pinjaman_agunan ke query yang sudah di-GROUP BY per\n            -- jadwal akan mengalikan baris jadwal x baris agunan dan\n            -- menggelembungkan seluruh SUM saldo di atas.\n            COALESCE((SELECT SUM(ag.nilai_agunan) FROM pinjaman_agunan ag WHERE ag.pinjaman_id = p.id), 0) as nilai_agunan\n     FROM pinjaman p\n     JOIN anggota a ON a.id = p.anggota_id\n     -- BUG-08/BUG-12: jadwal obsolete (DIRESTRUKTURISASI/DIHAPUSBUKU)\n     -- dikeluarkan DI JOIN, bukan di WHERE, supaya pinjaman tanpa jadwal\n     -- current tetap muncul (LEFT JOIN) dengan saldo 0 dan bukan hilang\n     -- dari laporan. Tanpa ini, saldo & aging pinjaman yang pernah\n     -- direstrukturisasi dihitung dari jadwal lama + jadwal baru.\n     LEFT JOIN angsuran_jadwal aj ON aj.pinjaman_id = p.id AND ${(0,a.sqlJadwalBukanObsolete)('aj')}\n     WHERE ${o.join(' AND ')}\n     GROUP BY p.id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status,\n              p.satuan_tenor, p.tanggal_jatuh_tempo`,u,u,u,u,u,...k)).filter(a=>a.saldo_piutang>0).map(a=>{const n=Math.max(0,Math.floor(a.hari_max??0)),t=Math.max(0,a.saldo_pokok??0),r=Math.max(0,a.saldo_jasa??0),o=Math.max(0,a.nilai_agunan??0),s=(a.jumlah_angsuran_kontraktual??0)<=1?'TANPA_ANGSURAN':'ANGSURAN',k=(0,l.masaAngsuranBulanDariSatuanTenor)(String(a.satuan_tenor)),p=a.jatuh_tempo_pokok_tertua?(0,l.bulanPenuhAntara)(String(a.jatuh_tempo_pokok_tertua),u):0,j=a.jatuh_tempo_jasa_tertua?(0,l.bulanPenuhAntara)(String(a.jatuh_tempo_jasa_tertua),u):0,h=a.tanggal_jatuh_tempo?String(a.tanggal_jatuh_tempo):null,A=!!h&&h<u,b=h&&A?(0,l.bulanPenuhAntara)(h,u):0,c=Math.max(0,a.angsuran_terbayar??0),E=Math.max(0,a.kewajiban_kontraktual??0),T=(0,l.klasifikasikanSom)({polaPengembalian:s,masaAngsuranBulan:k,bulanTunggakanPokok:p,bulanTunggakanJasa:j,sudahJatuhTempo:A,bulanSejakJatuhTempo:b,angsuranTerbayar:c,totalKewajibanKontraktual:E,nilaiAgunan:o,sisaUtang:t+r,diserahkanKePengadilanAtauAsuransi:!1});return{pinjamanId:a.pinjaman_id,nomorPinjaman:a.nomor_pinjaman,anggotaId:a.anggota_id,nomorAnggota:a.nomor_anggota,namaAnggota:a.nama_lengkap,statusAnggota:a.status_anggota,saldoPiutang:a.saldo_piutang,saldoPokok:t,saldoJasa:r,tanggalJatuhTempoTertunggak:a.jatuh_tempo_tertua??null,hariTunggakan:n,polaPengembalian:s,masaAngsuranBulan:k,bulanTunggakanPokok:p,bulanTunggakanJasa:j,nilaiAgunan:o,angsuranTerbayar:c,kewajibanKontraktual:E,rasioAngsuranPersen:T.rasioAngsuranPersen,rasioAgunanPersen:T.rasioAgunanPersen,bulanSejakDiragukan:T.bulanSejakDiragukan,kolektibilitas:T.kategori,dasarPenggolongan:T.dasarPenggolongan,bermasalah:(0,l.isPinjamanBermasalah)(T.kategori),persentaseCadangan:T.persentasePenyisihan,nilaiCadangan:_(t,T.kategori)}})}async function A(a,n){return(await h(a,{tanggalLaporan:n,statusAnggota:'SEMUA'})).reduce((a,n)=>a+n.nilaiCadangan,0)}},965,[909,778,958,959,828,785,918,925]);
-__d(function(g,_r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.checkSaldoCukup=function(n){return n.nominalKeluar<=n.saldoTersedia?{valid:!0}:{valid:!1,reason:`Saldo ${n.namaRekening??'rekening'} tidak cukup (saldo: ${n.saldoTersedia}, dibutuhkan: ${n.nominalKeluar}).`}},e.checkLiquiditySufficient=function(n){const t=n.kas+n.bank-n.reservedLiquidity-n.minimumCashReserve-n.pendingDisbursement;if(n.jumlahDiajukan<=t)return{valid:!0,availableLiquidity:t};return{valid:!1,availableLiquidity:t,reason:`Likuiditas tidak cukup: tersedia ${t} (kas ${n.kas} + bank ${n.bank} - reserved ${n.reservedLiquidity} - minimum reserve ${n.minimumCashReserve} - pending ${n.pendingDisbursement}), dibutuhkan ${n.jumlahDiajukan}.`}},e.checkTidakNegatif=function(n){const t=n.saldoSaatIni+n.perubahan;return t>=0||n.izinkanOverdraft?{valid:!0}:{valid:!1,reason:`Transaksi ini akan membuat saldo negatif (${t}). Kebijakan overdraft tidak aktif untuk rekening ini.`}},e.checkAnggotaAktif=function(n){return'AKTIF'===n?{valid:!0}:{valid:!1,reason:`Anggota berstatus "${n}" \u2014 hanya anggota AKTIF yang bisa melakukan transaksi baru.`}},e.checkSaldoSimpananMinimum=function(n,t){return t<=0||n>=t?{valid:!0}:{valid:!1,reason:`Saldo simpanan (${n}) belum memenuhi syarat minimum pengajuan pinjaman (${t}).`}},e.checkKepemilikanSimpananPokokWajib=function(n,t){const u=[];n<=0&&u.push('Simpanan Pokok');t<=0&&u.push('Simpanan Wajib');return 0===u.length?{valid:!0}:{valid:!1,reason:`Pengajuan pinjaman ditolak: anggota belum memiliki ${u.join(' dan ')}.`}},e.checkLimitPinjaman=function(n,t){return t<=0||n<=t?{valid:!0}:{valid:!1,reason:`Jumlah pinjaman (${n}) melebihi plafon maksimum (${t}).`}},e.checkLimitOutstanding=function(n,t,u){if(u<=0)return{valid:!0};const r=n+t;return r<=u?{valid:!0}:{valid:!1,reason:`Total pinjaman berjalan setelah pengajuan ini (${r} = ${n} + ${t}) melebihi batas outstanding (${u}).`}},e.checkBatasTunggakan=function(n){if(n.limitJumlahTunggakan>0&&n.jumlahTunggakanAktif>=n.limitJumlahTunggakan)return{valid:!1,reason:`Anggota memiliki ${n.jumlahTunggakanAktif} tunggakan aktif (batas: ${n.limitJumlahTunggakan}) \u2014 pengajuan pinjaman baru ditolak.`};if(n.limitHariTerlambat>0&&n.hariTerlambatMaksimum>n.limitHariTerlambat)return{valid:!1,reason:`Anggota memiliki tunggakan terlambat ${n.hariTerlambatMaksimum} hari (batas: ${n.limitHariTerlambat} hari) \u2014 pengajuan pinjaman baru ditolak.`};return{valid:!0}},e.checkBelumDicairkan=function(n){return'DIAJUKAN'===n||'DISETUJUI'===n?{valid:!0}:{valid:!1,reason:`Pinjaman berstatus "${n}" tidak bisa dicairkan (mungkin sudah cair, lunas, atau ditolak).`}},e.checkPembayaranTidakMelebihiOutstanding=function(n,t){return n<=t?{valid:!0}:{valid:!1,reason:`Nominal pembayaran (${n}) melebihi sisa tagihan/outstanding (${t}).`}},e.validateAll=function(...n){return n.find(n=>!n.valid)??{valid:!0}}},966,[]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/ScheduleLifecycle":return _$r(909);case "@/database/db":return _$r(778);case "@/accounting/AccountingEngine":return _$r(958);case "@/accounting/AccountMapping":return _$r(959);case "@/services/PermissionService":return _$r(828);case "@/utils/id":return _$r(785);case "@/utils/tanggal":return _$r(918);case "@/accounting/PenyelesaianPinjaman":return _$r(9018);case "@/services/KolektibilitasSomService":return _$r(925);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.PERSENTASE_CADANGAN=exports.KOLEKTIBILITAS_URUT=exports.KOLEKTIBILITAS_LABEL=void 0;
+exports.hitungCadangan=hitungCadangan;
+exports.getKlasifikasiPinjamanAktif=getKlasifikasiPinjamanAktif;
+exports.getKolektibilitasAnggota=getKolektibilitasAnggota;
+exports.getTotalPenyisihanTarget=getTotalPenyisihanTarget;
+exports.sesuaikanPenyisihanPiutang=sesuaikanPenyisihanPiutang;
+exports.getRingkasanAging=getRingkasanAging;
+exports.ringkasKualitasPinjaman=ringkasKualitasPinjaman;
+exports.listPinjamanMacetUntukPenghapusan=listPinjamanMacetUntukPenghapusan;
+const ScheduleLifecycle_1 = require("@/accounting/ScheduleLifecycle");
+const db_1 = require("@/database/db");
+const AccountingEngine_1 = require("@/accounting/AccountingEngine");
+const AccountMapping_1 = require("@/accounting/AccountMapping");
+const PermissionService_1 = require("@/services/PermissionService");
+const id_1 = require("@/utils/id");
+const tanggal_1 = require("@/utils/tanggal");
+const PenyelesaianPinjaman_1 = require("@/accounting/PenyelesaianPinjaman");
+const KolektibilitasSomService_1 = require("@/services/KolektibilitasSomService");
+exports.KOLEKTIBILITAS_LABEL=KolektibilitasSomService_1.LABEL_KOLEKTIBILITAS_SOM;
+/** Urutan penyajian kategori (ringan -> berat) — satu urutan untuk layar, export, dan ringkasan. */
+exports.KOLEKTIBILITAS_URUT=KolektibilitasSomService_1.KOLEKTIBILITAS_SOM_URUT;
+/**
+ * Persentase penyisihan per kategori SOM. Tetap diekspor dengan nama
+ * lama supaya pemanggil lama tidak perlu diubah; NILAINYA berasal dari
+ * `PERSENTASE_PENYISIHAN_SOM` — satu sumber, tidak dua tabel angka.
+ */
+exports.PERSENTASE_CADANGAN=KolektibilitasSomService_1.PERSENTASE_PENYISIHAN_SOM;
+/**
+ * Penyisihan = saldo POKOK outstanding x persentase kategori. Delegasi
+ * ke `hitungPenyisihanSom` — lihat alasan pemilihan saldo pokok (bukan
+ * pokok + jasa) di berkas itu.
+ */
+function hitungCadangan(saldoPokok, kategori) {
+    return (0, KolektibilitasSomService_1.hitungPenyisihanSom)(saldoPokok, kategori);
+}
+/**
+ * Klasifikasi kolektibilitas SEMUA pinjaman berstatus AKTIF (dasar
+ * layar Kolektibilitas Piutang §4 & basis perhitungan penyisihan
+ * agregat §15-17). Aging dihitung dari `angsuran_jadwal` sungguhan
+ * (jatuh tempo & status per angsuran, BUKAN tanggal transaksi
+ * pinjaman) — §4B. Hanya pinjaman dengan saldo piutang > 0 yang
+ * dikembalikan (pinjaman yang sudah lunas semua angsurannya otomatis
+ * tidak ikut, meski query awal menyertakan seluruh status='AKTIF').
+ *
+ * Update pasca-6-perbaikan (permintaan pengguna §5): `nilaiCadangan`
+ * dihitung dari `saldo_pokok` (pokok outstanding SAJA), bukan lagi
+ * dari `saldo_piutang` (pokok+jasa) — lihat komentar `saldoPokok` di
+ * `KlasifikasiPinjamanItem`.
+ *
+ * PENGGOLONGAN SOM Juklat 3/2025: query di bawah mengumpulkan SELURUH
+ * masukan yang dibutuhkan mesin aturan dalam SATU perjalanan ke
+ * database — usia tunggakan POKOK dan JASA dipisah (SOM punya ambang
+ * berbeda untuk keduanya), jumlah baris jadwal current (untuk
+ * membedakan pengembalian dengan/tanpa angsuran), satuan tenor (masa
+ * angsuran), dan total nilai agunan (kriteria Diragukan). Penggolongannya
+ * sendiri dilakukan `klasifikasikanSom()` — tidak ada satu pun ambang
+ * SOM yang ditulis di berkas ini.
+ */
+async function getKlasifikasiPinjamanAktif(db, opts = {}) {
+    const tanggalLaporan = opts.tanggalLaporan ?? (0, tanggal_1.getTanggalLokalHariIni)();
+    const statusAnggota = opts.statusAnggota ?? 'AKTIF';
+    const filters = [`p.status = 'AKTIF'`];
+    if (statusAnggota === 'AKTIF')
+        filters.push(`a.status = 'AKTIF'`);
+    else if (statusAnggota === 'TIDAK_AKTIF')
+        filters.push(`a.status != 'AKTIF'`);
+    // SEMUA -> tidak ada filter tambahan status anggota.
+    // REQUIREMENT 2 — filter satu anggota (opsional). Parameter di-bind
+    // (bukan string interpolation) mengikuti pola query lain di file ini.
+    const paramsAnggota = [];
+    if (opts.anggotaId) {
+        filters.push(`p.anggota_id = ?`);
+        paramsAnggota.push(opts.anggotaId);
+    }
+    const jadwalCurrentJatuhTempo = `${(0, ScheduleLifecycle_1.sqlJadwalCurrent)('aj')} AND aj.tanggal_jatuh_tempo <= ?`;
+    const rows = await db.getAllAsync(`SELECT p.id as pinjaman_id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status as status_anggota,
+            p.satuan_tenor, p.tanggal_jatuh_tempo,
+            p.penyelesaian_jalur, p.penyelesaian_tanggal, p.penyelesaian_nomor,
+            COALESCE(SUM(aj.total - aj.pokok_terbayar - aj.jasa_terbayar), 0) as saldo_piutang,
+            COALESCE(SUM(aj.pokok - aj.pokok_terbayar), 0) as saldo_pokok,
+            COALESCE(SUM(aj.jasa - aj.jasa_terbayar), 0) as saldo_jasa,
+            -- Kriteria Diragukan SOM huruf a: "angsurannya bernilai
+            -- sekurang-kurangnya 75% dari utang peminjam TERMASUK
+            -- BUNGANYA". Pembilang = angsuran pokok + bunga yang sudah
+            -- DIBAYAR; penyebut = kewajiban KONTRAKTUAL pokok + bunga
+            -- sepanjang jadwal. Denda SENGAJA tidak ikut keduanya: denda
+            -- bukan bagian dari "utang peminjam termasuk bunganya", dan
+            -- memasukkannya akan mengecilkan rasio kemajuan pembayaran
+            -- justru pada pinjaman yang menunggak.
+            COALESCE(SUM(aj.pokok_terbayar + aj.jasa_terbayar), 0) as angsuran_terbayar,
+            COALESCE(SUM(aj.pokok + aj.jasa), 0) as kewajiban_kontraktual,
+            -- Jumlah angsuran KONTRAKTUAL pinjaman ini, dipakai membedakan
+            -- pengembalian dengan angsuran vs tanpa angsuran (sekali bayar
+            -- di jatuh tempo).
+            --
+            -- SENGAJA menghitung SELURUH baris jadwal yang bukan obsolete
+            -- (JOIN sudah memfilternya) — TERMASUK baris LUNAS. Kalau hanya
+            -- baris CURRENT yang dihitung, pinjaman 12 angsuran yang 11
+            -- angsurannya sudah lunas akan tersisa 1 baris current dan
+            -- salah dikenali sebagai pinjaman tanpa angsuran, sehingga
+            -- ambang SOM yang dipakai ikut salah.
+            COUNT(aj.id) as jumlah_angsuran_kontraktual,
+            MIN(CASE WHEN ${jadwalCurrentJatuhTempo} THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_tertua,
+            -- Usia tunggakan POKOK dan JASA dipisah: SOM menetapkan ambang
+            -- yang berbeda untuk tunggakan pokok dan tunggakan jasa, jadi
+            -- keduanya harus dihitung dari baris yang benar-benar masih
+            -- menunggak komponen tersebut.
+            MIN(CASE WHEN ${jadwalCurrentJatuhTempo} AND (aj.pokok - aj.pokok_terbayar) > 0
+                     THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_pokok_tertua,
+            MIN(CASE WHEN ${jadwalCurrentJatuhTempo} AND (aj.jasa - aj.jasa_terbayar) > 0
+                     THEN aj.tanggal_jatuh_tempo END) as jatuh_tempo_jasa_tertua,
+            MAX(CASE WHEN ${jadwalCurrentJatuhTempo}
+                     THEN julianday(?) - julianday(aj.tanggal_jatuh_tempo) ELSE 0 END) as hari_max,
+            -- Nilai agunan sebagai SUBQUERY berkorelasi, bukan JOIN kedua:
+            -- men-JOIN pinjaman_agunan ke query yang sudah di-GROUP BY per
+            -- jadwal akan mengalikan baris jadwal x baris agunan dan
+            -- menggelembungkan seluruh SUM saldo di atas.
+            COALESCE((SELECT SUM(ag.nilai_agunan) FROM pinjaman_agunan ag WHERE ag.pinjaman_id = p.id), 0) as nilai_agunan
+     FROM pinjaman p
+     JOIN anggota a ON a.id = p.anggota_id
+     -- BUG-08/BUG-12: jadwal obsolete (DIRESTRUKTURISASI/DIHAPUSBUKU)
+     -- dikeluarkan DI JOIN, bukan di WHERE, supaya pinjaman tanpa jadwal
+     -- current tetap muncul (LEFT JOIN) dengan saldo 0 dan bukan hilang
+     -- dari laporan. Tanpa ini, saldo & aging pinjaman yang pernah
+     -- direstrukturisasi dihitung dari jadwal lama + jadwal baru.
+     LEFT JOIN angsuran_jadwal aj ON aj.pinjaman_id = p.id AND ${(0, ScheduleLifecycle_1.sqlJadwalBukanObsolete)('aj')}
+     WHERE ${filters.join(' AND ')}
+     GROUP BY p.id, p.nomor_pinjaman, p.anggota_id, a.nomor_anggota, a.nama_lengkap, a.status,
+              p.satuan_tenor, p.tanggal_jatuh_tempo,
+              p.penyelesaian_jalur, p.penyelesaian_tanggal, p.penyelesaian_nomor`, 
+    // URUTAN PENTING: seluruh `?` di bawah ada di SELECT (sebelum WHERE) —
+    // lima kemunculan `tanggalLaporan` mengikuti urutan kolomnya di atas
+    // (jatuh_tempo_tertua, jatuh_tempo_pokok_tertua, jatuh_tempo_jasa_tertua,
+    // lalu dua kali pada hari_max) — parameter anggotaId ada di WHERE,
+    // jadi harus di posisi terakhir.
+    tanggalLaporan, tanggalLaporan, tanggalLaporan, tanggalLaporan, tanggalLaporan, ...paramsAnggota);
+    return rows
+        .filter((r) => r.saldo_piutang > 0)
+        .map((r) => {
+        const hariTunggakan = Math.max(0, Math.floor(r.hari_max ?? 0));
+        const saldoPokok = Math.max(0, r.saldo_pokok ?? 0);
+        const saldoJasa = Math.max(0, r.saldo_jasa ?? 0);
+        const nilaiAgunan = Math.max(0, r.nilai_agunan ?? 0);
+        // Pengembalian TANPA ANGSURAN = satu kali bayar di jatuh tempo,
+        // yaitu jadwal current hanya berisi SATU baris. Ini turunan dari
+        // data yang ada, bukan kolom baru: aplikasi tidak menyimpan
+        // "pola pengembalian" secara eksplisit, dan menambah kolomnya
+        // hanya untuk pembedaan ini akan menyisakan seluruh pinjaman lama
+        // tanpa nilai.
+        const polaPengembalian = (r.jumlah_angsuran_kontraktual ?? 0) <= 1 ? 'TANPA_ANGSURAN' : 'ANGSURAN';
+        const masaAngsuranBulan = (0, KolektibilitasSomService_1.masaAngsuranBulanDariSatuanTenor)(String(r.satuan_tenor));
+        const bulanTunggakanPokok = r.jatuh_tempo_pokok_tertua
+            ? (0, KolektibilitasSomService_1.bulanPenuhAntara)(String(r.jatuh_tempo_pokok_tertua), tanggalLaporan)
+            : 0;
+        const bulanTunggakanJasa = r.jatuh_tempo_jasa_tertua
+            ? (0, KolektibilitasSomService_1.bulanPenuhAntara)(String(r.jatuh_tempo_jasa_tertua), tanggalLaporan)
+            : 0;
+        const jatuhTempoPinjaman = r.tanggal_jatuh_tempo ? String(r.tanggal_jatuh_tempo) : null;
+        // `<` dan BUKAN `<=`: pada tanggal jatuh tempo itu sendiri pinjaman
+        // belum terlambat — kewajibannya jatuh pada hari itu. Kriteria SOM
+        // "telah jatuh tempo dan belum dibayar" baru berlaku sehari
+        // sesudahnya. Dengan `<=`, setiap pinjaman tanpa angsuran akan
+        // langsung digolongkan Kurang Lancar pada hari jatuh temponya.
+        const sudahJatuhTempo = !!jatuhTempoPinjaman && jatuhTempoPinjaman < tanggalLaporan;
+        const bulanSejakJatuhTempo = jatuhTempoPinjaman && sudahJatuhTempo ? (0, KolektibilitasSomService_1.bulanPenuhAntara)(jatuhTempoPinjaman, tanggalLaporan) : 0;
+        const angsuranTerbayar = Math.max(0, r.angsuran_terbayar ?? 0);
+        const kewajibanKontraktual = Math.max(0, r.kewajiban_kontraktual ?? 0);
+        // RC-S133.6.4 — kriteria Macet angka 3: hanya bila pencatatan ADA dan
+        // sudah berlaku pada tanggal laporan (laporan untuk tanggal sebelum
+        // penyelesaian diserahkan tidak boleh ikut Macet).
+        const jalurPenyelesaian = r.penyelesaian_jalur === 'PENGADILAN' || r.penyelesaian_jalur === 'ASURANSI' ? r.penyelesaian_jalur : null;
+        const tanggalPenyelesaian = r.penyelesaian_tanggal ? String(r.penyelesaian_tanggal) : null;
+        const nomorPenyelesaian = r.penyelesaian_nomor ? String(r.penyelesaian_nomor) : null;
+        const penyelesaianBerlaku = !!jalurPenyelesaian && !!tanggalPenyelesaian && tanggalPenyelesaian <= tanggalLaporan;
+        const som = (0, KolektibilitasSomService_1.klasifikasikanSom)({
+            polaPengembalian,
+            masaAngsuranBulan,
+            bulanTunggakanPokok,
+            bulanTunggakanJasa,
+            sudahJatuhTempo,
+            bulanSejakJatuhTempo,
+            // Kriteria Diragukan huruf a (rasio 75%) dan huruf b (rasio 100%)
+            // memakai PENYEBUT YANG BERBEDA — lihat komentar masing-masing
+            // field di `InputKlasifikasiSom`. Huruf a mengukur kemajuan
+            // pembayaran terhadap kewajiban PENUH; huruf b mengukur
+            // kecukupan agunan terhadap SISA utang.
+            angsuranTerbayar,
+            totalKewajibanKontraktual: kewajibanKontraktual,
+            nilaiAgunan,
+            sisaUtang: saldoPokok + saldoJasa,
+            // v82 (RC-S133.6.4): dicatat manual di `pinjaman.penyelesaian_*` —
+            // lihat komentar field ini di `InputKlasifikasiSom`.
+            diserahkanKePengadilanAtauAsuransi: penyelesaianBerlaku,
+            rujukanPenyelesaian: penyelesaianBerlaku && jalurPenyelesaian
+                ? (0, PenyelesaianPinjaman_1.ringkasPenyelesaian)({ jalur: jalurPenyelesaian, nomor: nomorPenyelesaian, tanggal: tanggalPenyelesaian })
+                : undefined,
+        });
+        return {
+            pinjamanId: r.pinjaman_id,
+            nomorPinjaman: r.nomor_pinjaman,
+            anggotaId: r.anggota_id,
+            nomorAnggota: r.nomor_anggota,
+            namaAnggota: r.nama_lengkap,
+            statusAnggota: r.status_anggota,
+            saldoPiutang: r.saldo_piutang,
+            saldoPokok,
+            saldoJasa,
+            tanggalJatuhTempoTertunggak: r.jatuh_tempo_tertua ?? null,
+            hariTunggakan,
+            polaPengembalian,
+            masaAngsuranBulan,
+            bulanTunggakanPokok,
+            bulanTunggakanJasa,
+            nilaiAgunan,
+            angsuranTerbayar,
+            kewajibanKontraktual,
+            penyelesaianJalur: jalurPenyelesaian,
+            penyelesaianTanggal: tanggalPenyelesaian,
+            penyelesaianNomor: nomorPenyelesaian,
+            penyelesaianBerlaku,
+            rasioAngsuranPersen: som.rasioAngsuranPersen,
+            rasioAgunanPersen: som.rasioAgunanPersen,
+            bulanSejakDiragukan: som.bulanSejakDiragukan,
+            kolektibilitas: som.kategori,
+            dasarPenggolongan: som.dasarPenggolongan,
+            bermasalah: (0, KolektibilitasSomService_1.isPinjamanBermasalah)(som.kategori),
+            persentaseCadangan: som.persentasePenyisihan,
+            nilaiCadangan: hitungCadangan(saldoPokok, som.kategori),
+        };
+    });
+}
+/**
+ * Kolektibilitas piutang SATU anggota (REQUIREMENT 2) — dipakai layar
+ * Detail Anggota.
+ *
+ * SUMBER DATA & PERHITUNGAN 100% dari `getKlasifikasiPinjamanAktif()`
+ * yang SUDAH ADA (mesin yang sama persis dipakai layar Kolektibilitas
+ * Piutang & perhitungan penyisihan agregat). TIDAK ADA rumus aging
+ * kedua, TIDAK ADA nilai hardcode, TIDAK ADA tabel baru — fungsi ini
+ * murni MENGAGREGASI hasil mesin existing untuk satu anggota.
+ *
+ * `statusAnggota: 'SEMUA'` DISENGAJA: layar Detail Anggota harus tetap
+ * menampilkan kolektibilitas walau anggota yang sedang dibuka berstatus
+ * TIDAK_AKTIF/KELUAR — piutangnya tetap ada dan tetap berisiko. Ini
+ * konsisten dengan alasan yang sama di `getTotalPenyisihanTarget()`.
+ */
+async function getKolektibilitasAnggota(db, anggotaId, tanggalLaporan) {
+    const tanggal = tanggalLaporan ?? (0, tanggal_1.getTanggalLokalHariIni)();
+    const rincian = await getKlasifikasiPinjamanAktif(db, {
+        tanggalLaporan: tanggal,
+        statusAnggota: 'SEMUA',
+        anggotaId,
+    });
+    if (rincian.length === 0) {
+        return {
+            anggotaId,
+            tanggalLaporan: tanggal,
+            tanpaPinjamanAktif: true,
+            kolektibilitas: null,
+            hariTunggakan: 0,
+            tanggalJatuhTempoTertunggak: null,
+            jumlahPinjamanAktif: 0,
+            totalOutstanding: 0,
+            totalPokok: 0,
+            totalCadangan: 0,
+            rincian: [],
+        };
+    }
+    // Kategori terburuk diambil dari kategori yang SUDAH dihitung mesin SOM
+    // per pinjaman, dengan mengambil posisi TERAKHIR pada KOLEKTIBILITAS_URUT
+    // (urutan ringan -> berat). Sengaja TIDAK dengan menggolongkan ulang
+    // hari tunggakan terlama: penggolongan SOM tidak lagi merupakan fungsi
+    // dari hari tunggakan saja (ia juga bergantung pada masa angsuran,
+    // komponen pokok/jasa, dan rasio agunan MASING-MASING pinjaman), jadi
+    // menggolongkan ulang dari angka agregat bisa menghasilkan kategori
+    // yang tidak dimiliki satu pun pinjaman anggota ini.
+    const kategoriTerburuk = rincian.reduce((terburuk, r) => exports.KOLEKTIBILITAS_URUT.indexOf(r.kolektibilitas) > exports.KOLEKTIBILITAS_URUT.indexOf(terburuk)
+        ? r.kolektibilitas
+        : terburuk, 'LANCAR');
+    const hariTunggakan = rincian.reduce((max, r) => Math.max(max, r.hariTunggakan), 0);
+    const tanggalTertunggak = rincian
+        .map((r) => r.tanggalJatuhTempoTertunggak)
+        .filter((t) => !!t)
+        .sort()[0] ?? null;
+    return {
+        anggotaId,
+        tanggalLaporan: tanggal,
+        tanpaPinjamanAktif: false,
+        kolektibilitas: kategoriTerburuk,
+        hariTunggakan,
+        tanggalJatuhTempoTertunggak: tanggalTertunggak,
+        jumlahPinjamanAktif: rincian.length,
+        totalOutstanding: rincian.reduce((a, r) => a + r.saldoPiutang, 0),
+        totalPokok: rincian.reduce((a, r) => a + r.saldoPokok, 0),
+        // Cadangan DIJUMLAH per pinjaman (masing-masing memakai persentase
+        // kategorinya SENDIRI), BUKAN dihitung ulang dari totalPokok x
+        // persentase kategori terburuk — supaya angkanya identik dengan
+        // laporan penyisihan agregat. Kategori terburuk di atas murni untuk
+        // penyajian status, tidak dipakai menghitung uang.
+        totalCadangan: rincian.reduce((a, r) => a + r.nilaiCadangan, 0),
+        rincian,
+    };
+}
+/**
+ * Total penyisihan yang SEHARUSNYA tercatat saat ini (target), dari
+ * SELURUH pinjaman aktif — TERMASUK anggota nonaktif (`statusAnggota:
+ * 'SEMUA'`): penyisihan/CKPN adalah soal risiko kredit piutang, bukan
+ * soal status keanggotaan, jadi basis provisioning harus mencakup
+ * semua piutang outstanding apa pun status anggotanya.
+ */
+async function getTotalPenyisihanTarget(db, tanggalLaporan) {
+    const klasifikasi = await getKlasifikasiPinjamanAktif(db, { tanggalLaporan, statusAnggota: 'SEMUA' });
+    return klasifikasi.reduce((a, k) => a + k.nilaiCadangan, 0);
+}
+/**
+ * Sesuaikan saldo akun Penyisihan Piutang Tak Tertagih supaya PERSIS
+ * sama dengan target hasil klasifikasi terbaru — HANYA memposting
+ * selisihnya (delta), bukan nilai penuh, supaya aman dijalankan
+ * berulang kali tanpa dobel-catat (idempoten by construction).
+ *
+ * §15-18 (permintaan pengguna): akun DITENTUKAN OTOMATIS lewat
+ * `resolveAccountId('PENYISIHAN_PIUTANG', ...)` — TIDAK ADA parameter
+ * akun yang dipilih user sama sekali (sudah begini sejak fungsi ini
+ * dibuat; diaudit ulang & dikonfirmasi tidak ada celah UI yang
+ * memberi pilihan akun manual untuk fungsi ini).
+ *
+ * delta > 0 (perlu tambah cadangan): DEBIT Beban Penyisihan Piutang,
+ *   KREDIT Penyisihan Piutang Tak Tertagih (kontra-aset — piutang
+ *   BRUTO tidak tersentuh, lihat komentar header file).
+ * delta < 0 (kualitas piutang membaik, cadangan dilepas sebagian):
+ *   arah dibalik.
+ */
+async function sesuaikanPenyisihanPiutang(params) {
+    return (0, db_1.withTransaction)(async (db) => {
+        await (0, PermissionService_1.requirePermission)(db, params.createdBy, 'pinjaman', 'edit');
+        const targetPenyisihan = await getTotalPenyisihanTarget(db, params.tanggal);
+        const penyisihanAccountId = await (0, AccountMapping_1.resolveAccountId)(db, 'PENYISIHAN_PIUTANG', 'KREDIT_PENYISIHAN');
+        const saldoPenyisihanSebelumnya = await (0, AccountingEngine_1.getAccountBalance)(db, penyisihanAccountId, params.tanggal);
+        const delta = targetPenyisihan - saldoPenyisihanSebelumnya;
+        if (delta === 0) {
+            return { targetPenyisihan, saldoPenyisihanSebelumnya, delta: 0, journalId: null };
+        }
+        const bebanAccountId = await (0, AccountMapping_1.resolveAccountId)(db, 'PENYISIHAN_PIUTANG', 'DEBIT_BEBAN');
+        const year = new Date(params.tanggal).getFullYear();
+        const nomorTransaksi = await (0, id_1.nextSequence)(db, 'PSH', year);
+        const lines = delta > 0
+            ? [
+                { accountId: bebanAccountId, debit: delta, kredit: 0 },
+                { accountId: penyisihanAccountId, debit: 0, kredit: delta },
+            ]
+            : [
+                { accountId: penyisihanAccountId, debit: -delta, kredit: 0 },
+                { accountId: bebanAccountId, debit: 0, kredit: -delta },
+            ];
+        const { journalId } = await (0, AccountingEngine_1.createJournal)(db, {
+            tanggal: params.tanggal,
+            sumberTransaksi: 'PENYISIHAN_PIUTANG',
+            nomorReferensi: nomorTransaksi,
+            deskripsi: `Penyesuaian penyisihan piutang tak tertagih (${delta > 0 ? 'tambah' : 'lepas'} ${Math.abs(delta)}) - ${nomorTransaksi}`,
+            createdBy: params.createdBy,
+            lines,
+        });
+        return { targetPenyisihan, saldoPenyisihanSebelumnya, delta, journalId };
+    });
+}
+/**
+ * Ringkasan agregat per kategori (§4C) — untuk layar/laporan Kolektibilitas Piutang.
+ *
+ * Audit ulang (permintaan pengguna §23-25): `totalOutstanding` SEKARANG
+ * dihitung dari `saldoPokok` (pinjaman outstanding — saldo pokok yang
+ * belum dilunasi), BUKAN lagi dari `saldoPiutang` (pokok + jasa/bunga
+ * belum terbayar). Rumus per kategori (§24):
+ *   Total = SUM(saldoPokok) dari pinjaman pada kategori tersebut.
+ */
+async function getRingkasanAging(opts = {}) {
+    const db = await (0, db_1.getDb)();
+    const klasifikasi = await getKlasifikasiPinjamanAktif(db, opts);
+    return exports.KOLEKTIBILITAS_URUT.map((kategori) => {
+        const items = klasifikasi.filter((k) => k.kolektibilitas === kategori);
+        return {
+            kategori,
+            jumlahPinjaman: items.length,
+            totalOutstanding: items.reduce((a, k) => a + k.saldoPokok, 0),
+            totalCadangan: items.reduce((a, k) => a + k.nilaiCadangan, 0),
+        };
+    });
+}
+/**
+ * Ringkasan kualitas portofolio pinjaman — dipakai kartu ringkasan layar
+ * Kolektibilitas Piutang.
+ *
+ * MENERIMA hasil klasifikasi yang SUDAH dimuat (bukan query sendiri),
+ * supaya layar yang sudah memegang daftar detailnya tidak memuat ulang
+ * seluruh portofolio hanya untuk menghitung total — dan supaya angka
+ * ringkasan MUSTAHIL berbeda dari angka daftar di bawahnya.
+ */
+function ringkasKualitasPinjaman(items) {
+    const totalOutstanding = items.reduce((a, k) => a + k.saldoPokok, 0);
+    const bermasalah = items.filter((k) => k.bermasalah);
+    const outstandingBermasalah = bermasalah.reduce((a, k) => a + k.saldoPokok, 0);
+    return {
+        jumlahPinjaman: items.length,
+        totalOutstanding,
+        outstandingBermasalah,
+        jumlahPinjamanBermasalah: bermasalah.length,
+        rasioBermasalahPersen: totalOutstanding > 0 ? (outstandingBermasalah / totalOutstanding) * 100 : 0,
+        totalCadangan: items.reduce((a, k) => a + k.nilaiCadangan, 0),
+        perKategori: exports.KOLEKTIBILITAS_URUT.map((kategori) => {
+            const isi = items.filter((k) => k.kolektibilitas === kategori);
+            return {
+                kategori,
+                jumlahPinjaman: isi.length,
+                totalOutstanding: isi.reduce((a, k) => a + k.saldoPokok, 0),
+                totalCadangan: isi.reduce((a, k) => a + k.nilaiCadangan, 0),
+            };
+        }),
+    };
+}
+/**
+ * Daftar pinjaman berkolektibilitas MACET SAJA (§14, permintaan
+ * pengguna) — dipakai picker "Pilih Pinjaman" pada Penghapusan Piutang
+ * (`PenghapusanPiutangFormScreen`). Filter dilakukan DI SINI (service),
+ * memakai mesin klasifikasi yang SAMA dengan layar Kolektibilitas
+ * Piutang (`getKlasifikasiPinjamanAktif`) — bukan filter terpisah yang
+ * bisa berbeda hasil. `statusAnggota: 'SEMUA'` karena piutang yang
+ * sudah macet tetap harus bisa dihapuskan walau anggotanya sudah
+ * keluar/nonaktif.
+ */
+async function listPinjamanMacetUntukPenghapusan(opts = {}) {
+    const db = await (0, db_1.getDb)();
+    const tanggalHariIni = (0, tanggal_1.getTanggalLokalHariIni)();
+    const klasifikasi = await getKlasifikasiPinjamanAktif(db, { tanggalLaporan: tanggalHariIni, statusAnggota: 'SEMUA' });
+    const macet = klasifikasi.filter((k) => k.kolektibilitas === 'MACET');
+    if (macet.length === 0)
+        return [];
+    const ids = macet.map((k) => k.pinjamanId);
+    const rows = await db.getAllAsync(`SELECT p.id, p.nomor_pinjaman, p.anggota_id, a.nama_lengkap, p.jumlah_pinjaman, p.tenor, p.satuan_tenor, p.status, p.tanggal_jatuh_tempo
+     FROM pinjaman p JOIN anggota a ON a.id = p.anggota_id
+     WHERE p.id IN (${ids.map(() => '?').join(',')})
+     ${opts.search ? 'AND (p.nomor_pinjaman LIKE ? OR a.nama_lengkap LIKE ?)' : ''}
+     ORDER BY p.nomor_pinjaman ASC`, ...ids, ...(opts.search ? [`%${opts.search}%`, `%${opts.search}%`] : []));
+    const byId = new Map(macet.map((k) => [k.pinjamanId, k]));
+    return rows.map((r) => ({
+        id: r.id,
+        nomorPinjaman: r.nomor_pinjaman,
+        anggotaId: r.anggota_id,
+        namaAnggota: r.nama_lengkap,
+        jumlahPinjaman: r.jumlah_pinjaman,
+        sisaPiutang: byId.get(r.id).saldoPiutang,
+        tenor: r.tenor,
+        satuanTenor: r.satuan_tenor,
+        status: r.status,
+        tanggalJatuhTempo: r.tanggal_jatuh_tempo,
+        hariTunggakan: byId.get(r.id).hariTunggakan,
+    }));
+}
+
+},965,[909,778,958,959,828,785,918,9018,925]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+/**
+ * BusinessRuleEngine — Phase 3 (AUDIT_INTERNAL.md §5: "BusinessRuleEngine:
+ * MISSING — logika tersebar ad-hoc per service").
+ *
+ * SEMUA fungsi di sini murni (pure): tidak ada akses database, tidak
+ * ada side effect, cuma menerima angka/status yang SUDAH diambil
+ * pemanggil dari database lalu mengembalikan hasil valid/tidak +
+ * alasan. Ini SENGAJA dipisah dari I/O — sama seperti pola
+ * `PinjamanCalculator.ts`/`ShuCalculator.ts` yang sudah ada di
+ * codebase — supaya setiap rule bisa dites SATU-SATU tanpa perlu
+ * database sungguhan/mock, dan supaya satu rule bisa dipakai ulang
+ * dari service manapun tanpa duplikasi logika.
+ *
+ * Modul ini TIDAK memanggil dirinya sendiri secara otomatis dari
+ * service manapun di Phase 3 — penyambungan (service memanggil rule
+ * yang relevan sebelum createJournal) dikerjakan di Phase 4
+ * (Liquidity/Cash/Bank) dan Phase 6-7 (Loan & Loan payment), supaya
+ * tiap penyambungan bisa diuji sekaligus dengan konteks service-nya.
+ */
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.checkSaldoCukup=checkSaldoCukup;
+exports.checkLiquiditySufficient=checkLiquiditySufficient;
+exports.checkTidakNegatif=checkTidakNegatif;
+exports.checkAnggotaAktif=checkAnggotaAktif;
+exports.checkSaldoSimpananMinimum=checkSaldoSimpananMinimum;
+exports.checkKepemilikanSimpananPokokWajib=checkKepemilikanSimpananPokokWajib;
+exports.checkLimitPinjaman=checkLimitPinjaman;
+exports.checkLimitOutstanding=checkLimitOutstanding;
+exports.checkBatasTunggakan=checkBatasTunggakan;
+exports.checkBelumDicairkan=checkBelumDicairkan;
+exports.checkPembayaranTidakMelebihiOutstanding=checkPembayaranTidakMelebihiOutstanding;
+exports.validateAll=validateAll;
+exports.collectFailures=collectFailures;
+exports.alasanSebagaiPeringatan=alasanSebagaiPeringatan;
+// ============================================================
+// CASH / BANK / LIQUIDITY
+// ============================================================
+/** Rule: "cash sufficient" / "bank sufficient" — saldo rekening yang dipakai harus cukup untuk nominal yang mau keluar. */
+function checkSaldoCukup(params) {
+    if (params.nominalKeluar <= params.saldoTersedia)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Saldo ${params.namaRekening ?? 'rekening'} tidak cukup (saldo: ${params.saldoTersedia}, dibutuhkan: ${params.nominalKeluar}).`,
+    };
+}
+/**
+ * Rule: "liquidity sufficient" — sesuai rumus yang diminta:
+ *   availableLiquidity = kas + bank - reservedLiquidity - minimumCashReserve - pendingDisbursement
+ *   valid jika jumlahDiajukan <= availableLiquidity
+ *
+ * Contoh dari spesifikasi: Kas 5jt, Bank 3jt, Reserve 2jt →
+ * available 6jt, pinjaman 10jt → DITOLAK. Fungsi ini murni hitung —
+ * pemanggil (Phase 4/6) yang bertanggung jawab mengambil kas/bank
+ * sungguhan lewat getAccountBalance() dan reservedLiquidity/
+ * minimumCashReserve lewat AccountingPolicyService.
+ */
+function checkLiquiditySufficient(input) {
+    const availableLiquidity = input.kas + input.bank - input.reservedLiquidity - input.minimumCashReserve - input.pendingDisbursement;
+    if (input.jumlahDiajukan <= availableLiquidity) {
+        return { valid: true, availableLiquidity };
+    }
+    return {
+        valid: false,
+        availableLiquidity,
+        reason: `Likuiditas tidak cukup: tersedia ${availableLiquidity} (kas ${input.kas} + bank ${input.bank} - reserved ${input.reservedLiquidity} - minimum reserve ${input.minimumCashReserve} - pending ${input.pendingDisbursement}), dibutuhkan ${input.jumlahDiajukan}.`,
+    };
+}
+/**
+ * Rule: "no negative balance" — saldo SESUDAH transaksi tidak boleh
+ * negatif, kecuali kebijakan overdraft eksplisit mengizinkan
+ * (izinkanOverdraft=true, mis. untuk rekening bank tertentu yang
+ * memang punya fasilitas cerukan — TIDAK pernah default true).
+ */
+function checkTidakNegatif(params) {
+    const saldoSesudah = params.saldoSaatIni + params.perubahan;
+    if (saldoSesudah >= 0 || params.izinkanOverdraft)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Transaksi ini akan membuat saldo negatif (${saldoSesudah}). Kebijakan overdraft tidak aktif untuk rekening ini.`,
+    };
+}
+// ============================================================
+// ANGGOTA
+// ============================================================
+/** Rule: "member active" — anggota berstatus selain AKTIF tidak boleh jadi subjek transaksi finansial baru. */
+function checkAnggotaAktif(statusAnggota) {
+    if (statusAnggota === 'AKTIF')
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Anggota berstatus "${statusAnggota}" — hanya anggota AKTIF yang bisa melakukan transaksi baru.`,
+    };
+}
+// ============================================================
+// PINJAMAN — eligibility & limit
+// ============================================================
+/**
+ * Rule: "saving balance" — syarat saldo simpanan minimum sebelum
+ * boleh mengajukan pinjaman. `minimum` 0 = tidak ada syarat (default
+ * AccountingPolicyService), jadi fungsi ini otomatis selalu valid
+ * kalau kebijakan belum diaktifkan admin.
+ */
+function checkSaldoSimpananMinimum(saldoSimpanan, minimum) {
+    if (minimum <= 0 || saldoSimpanan >= minimum)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Saldo simpanan (${saldoSimpanan}) belum memenuhi syarat minimum pengajuan pinjaman (${minimum}).`,
+    };
+}
+/**
+ * Rule: "kepemilikan simpanan wajib" — SYARAT WAJIB (bukan kebijakan
+ * configurable seperti checkSaldoSimpananMinimum di atas) sebelum
+ * anggota boleh mengajukan pinjaman: HARUS sudah punya Simpanan Pokok
+ * DAN Simpanan Wajib (> 0), terlepas dari pengaturan
+ * MINIMUM_SALDO_SIMPANAN_PINJAMAN. Kedua alasan ditampilkan sekaligus
+ * kalau keduanya belum ada, supaya anggota/petugas tahu persis apa
+ * yang kurang tanpa harus dicoba berulang.
+ */
+function checkKepemilikanSimpananPokokWajib(saldoPokok, saldoWajib) {
+    const kurang = [];
+    if (saldoPokok <= 0)
+        kurang.push('Simpanan Pokok');
+    if (saldoWajib <= 0)
+        kurang.push('Simpanan Wajib');
+    if (kurang.length === 0)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Pengajuan pinjaman ditolak: anggota belum memiliki ${kurang.join(' dan ')}.`,
+    };
+}
+/** Rule: "loan limit" — plafon pinjaman per pengajuan. `limit` 0 = tanpa batas. */
+function checkLimitPinjaman(jumlahDiajukan, limit) {
+    if (limit <= 0 || jumlahDiajukan <= limit)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Jumlah pinjaman (${jumlahDiajukan}) melebihi plafon maksimum (${limit}).`,
+    };
+}
+/** Rule: "outstanding limit" — total sisa pinjaman berjalan + pinjaman baru tidak boleh melebihi batas. `limit` 0 = tanpa batas. */
+function checkLimitOutstanding(outstandingSaatIni, jumlahBaru, limit) {
+    if (limit <= 0)
+        return { valid: true };
+    const totalSesudah = outstandingSaatIni + jumlahBaru;
+    if (totalSesudah <= limit)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Total pinjaman berjalan setelah pengajuan ini (${totalSesudah} = ${outstandingSaatIni} + ${jumlahBaru}) melebihi batas outstanding (${limit}).`,
+    };
+}
+/**
+ * Rule: "overdue limit" — anggota dengan tunggakan aktif melebihi
+ * batas (jumlah baris DAN/ATAU hari keterlambatan, tergantung mana
+ * yang dikonfigurasi admin) tidak boleh mengajukan pinjaman baru.
+ * Kedua limit 0 = tidak dicek sama sekali (default).
+ */
+function checkBatasTunggakan(params) {
+    if (params.limitJumlahTunggakan > 0 && params.jumlahTunggakanAktif >= params.limitJumlahTunggakan) {
+        return {
+            valid: false,
+            reason: `Anggota memiliki ${params.jumlahTunggakanAktif} tunggakan aktif (batas: ${params.limitJumlahTunggakan}) — pengajuan pinjaman baru ditolak.`,
+        };
+    }
+    if (params.limitHariTerlambat > 0 && params.hariTerlambatMaksimum > params.limitHariTerlambat) {
+        return {
+            valid: false,
+            reason: `Anggota memiliki tunggakan terlambat ${params.hariTerlambatMaksimum} hari (batas: ${params.limitHariTerlambat} hari) — pengajuan pinjaman baru ditolak.`,
+        };
+    }
+    return { valid: true };
+}
+/** Rule: "loan not already disbursed" — pinjaman hanya boleh dicairkan sekali. */
+function checkBelumDicairkan(statusPinjaman) {
+    if (statusPinjaman === 'DIAJUKAN' || statusPinjaman === 'DISETUJUI')
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Pinjaman berstatus "${statusPinjaman}" tidak bisa dicairkan (mungkin sudah cair, lunas, atau ditolak).`,
+    };
+}
+// ============================================================
+// PEMBAYARAN
+// ============================================================
+/**
+ * Rule: "payment <= outstanding" — nominal pembayaran TIDAK BOLEH
+ * melebihi sisa tagihan. Berbeda dari perilaku lama `bayarAngsuran`
+ * (memotong diam-diam, lihat AUDIT_INTERNAL.md §3.2) — rule ini
+ * eksplisit MENOLAK, bukan memotong, supaya pemanggil bisa
+ * menampilkan pesan jelas ke user dan tidak ada uang yang "hilang"
+ * dari jurnal.
+ */
+function checkPembayaranTidakMelebihiOutstanding(nominalBayar, outstanding) {
+    if (nominalBayar <= outstanding)
+        return { valid: true };
+    return {
+        valid: false,
+        reason: `Nominal pembayaran (${nominalBayar}) melebihi sisa tagihan/outstanding (${outstanding}).`,
+    };
+}
+// ============================================================
+// GABUNGAN — jalankan beberapa rule sekaligus, hasil rule pertama yang gagal
+// ============================================================
+/**
+ * Jalankan beberapa RuleResult (yang sudah dihitung pemanggil) secara
+ * berurutan, return rule pertama yang gagal — supaya service pemanggil
+ * cukup satu `if` untuk melempar error, bukan berantai if/else per rule.
+ */
+function validateAll(...results) {
+    const gagal = results.find((r) => !r.valid);
+    return gagal ?? { valid: true };
+}
+/**
+ * RC-S133.6.4 — pasangan `validateAll` yang mengembalikan SEMUA alasan
+ * kegagalan, bukan hanya yang pertama. Dipakai di tempat yang tidak
+ * menolak melainkan memperingatkan (import data awal): pengurus perlu
+ * melihat seluruh syarat yang tidak terpenuhi sekaligus.
+ */
+function collectFailures(...results) {
+    return results.filter((r) => !r.valid).map((r) => r.reason ?? 'Syarat tidak terpenuhi.');
+}
+/**
+ * RC-S133.6.4 — ubah alasan penolakan menjadi kalimat peringatan netral
+ * ("ditolak" menyesatkan bila pinjaman justru tetap dicatat). Pesan asli
+ * tidak diubah; ini hanya dipakai di jalur peringatan (import data awal).
+ */
+function alasanSebagaiPeringatan(reason) {
+    const netral = reason
+        .replace(/^Pengajuan pinjaman ditolak: /, '')
+        .replace(/ — pengajuan pinjaman baru ditolak\.$/, '.')
+        .replace(/ — hanya anggota AKTIF yang bisa melakukan transaksi baru\.$/, '.');
+    const kalimat = netral.charAt(0).toUpperCase() + netral.slice(1);
+    return /[.!?]$/.test(kalimat) ? kalimat : `${kalimat}.`;
+}
+
+},966,[]);
 __d(function(g,_r,_i,_a,_m,e,_d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.terimaUtang=async function(i){return(0,a.withTransaction)(async a=>{await(0,u.requirePermission)(a,i.createdBy,'kas_bank','create');const r=i.persenBunga>0?i.basisBunga??null:null;if(i.persenBunga>0&&null===r)throw new Error('Basis bunga wajib dipilih (Per Tahun / Per Bulan) untuk utang yang berbunga.');const o=await(0,t.resolveKasBankAccountId)(a,i.sumberDana,i.bankAccountId),s='BANK'===i.jenisPemberi?'UTANG_BANK':'UTANG_PIHAK_LAIN',l=await(0,t.resolveAccountId)(a,s,'KREDIT_DEFAULT'),c=new Date(i.tanggal).getFullYear(),A=await(0,d.nextSequence)(a,'UTG',c),{journalId:_}=await(0,n.createJournal)(a,{tanggal:i.tanggal,sumberTransaksi:s,nomorReferensi:A,deskripsi:`Penerimaan utang dari ${i.namaPemberi} - ${A}`,createdBy:i.createdBy,lines:[{accountId:o,debit:i.pokokPinjaman,kredit:0},{accountId:l,debit:0,kredit:i.pokokPinjaman}]}),j=(0,d.newId)(),E=(new Date).toISOString();return await a.runAsync("INSERT INTO utang\n        (id, nomor_utang, nama_pemberi, jenis_pemberi, pokok_pinjaman, persen_bunga, jenis_bunga,\n         basis_bunga, basis_bunga_diisi_oleh, basis_bunga_diisi_pada,\n         tanggal, sumber_dana, bank_account_id, sumber, aset_tetap_id, status, keterangan, journal_id, created_by, created_at, updated_at)\n       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",j,A,i.namaPemberi,i.jenisPemberi,i.pokokPinjaman,i.persenBunga,i.jenisBunga,r,r?i.createdBy:null,r?(new Date).toISOString():null,i.tanggal,i.sumberDana,i.bankAccountId??null,'LANGSUNG',null,'AKTIF',i.keterangan??null,_,i.createdBy,E,E),{id:j,nomorUtang:A,journalId:_}})},e.catatUtangUsahaDariAset=async function(a,n){const t=new Date(n.tanggal).getFullYear(),i=await(0,d.nextSequence)(a,'UTG',t),r=(0,d.newId)(),u=(new Date).toISOString();return await a.runAsync("INSERT INTO utang\n      (id, nomor_utang, nama_pemberi, jenis_pemberi, pokok_pinjaman, persen_bunga, jenis_bunga,\n       basis_bunga, tanggal, sumber_dana, bank_account_id, sumber, aset_tetap_id, status, keterangan, journal_id, created_by, created_at, updated_at)\n     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",r,i,n.namaPemasok,'UTANG_USAHA',n.nilaiPerolehan,0,'LAINNYA',null,n.tanggal,null,null,'PEMBELIAN_ASET',n.asetTetapId,'AKTIF','Timbul otomatis dari pembelian aset tetap secara kredit.',n.journalId,n.createdBy,u,u),{id:r,nomorUtang:i}},e.listUtang=c,e.bayarUtang=async function(o){return(0,a.withTransaction)(async a=>{if(await(0,u.requirePermission)(a,o.createdBy,'kas_bank','create'),o.pokok<0||o.bunga<0)throw new Error('Jumlah pokok/bunga tidak boleh negatif.');if(o.pokok+o.bunga<=0)throw new Error('Jumlah pembayaran harus lebih dari 0.');const s=await a.getFirstAsync("SELECT nama_pemberi, jenis_pemberi, pokok_pinjaman, status FROM utang WHERE id = ?",o.utangId);if(!s)throw new Error('Data utang tidak ditemukan.');if('LUNAS'===s.status)throw new Error('Utang ini sudah lunas.');if('UTANG_USAHA'===s.jenis_pemberi&&o.bunga>0)throw new Error('Utang usaha (pembelian aset) tidak memiliki komponen bunga.');const l=await a.getFirstAsync("SELECT COALESCE(SUM(pokok), 0) as total FROM utang_pembayaran WHERE utang_id = ?",o.utangId),c=s.pokok_pinjaman-(l?.total??0);if(!(0,r.checkPembayaranTidakMelebihiOutstanding)(o.pokok,c).valid)throw new Error(`Pembayaran pokok (${o.pokok}) melebihi sisa pokok utang (${c}).`);const A=await(0,t.resolveKasBankAccountId)(a,o.sumberDana,o.bankAccountId),j=await(0,i.checkSaldoAkunCukup)(a,{accountId:A,namaRekening:'BANK'===o.sumberDana?'rekening bank yang dipilih':'Kas',nominalKeluar:o.pokok+o.bunga});if(!j.valid)throw new Error(j.reason);const E='BANK'===s.jenis_pemberi?'UTANG_BANK':'PIHAK_LAIN'===s.jenis_pemberi?'UTANG_PIHAK_LAIN':'UTANG_USAHA',b=await(0,t.resolveAccountId)(a,E,'KREDIT_DEFAULT'),k=new Date(o.tanggal).getFullYear(),m=await(0,d.nextSequence)(a,'KWJ',k),N=[];if(o.pokok>0&&N.push({accountId:b,debit:o.pokok,kredit:0}),o.bunga>0){const n=await p(a,o.utangId),{keUtangBunga:i,keBeban:r}=_(o.bunga,n.outstanding);if(i>0){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL');N.push({accountId:n,debit:i,kredit:0})}if(r>0){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','DEBIT_BEBAN');N.push({accountId:n,debit:r,kredit:0})}}N.push({accountId:A,debit:0,kredit:o.pokok+o.bunga});const{journalId:S}=await(0,n.createJournal)(a,{tanggal:o.tanggal,sumberTransaksi:E,nomorReferensi:m,deskripsi:`Pelunasan utang ${s.nama_pemberi} - ${m}`,createdBy:o.createdBy,lines:N}),T=(0,d.newId)(),U=(new Date).toISOString();await a.runAsync("INSERT INTO utang_pembayaran\n        (id, utang_id, tanggal, pokok, bunga, sumber_dana, bank_account_id, nomor_transaksi, journal_id, created_by, created_at)\n       VALUES (?,?,?,?,?,?,?,?,?,?,?)",T,o.utangId,o.tanggal,o.pokok,o.bunga,o.sumberDana,o.bankAccountId??null,m,S,o.createdBy,U);const y=c-o.pokok;return y<=0&&await a.runAsync("UPDATE utang SET status = 'LUNAS', updated_at = ? WHERE id = ?",U,o.utangId),{id:T,nomorTransaksi:m,journalId:S,sisaPokokSetelah:Math.max(0,y)}})},e.akruiBungaUtang=A,e.bagiPembayaranBunga=_,e.getDiagnostikUtangBungaHistoris=async function(){const n=await(0,a.getDb)(),i=await(0,t.resolveAccountId)(n,'UTANG_BUNGA','KREDIT_AKRUAL'),r=await n.getAllAsync("SELECT id, nomor_utang, nama_pemberi FROM utang ORDER BY tanggal ASC"),u=[];for(const a of r){const t=await n.getFirstAsync("SELECT COALESCE(SUM(je.kredit),0) kredit, COALESCE(SUM(je.debit),0) debit\n         FROM journal_entry je JOIN journal j ON j.id = je.journal_id\n        WHERE je.account_id = ? AND j.sumber_transaksi = 'UTANG_BUNGA'\n          AND j.sumber_id = ? AND j.status IN ('POSTED','REVERSED')",i,a.id),r=t?.kredit??0,o=t?.debit??0,s=await U(n,a.id),d=s.totalDibayar,l=await n.getFirstAsync("SELECT COALESCE(SUM(je.kredit - je.debit),0) total\n         FROM journal_entry je JOIN journal j ON j.id = je.journal_id\n        WHERE je.account_id = ?\n          AND j.status IN ('POSTED','REVERSED')\n          AND (\n            j.sumber_id = ?\n            OR j.id IN (SELECT journal_id FROM utang_pembayaran WHERE utang_id = ?)\n          )",i,a.id,a.id),c=l?.total??0,A=r-o-s.diterapkanKeUtangBunga,_=[];for(const a of s.pembayaran){if(a.keUtangBunga<=0||!a.journalId)continue;const t=await n.getFirstAsync("SELECT j.nomor_jurnal, COALESCE((SELECT SUM(je.debit) FROM journal_entry je WHERE je.journal_id = j.id AND je.account_id = ?), 0) AS debit\n           FROM journal j WHERE j.id = ?",i,a.journalId);t&&t.debit<a.keUtangBunga&&_.push({journal_id:a.journalId,nomor_jurnal:t.nomor_jurnal,tanggal:a.tanggal,bunga:a.bunga})}_.sort((a,n)=>a.tanggal<n.tanggal?-1:a.tanggal>n.tanggal?1:0);const j=c-A;0===j&&0===r&&0===d||u.push({utangId:a.id,nomorUtang:a.nomor_utang,namaPemberi:a.nama_pemberi,totalAkrual:r,totalDibayar:d,totalReversal:o,outstandingSeharusnya:A,saldoLedger:c,selisih:j,periodeTerdampak:[...new Set(_.map(a=>E(a.tanggal)))],jurnalPenyebab:_.map(a=>({journalId:a.journal_id,nomorJurnal:a.nomor_jurnal,tanggal:a.tanggal,bunga:a.bunga}))})}const o=a=>u.reduce((n,t)=>n+a(t),0),s=o(a=>a.selisih);return{totalAkrual:o(a=>a.totalAkrual),totalDibayar:o(a=>a.totalDibayar),totalReversal:o(a=>a.totalReversal),outstandingSeharusnya:o(a=>a.outstandingSeharusnya),saldoLedger:o(a=>a.saldoLedger),selisih:s,adaSelisih:0!==s,perUtang:u,usulanKoreksi:s}},e.penyesuaianManualBungaUtang=async function(a){const n=a.alasan?.trim()??'';if(n.length<5)throw new Error('Alasan penyesuaian manual wajib diisi (minimal 5 karakter).');return A({utangId:a.utangId,tanggal:a.tanggal,nominal:a.nominalTarget,keterangan:`Penyesuaian manual: ${n}`,createdBy:a.createdBy})},e.assertKontrakBungaBolehDiubah=j,e.lengkapiBasisBungaUtang=async function(n){return(0,a.withTransaction)(async a=>{if(await(0,u.requirePermission)(a,n.createdBy,'kas_bank','edit'),'TAHUNAN'!==n.basisBunga&&'BULANAN'!==n.basisBunga)throw new Error('Basis bunga harus "TAHUNAN" atau "BULANAN".');const t=await a.getFirstAsync("SELECT nama_pemberi, jenis_pemberi, persen_bunga, basis_bunga FROM utang WHERE id = ?",n.utangId);if(!t)throw new Error('Data utang tidak ditemukan.');if('UTANG_USAHA'===t.jenis_pemberi)throw new Error('Utang usaha (pembelian aset) tidak memiliki komponen bunga.');if(!(t.persen_bunga>0))throw new Error('Utang ini tidak berbunga \u2014 basis bunga tidak berlaku.');if(t.basis_bunga===n.basisBunga)return{diubah:!1,basisBunga:n.basisBunga};t.basis_bunga&&await j(a,n.utangId,'Basis bunga');const i=(new Date).toISOString();await a.runAsync("UPDATE utang SET basis_bunga = ?, basis_bunga_diisi_oleh = ?, basis_bunga_diisi_pada = ?, updated_at = ?\n        WHERE id = ?",n.basisBunga,n.createdBy,i,i,n.utangId);const r=new Date;return await a.runAsync("INSERT INTO audit_log (id, user_id, tanggal, waktu, action, entity, entity_id, data_sebelum, data_sesudah, created_at)\n       VALUES (?,?,?,?,?,?,?,?,?,?)",(0,d.newId)(),n.createdBy,r.toISOString().slice(0,10),r.toISOString().slice(11,19),'UPDATE','utang',n.utangId,JSON.stringify({basisBunga:t.basis_bunga}),JSON.stringify({basisBunga:n.basisBunga,persenBunga:t.persen_bunga}),r.toISOString()),{diubah:!0,basisBunga:n.basisBunga}})},e.periodeKeyDariTanggal=E,e.getGapAkrualBungaUtangPadaDb=b,e.getGapAkrualBungaUtang=async function(n,t,i){return b(await(0,a.getDb)(),n,t,i)},e.getRekonsiliasiBungaUtang=p,e.bandingkanKejadianBungaUtang=N,e.muatKejadianBungaUtang=S,e.hitungReplayDariKejadian=T,e.replayBungaUtang=U,e.getSaldoUtangBunga=async function(i){const r=await(0,a.getDb)(),u=await(0,t.resolveAccountId)(r,'UTANG_BUNGA','KREDIT_AKRUAL');return(0,n.getAccountBalance)(r,u,i)},e.listAkunKewajiban=I,Object.defineProperty(e,"PESAN_SIMPANAN_BERJANGKA_BUKAN_KEWAJIBAN_UMUM",{enumerable:!0,get:function(){return R}}),Object.defineProperty(e,"PESAN_PENDAPATAN_DIMUKA_BUKAN_KEWAJIBAN_UMUM",{enumerable:!0,get:function(){return D}}),e.listAkunKewajibanUmum=async function(){const n=await(0,a.getDb)(),t=await w(n);return(await I()).filter(a=>!a.jenisPemberiTerkait&&!t.has(a.accountId)&&a.saldo>0)},e.pesanMelebihiSaldoKewajiban=O,Object.defineProperty(e,"PESAN_UTANG_BUNGA_LEWAT_BAYAR_UTANG",{enumerable:!0,get:function(){return B}}),e.bayarKewajibanCoa=async function(t){const i=await(0,a.getDb)(),r=await i.getFirstAsync("SELECT id, nama, kategori, is_active FROM account WHERE id = ?",t.accountId);if(!r)throw new Error('Akun kewajiban tidak ditemukan.');if('LIABILITAS'!==r.kategori)throw new Error('Akun yang dipilih bukan akun Liabilitas/Kewajiban.');if(!r.is_active)throw new Error('Akun ini sudah dinonaktifkan dan tidak dapat dipakai transaksi baru.');const u=await i.getFirstAsync("SELECT account_id FROM account_mapping WHERE transaction_type = 'SIMPANAN_SUKARELA' AND role = 'KREDIT_DEFAULT'");if(u?.account_id===t.accountId)throw new Error('Simpanan Sukarela memiliki alur transaksi tersendiri (menu Simpanan/Tarik Simpanan Anggota) \u2014 tidak dibayar lewat Bayar Kewajiban.');const s=y.map(a=>a.transactionType),d=s.map(()=>'?').join(',');if(await i.getFirstAsync(`SELECT transaction_type FROM account_mapping\n     WHERE account_id = ? AND role = 'KREDIT_DEFAULT' AND transaction_type IN (${d})`,t.accountId,...s))throw new Error('Akun ini dikelola lewat pencatatan Utang Koperasi (pokok, bunga, outstanding) \u2014 pilih dari daftar Utang Koperasi, bukan pembayaran langsung.');const l=await i.getFirstAsync("SELECT account_id FROM account_mapping WHERE transaction_type = 'UTANG_BUNGA' AND role = 'KREDIT_AKRUAL'");if(l?.account_id===t.accountId)throw new Error(B);const c=(await w(i)).get(t.accountId);if(c)throw new Error(c);const A=await(0,n.getAccountBalance)(i,t.accountId);if(!(t.nominal>0))throw new Error('Nominal pembayaran harus lebih dari 0.');if(t.nominal>A)throw new Error(O(A));return(0,o.catatPengeluaran)({jenis:t.sumberDana,bankAccountId:t.bankAccountId,nominal:t.nominal,tanggal:t.tanggal,akunLawanId:t.accountId,kategori:'Kewajiban',keterangan:t.keterangan?.trim()||`Pembayaran kewajiban ${r.nama}`,createdBy:t.createdBy})},e.muatKejadianBungaUtangSemua=L,e.akrualBersihPerUtangPeriode=h,e.dibebankanSaatBayarPerUtangPeriode=P,e.periodeAkrualPerUtang=G,e.akrualKembarPerUtang=C,e.pembayaranTanpaJurnalPerUtang=M,e.getKontrolGapUtangBunga=async function(i){const r=i??await(0,a.getDb)(),u=await(0,t.resolveAccountId)(r,'UTANG_BUNGA','KREDIT_AKRUAL'),o=await(0,t.resolveAccountId)(r,'UTANG_BUNGA','DEBIT_BEBAN'),s=[];let d=0;const l=await r.getAllAsync("SELECT id, nomor_utang, nama_pemberi FROM utang ORDER BY tanggal ASC, id ASC");for(const a of l){const n=await U(r,a.id);d+=n.outstanding;const t={utangId:a.id,nomorUtang:a.nomor_utang,namaPemberi:a.nama_pemberi},i=await r.getFirstAsync("SELECT COALESCE(SUM(je.kredit - je.debit),0) total\n         FROM journal_entry je JOIN journal j ON j.id = je.journal_id\n        WHERE je.account_id = ? AND j.status IN ('POSTED','REVERSED')\n          AND ((j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id = ?)\n               OR j.id IN (SELECT journal_id FROM utang_pembayaran WHERE utang_id = ? AND journal_id IS NOT NULL))",u,a.id,a.id),l=i?.total??0,c=[];let A=0;for(const a of n.pembayaran){if(!a.journalId)continue;const n=await r.getFirstAsync("SELECT COALESCE((SELECT SUM(je.debit - je.kredit) FROM journal_entry je WHERE je.journal_id = j.id AND je.account_id = ?), 0) AS debit, j.status\n           FROM journal j WHERE j.id = ?",u,a.journalId);n&&n.debit!==a.keUtangBunga&&(c.push(a.journalId),A+=a.keUtangBunga-n.debit)}if(l!==n.outstanding){const a=c.length>0&&A===l-n.outstanding;s.push(Object.assign({kode:a?'UTANG_BUNGA_HISTORICAL_GAP':'INTEREST_PAYABLE_GAP'},t,{periode:null,expected:n.outstanding,recorded:l,difference:l-n.outstanding,jurnal:await f(r,c,u),keterangan:a?'Jurnal pembayaran tidak mengurangi Utang Bunga sebesar aturan pembagian (pola sebelum RC-S53). Tidak dikoreksi otomatis.':'Saldo Utang Bunga utang ini tidak sama dengan outstanding menurut subledger (akrual - pelunasan yang diterapkan).'}))}l<0&&s.push(Object.assign({kode:'OUTSTANDING_NEGATIF'},t,{periode:null,expected:Math.max(0,n.outstanding),recorded:l,difference:l-Math.max(0,n.outstanding),jurnal:[],keterangan:'Utang Bunga utang ini bersaldo debit: dilunasi melebihi yang pernah diakui.'}));const _=await r.getAllAsync("SELECT DISTINCT substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) AS periode\n         FROM journal j LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n        WHERE j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id = ? AND j.status IN ('POSTED','REVERSED')",a.id);for(const{periode:n}of _){const i=await b(r,a.id,n,0);if(i.akrualBersih>0&&i.dibebankanSaatBayar>0){const d=await r.getAllAsync("SELECT j.id FROM journal j LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n            WHERE j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id = ? AND j.status IN ('POSTED','REVERSED')\n              AND substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) = ?",a.id,n),l=await r.getAllAsync("SELECT journal_id FROM utang_pembayaran WHERE utang_id = ? AND bunga > 0 AND journal_id IS NOT NULL AND substr(tanggal,1,7) = ?",a.id,n),c=Math.min(i.akrualBersih,i.dibebankanSaatBayar);s.push(Object.assign({kode:'DUPLICATE_INTEREST_EXPENSE'},t,{periode:n,expected:i.akrualBersih+i.dibebankanSaatBayar-c,recorded:i.akrualBersih+i.dibebankanSaatBayar,difference:c,jurnal:[...await f(r,d.map(a=>a.id),u),...await f(r,l.map(a=>a.journal_id),o)],keterangan:'Bunga periode ini dibebankan saat dibayar tanpa akrual DAN juga diakru \u2014 beban terhitung dua kali sebesar difference (pola sebelum RC-S54 Tahap 10). Tidak dikoreksi otomatis.'}))}}const j=await r.getAllAsync("SELECT x.tanggal, x.nilai, GROUP_CONCAT(x.id) AS ids, COUNT(*) AS n FROM (\n         SELECT j.id, j.tanggal, SUM(je.kredit - je.debit) AS nilai\n           FROM journal j JOIN journal_entry je ON je.journal_id = j.id\n          WHERE je.account_id = ? AND j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id = ? AND j.status = 'POSTED'\n            AND j.reversal_of_id IS NULL\n          GROUP BY j.id, j.tanggal\n       ) x WHERE x.nilai > 0 GROUP BY x.tanggal, x.nilai HAVING COUNT(*) > 1",u,a.id);for(const a of j)s.push(Object.assign({kode:'DUPLICATE_INTEREST_EXPENSE'},t,{periode:E(a.tanggal),expected:a.nilai,recorded:a.nilai*a.n,difference:a.nilai*(a.n-1),jurnal:await f(r,a.ids.split(','),u),keterangan:`${a.n} jurnal akrual identik (tanggal & nominal sama) untuk satu utang \u2014 tidak mungkin dibuat lewat gap control; perlu ditinjau.`}));const p=await r.getAllAsync("SELECT p.id, p.tanggal, p.bunga, p.journal_id FROM utang_pembayaran p\n         LEFT JOIN journal j ON j.id = p.journal_id\n        WHERE p.utang_id = ? AND p.bunga > 0 AND (p.journal_id IS NULL OR j.id IS NULL OR j.status NOT IN ('POSTED','REVERSED'))",a.id);for(const a of p)s.push(Object.assign({kode:'SUBLEDGER_TANPA_JURNAL'},t,{periode:E(a.tanggal),expected:a.bunga,recorded:0,difference:-a.bunga,jurnal:[],keterangan:`Pembayaran bunga ${a.id} tercatat di utang_pembayaran tetapi jurnalnya ${a.journal_id??'(kosong)'} tidak ada/tidak berlaku.`}))}const c=await r.getAllAsync("SELECT DISTINCT j.id FROM journal j JOIN journal_entry je ON je.journal_id = j.id\n      WHERE je.account_id = ? AND j.status IN ('POSTED','REVERSED')\n        AND NOT (j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id IN (SELECT id FROM utang))\n        AND j.id NOT IN (SELECT journal_id FROM utang_pembayaran WHERE journal_id IS NOT NULL)\n      ORDER BY j.tanggal, j.id",u);if(c.length>0){const a=await f(r,c.map(a=>a.id),u),n=a.reduce((a,n)=>a+n.nilai,0);s.push({kode:'JURNAL_TANPA_SUBLEDGER',utangId:null,nomorUtang:null,namaPemberi:null,periode:null,expected:0,recorded:n,difference:n,jurnal:a,keterangan:'Mutasi akun Utang Bunga yang tidak berasal dari akrual utang maupun pembayaran utang (mis. pengeluaran kas langsung ke akun ini).'})}const A=await(0,n.getAccountBalance)(r,u),_=A-d;return{status:0===s.length&&0===_?'BALANCED':'GAP',expected:d,actual:A,gap:_,temuan:s}},e.getKontrolGapUtangBungaAsOf=async function(i,r){const u=r??await(0,a.getDb)(),o=await(0,t.resolveAccountId)(u,'UTANG_BUNGA','KREDIT_AKRUAL'),s=await(0,t.resolveAccountId)(u,'UTANG_BUNGA','DEBIT_BEBAN'),d=i.slice(0,7),l=await L(u),A=await h(u),_=await P(u),j=await G(u),b=await C(u),p=await M(u),k=[];let m=0;for(const a of await c({asOfDate:i})){const n={utangId:a.id,nomorUtang:a.nomorUtang,namaPemberi:a.namaPemberi},t=l.get(a.id)??[],r=T(t),s=t.filter(a=>void 0!==a.akrual&&a.tanggal<=i).reduce((a,n)=>a+(n.akrual??0),0),c=r.pembayaran.filter(a=>a.tanggal<=i),A=s-c.reduce((a,n)=>a+n.keUtangBunga,0);m+=A;const _=await K(u,c.map(a=>a.journalId).filter(a=>!!a),o),j=s+_.filter(a=>a.tanggal<=i).reduce((a,n)=>a+n.nilai,0);j!==A&&k.push(Object.assign({kode:'INTEREST_PAYABLE_GAP'},n,{periode:d,expected:A,recorded:j,difference:j-A,jurnal:_,keterangan:`Per ${i}: saldo Utang Bunga utang ini tidak sama dengan outstanding subledger as-of.`})),j<0&&k.push(Object.assign({kode:'OUTSTANDING_NEGATIF'},n,{periode:d,expected:Math.max(0,A),recorded:j,difference:j-Math.max(0,A),jurnal:[],keterangan:`Per ${i}: Utang Bunga utang ini bersaldo debit.`}))}const N=await u.getAllAsync("SELECT id, nomor_utang, nama_pemberi FROM utang ORDER BY tanggal ASC, id ASC");for(const a of N){const n={utangId:a.id,nomorUtang:a.nomor_utang,namaPemberi:a.nama_pemberi};for(const t of j.get(a.id)??[]){const i=A.get(`${a.id}|${t}`)??0,r=_.get(`${a.id}|${t}`)??0;if(!(i>0&&r>0))continue;if(t>d)continue;const l=await u.getAllAsync("SELECT j.id FROM journal j LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n          WHERE j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id = ? AND j.status IN ('POSTED','REVERSED')\n            AND substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) = ?",a.id,t),c=await u.getAllAsync("SELECT journal_id FROM utang_pembayaran WHERE utang_id = ? AND bunga > 0 AND journal_id IS NOT NULL AND substr(tanggal,1,7) = ?",a.id,t),j=Math.min(i,r);k.push(Object.assign({kode:'DUPLICATE_INTEREST_EXPENSE'},n,{periode:t,expected:i+r-j,recorded:i+r,difference:j,jurnal:[...await K(u,l.map(a=>a.id),o),...await K(u,c.map(a=>a.journal_id),s)],keterangan:'Bunga periode ini dibebankan saat dibayar tanpa akrual DAN juga diakru \u2014 beban terhitung dua kali sebesar difference (pola sebelum RC-S54 Tahap 10). Tidak dikoreksi otomatis.'}))}for(const t of b.get(a.id)??[]){const a=E(t.tanggal);a>d||k.push(Object.assign({kode:'DUPLICATE_INTEREST_EXPENSE'},n,{periode:a,expected:t.nilai,recorded:t.nilai*t.n,difference:t.nilai*(t.n-1),jurnal:await K(u,t.ids.split(','),o),keterangan:`${t.n} jurnal akrual identik (tanggal & nominal sama) untuk satu utang \u2014 tidak mungkin dibuat lewat gap control; perlu ditinjau.`}))}for(const t of p.get(a.id)??[]){const a=E(t.tanggal);a>d||k.push(Object.assign({kode:'SUBLEDGER_TANPA_JURNAL'},n,{periode:a,expected:t.bunga,recorded:0,difference:-t.bunga,jurnal:[],keterangan:`Pembayaran bunga ${t.id} tercatat di utang_pembayaran tetapi jurnalnya ${t.journal_id??'(kosong)'} tidak ada/tidak berlaku.`}))}}const S=await u.getAllAsync("SELECT DISTINCT j.id FROM journal j JOIN journal_entry je ON je.journal_id = j.id\n      WHERE je.account_id = ? AND j.status IN ('POSTED','REVERSED')\n        AND j.tanggal <= ?\n        AND NOT (j.sumber_transaksi = 'UTANG_BUNGA' AND j.sumber_id IN (SELECT id FROM utang))\n        AND j.id NOT IN (SELECT journal_id FROM utang_pembayaran WHERE journal_id IS NOT NULL)\n      ORDER BY j.tanggal, j.id",o,i);if(S.length>0){const a=await K(u,S.map(a=>a.id),o),n=a.reduce((a,n)=>a+n.nilai,0);0!==n&&k.push({kode:'JURNAL_TANPA_SUBLEDGER',utangId:null,nomorUtang:null,namaPemberi:null,periode:d,expected:0,recorded:n,difference:n,jurnal:a,keterangan:`Per ${i}: Mutasi akun Utang Bunga yang tidak berasal dari akrual utang maupun pembayaran utang (mis. pengeluaran kas langsung ke akun ini).`})}const U=await(0,n.getAccountBalance)(u,o,i),y=U-m;return{asOfDate:i,status:0===k.length&&0===y?'BALANCED':'GAP',expected:m,actual:U,gap:y,temuan:k}};var a=_r(_d[0]),n=_r(_d[1]),t=_r(_d[2]),i=_r(_d[3]),r=_r(_d[4]),u=_r(_d[5]),o=_r(_d[6]),s=_r(_d[7]),d=_r(_d[8]),l=_r(_d[9]);async function c(n={}){const t=await(0,a.getDb)(),i=[],r=[];if(n.status&&!n.asOfDate&&(i.push('u.status = ?'),r.push(n.status)),n.search){i.push('(u.nama_pemberi LIKE ? OR u.nomor_utang LIKE ?)');const a=`%${n.search}%`;r.push(a,a)}n.asOfDate&&(i.push('u.tanggal <= ?'),r.push(n.asOfDate)),n.jenisPemberi&&(i.push('u.jenis_pemberi = ?'),r.push(n.jenisPemberi));const u=i.length?`WHERE ${i.join(' AND ')}`:'',o=n.asOfDate?"(SELECT SUM(pokok) FROM utang_pembayaran WHERE utang_id = u.id AND tanggal <= ?)":"(SELECT SUM(pokok) FROM utang_pembayaran WHERE utang_id = u.id)",s=n.asOfDate?[n.asOfDate]:[];let d=(await t.getAllAsync(`SELECT u.*, COALESCE(${o}, 0) as pokok_terbayar\n     FROM utang u ${u} ORDER BY u.created_at DESC`,...s,...r)).map(a=>{const t=a.pokok_pinjaman-a.pokok_terbayar;return{id:a.id,nomorUtang:a.nomor_utang,namaPemberi:a.nama_pemberi,jenisPemberi:a.jenis_pemberi,sumber:a.sumber??'LANGSUNG',asetTetapId:a.aset_tetap_id??null,pokokPinjaman:a.pokok_pinjaman,sisaPokok:t,persenBunga:a.persen_bunga,jenisBunga:a.jenis_bunga,basisBunga:'TAHUNAN'===a.basis_bunga||'BULANAN'===a.basis_bunga?a.basis_bunga:null,tanggal:a.tanggal,status:n.asOfDate?t<=0?'LUNAS':'AKTIF':a.status,keterangan:a.keterangan??null}});return n.status&&n.asOfDate&&(d=d.filter(a=>a.status===n.status)),d}async function A(i){return(0,a.withTransaction)(async a=>{if(await(0,u.requirePermission)(a,i.createdBy,'kas_bank','create'),!Number.isFinite(i.nominal)||i.nominal<=0)throw new Error('Nominal akrual bunga harus lebih dari 0.');const r=await a.getFirstAsync("SELECT nama_pemberi, jenis_pemberi, status FROM utang WHERE id = ?",i.utangId);if(!r)throw new Error('Data utang tidak ditemukan.');if('LUNAS'===r.status)throw new Error('Utang ini sudah lunas \u2014 tidak ada lagi bunga berjalan.');if('UTANG_USAHA'===r.jenis_pemberi)throw new Error('Utang usaha (pembelian aset) tidak memiliki komponen bunga.');const o=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','DEBIT_BEBAN'),s=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),l=E(i.tanggal),c=await b(a,i.utangId,l,i.nominal);if(c.sisaGap<=0)return{journalId:null,periodeKey:l,target:i.nominal,sudahDiakui:c.akrualBersih+c.dibebankanSaatBayar,dibukukanSekarang:0};const A=c.sisaGap,_=new Date(i.tanggal).getFullYear(),j=await(0,d.nextSequence)(a,'AKB',_),{journalId:p}=await(0,n.createJournal)(a,{tanggal:i.tanggal,sumberTransaksi:'UTANG_BUNGA',sumberId:i.utangId,nomorReferensi:j,deskripsi:`Akrual bunga utang ${r.nama_pemberi}${i.keterangan?` - ${i.keterangan}`:''} - ${j}`,createdBy:i.createdBy,lines:[{accountId:o,debit:A,kredit:0},{accountId:s,debit:0,kredit:A}]});return{journalId:p,periodeKey:l,target:i.nominal,sudahDiakui:c.akrualBersih+c.dibebankanSaatBayar,dibukukanSekarang:A}})}function _(a,n){const t=a>0?a:0,i=n>0?n:0,r=Math.min(t,i);return{keUtangBunga:r,keBeban:t-r}}async function j(a,n,t){const i=await a.getFirstAsync("SELECT COUNT(*) AS n FROM utang_bunga_akrual WHERE utang_id = ?",n);if((i?.n??0)>0)throw new Error(`${t} tidak dapat diubah karena utang ini sudah memiliki akrual yang terbukukan. Gunakan pembalikan (reversal) dan jurnal penyesuaian bila kontraknya memang berbeda.`)}function E(a){return a.slice(0,7)}async function b(a,n,i,r){const u=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),o=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','DEBIT_BEBAN'),s=await a.getFirstAsync("SELECT COALESCE(SUM(je.kredit - je.debit), 0) AS total\n       FROM journal_entry je\n       JOIN journal j ON j.id = je.journal_id\n       LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n      WHERE je.account_id = ?\n        AND j.sumber_transaksi = 'UTANG_BUNGA'\n        AND j.sumber_id = ?\n        AND substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) = ?\n        AND j.status IN ('POSTED','REVERSED')",u,n,i),d=await a.getFirstAsync("SELECT COALESCE(SUM(je.debit - je.kredit), 0) AS total\n       FROM utang_pembayaran p\n       JOIN journal j ON j.id = p.journal_id\n       JOIN journal_entry je ON je.journal_id = j.id\n      WHERE p.utang_id = ?\n        AND je.account_id = ?\n        AND substr(p.tanggal, 1, 7) = ?\n        AND j.status IN ('POSTED','REVERSED')",n,o,i),l=s?.total??0,c=d?.total??0,A=l+c,_=r-A;return{utangId:n,periodeKey:i,target:r,akrualBersih:l,dibebankanSaatBayar:c,sisaGap:_>0?_:0,melebihiTarget:A>r}}async function p(a,n){const t=await U(a,n);return{totalAkrual:t.totalAkrual,totalDibayar:t.totalDibayar,outstanding:t.outstanding>0?t.outstanding:0,kelebihanDibayar:t.dibebankanSaatBayar}}const k='\uffff';function m(a){const n=a?/^(.*)-(\d+)$/.exec(a):null;return n?{prefix:n[1],urut:Number(n[2])}:{prefix:k,urut:0}}function N(a,n){if(a.createdAt!==n.createdAt)return a.createdAt<n.createdAt?-1:1;const t=m(a.nomorJurnal),i=m(n.nomorJurnal);return t.prefix!==i.prefix?t.prefix<i.prefix?-1:1:t.urut!==i.urut?t.urut-i.urut:a.tanggal!==n.tanggal?a.tanggal<n.tanggal?-1:1:a.jenis!==n.jenis?'AKRUAL'===a.jenis?-1:1:a.id!==n.id?a.id<n.id?-1:1:0}async function S(a,n){const i=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),r=await a.getAllAsync("SELECT j.id AS journal_id, j.created_at AS created_at, SUM(je.kredit - je.debit) AS nilai,\n            j.tanggal AS tanggal, j.nomor_jurnal AS nomor_jurnal\n       FROM journal_entry je\n       JOIN journal j ON j.id = je.journal_id\n      WHERE je.account_id = ?\n        AND j.sumber_transaksi = 'UTANG_BUNGA'\n        AND j.sumber_id = ?\n        AND j.status IN ('POSTED','REVERSED')\n      GROUP BY j.id, j.created_at, j.tanggal, j.nomor_jurnal",i,n),u=await a.getAllAsync("SELECT p.id, p.tanggal, p.journal_id, p.created_at, p.bunga, j.nomor_jurnal AS nomor_jurnal\n       FROM utang_pembayaran p LEFT JOIN journal j ON j.id = p.journal_id\n      WHERE p.utang_id = ? AND p.bunga > 0",n);return[...r.map(a=>({jenis:'AKRUAL',id:a.journal_id,createdAt:a.created_at,tanggal:a.tanggal,nomorJurnal:a.nomor_jurnal??null,akrual:a.nilai})),...u.map(a=>({jenis:'PEMBAYARAN',id:a.id,createdAt:a.created_at,tanggal:a.tanggal,nomorJurnal:a.nomor_jurnal??null,bayar:{id:a.id,tanggal:a.tanggal,journal_id:a.journal_id,created_at:a.created_at,bunga:a.bunga}}))].sort(N)}function T(a){let n=0,t=0,i=0,r=0,u=0;const o=[];for(const s of a)if(void 0!==s.akrual)t+=s.akrual,n+=s.akrual;else if(s.bayar){const{keUtangBunga:a,keBeban:t}=_(s.bayar.bunga,n);n-=a,i+=s.bayar.bunga,r+=a,u+=t,o.push({id:s.bayar.id,tanggal:s.bayar.tanggal,journalId:s.bayar.journal_id,bunga:s.bayar.bunga,keUtangBunga:a,keBeban:t})}return{totalAkrual:t,totalDibayar:i,diterapkanKeUtangBunga:r,dibebankanSaatBayar:u,outstanding:n,pembayaran:o}}async function U(a,n){return T(await S(a,n))}const y=[{transactionType:'UTANG_BANK',jenisPemberi:'BANK'},{transactionType:'UTANG_PIHAK_LAIN',jenisPemberi:'PIHAK_LAIN'},{transactionType:'UTANG_USAHA',jenisPemberi:'UTANG_USAHA'}];async function I(){const t=await(0,a.getDb)(),i=await(0,s.getAccountsUntukKewajiban)(),r=y.map(()=>'?').join(','),u=await t.getAllAsync(`SELECT transaction_type, account_id FROM account_mapping\n     WHERE role = 'KREDIT_DEFAULT' AND transaction_type IN (${r})`,...y.map(a=>a.transactionType)),o=new Map;for(const a of u){const n=y.find(n=>n.transactionType===a.transaction_type);n&&o.set(a.account_id,n.jenisPemberi)}const d=[];for(const a of i)d.push({accountId:a.id,kode:a.kode,nama:a.nama,saldo:await(0,n.getAccountBalance)(t,a.id),jenisPemberiTerkait:o.get(a.id)??null});return d}const R='Simpanan Berjangka dan bunganya dikelola otomatis oleh siklus Simpanan Berjangka \u2014 tidak dibayar lewat Bayar Kewajiban.',D='Pendapatan Diterima Dimuka diakui otomatis sebagai pendapatan \u2014 tidak dibayar lewat Bayar Kewajiban.';async function w(a){const n=[{transactionType:'SIMPANAN_SUKARELA',role:'KREDIT_DEFAULT',pesan:'Simpanan Sukarela memiliki alur transaksi tersendiri (menu Simpanan/Tarik Simpanan Anggota) \u2014 tidak dibayar lewat Bayar Kewajiban.'},...y.map(a=>({transactionType:a.transactionType,role:'KREDIT_DEFAULT',pesan:'Akun ini dikelola lewat pencatatan Utang Koperasi (pokok, bunga, outstanding) \u2014 pilih dari daftar Utang Koperasi, bukan pembayaran langsung.'})),{transactionType:'UTANG_BUNGA',role:'KREDIT_AKRUAL',pesan:B},{transactionType:'SIMPANAN_BERJANGKA',role:'KREDIT_DEFAULT',pesan:R},{transactionType:'SIMPANAN_BERJANGKA_BUNGA_AKRUAL',role:'KREDIT_UTANG_BUNGA',pesan:R},{transactionType:'PENDAPATAN_DITERIMA_DIMUKA',role:'KREDIT_DEFAULT',pesan:D}],t=new Map;for(const i of n){const n=await a.getFirstAsync("SELECT account_id FROM account_mapping WHERE transaction_type = ? AND role = ?",i.transactionType,i.role);n?.account_id&&!t.has(n.account_id)&&t.set(n.account_id,i.pesan)}return t}function O(a){return`Pembayaran melebihi saldo kewajiban.\nSaldo yang tersedia: ${(0,l.formatRupiah)(a>0?a:0)}.`}const B='Utang Bunga dilunasi lewat pembayaran Utang Koperasi (isi porsi bunga pada utang terkait), bukan Bayar Kewajiban langsung \u2014 supaya outstanding bunga per utang ikut berkurang.';async function f(a,n,t){const i=[];for(const r of n){const n=await a.getFirstAsync("SELECT j.id, j.nomor_jurnal, j.tanggal, j.sumber_transaksi,\n              COALESCE((SELECT SUM(je.kredit - je.debit) FROM journal_entry je WHERE je.journal_id = j.id AND je.account_id = ?), 0) AS nilai\n         FROM journal j WHERE j.id = ?",t,r);n&&i.push({journalId:n.id,nomorJurnal:n.nomor_jurnal,tanggal:n.tanggal,sumberTransaksi:n.sumber_transaksi,nilai:n.nilai})}return i}async function L(a){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),i=await a.getAllAsync("SELECT j.sumber_id AS utang_id, j.id AS journal_id, j.created_at AS created_at,\n            SUM(je.kredit - je.debit) AS nilai, j.tanggal AS tanggal, j.nomor_jurnal AS nomor_jurnal\n       FROM journal_entry je\n       JOIN journal j ON j.id = je.journal_id\n      WHERE je.account_id = ?\n        AND j.sumber_transaksi = 'UTANG_BUNGA'\n        AND j.status IN ('POSTED','REVERSED')\n      GROUP BY j.id, j.sumber_id, j.created_at, j.tanggal, j.nomor_jurnal",n),r=await a.getAllAsync("SELECT p.utang_id AS utang_id, p.id, p.tanggal, p.journal_id, p.created_at, p.bunga,\n            j.nomor_jurnal AS nomor_jurnal\n       FROM utang_pembayaran p LEFT JOIN journal j ON j.id = p.journal_id\n      WHERE p.bunga > 0"),u=new Map,o=(a,n)=>{const t=u.get(a);t?t.push(n):u.set(a,[n])};for(const a of i)o(a.utang_id,{jenis:'AKRUAL',id:a.journal_id,createdAt:a.created_at,tanggal:a.tanggal,nomorJurnal:a.nomor_jurnal??null,akrual:a.nilai});for(const a of r)o(a.utang_id,{jenis:'PEMBAYARAN',id:a.id,createdAt:a.created_at,tanggal:a.tanggal,nomorJurnal:a.nomor_jurnal??null,bayar:{id:a.id,tanggal:a.tanggal,journal_id:a.journal_id,created_at:a.created_at,bunga:a.bunga}});for(const a of u.values())a.sort(N);return u}async function h(a){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),i=await a.getAllAsync("SELECT j.sumber_id AS utang_id,\n            substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) AS periode,\n            COALESCE(SUM(je.kredit - je.debit), 0) AS total\n       FROM journal_entry je\n       JOIN journal j ON j.id = je.journal_id\n       LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n      WHERE je.account_id = ?\n        AND j.sumber_transaksi = 'UTANG_BUNGA'\n        AND j.status IN ('POSTED','REVERSED')\n      GROUP BY j.sumber_id, periode",n),r=new Map;for(const a of i)r.set(`${a.utang_id}|${a.periode}`,a.total);return r}async function P(a){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','DEBIT_BEBAN'),i=await a.getAllAsync("SELECT p.utang_id AS utang_id, substr(p.tanggal, 1, 7) AS periode,\n            COALESCE(SUM(je.debit - je.kredit), 0) AS total\n       FROM utang_pembayaran p\n       JOIN journal j ON j.id = p.journal_id\n       JOIN journal_entry je ON je.journal_id = j.id\n      WHERE je.account_id = ?\n        AND j.status IN ('POSTED','REVERSED')\n      GROUP BY p.utang_id, periode",n),r=new Map;for(const a of i)r.set(`${a.utang_id}|${a.periode}`,a.total);return r}async function G(a){const n=await a.getAllAsync("SELECT DISTINCT j.sumber_id AS utang_id,\n            substr(COALESCE(asal.tanggal, j.tanggal), 1, 7) AS periode\n       FROM journal j LEFT JOIN journal asal ON asal.id = j.reversal_of_id\n      WHERE j.sumber_transaksi = 'UTANG_BUNGA'\n        AND j.status IN ('POSTED','REVERSED')\n      ORDER BY j.sumber_id, periode"),t=new Map;for(const a of n){const n=t.get(a.utang_id);n?n.push(a.periode):t.set(a.utang_id,[a.periode])}return t}async function C(a){const n=await(0,t.resolveAccountId)(a,'UTANG_BUNGA','KREDIT_AKRUAL'),i=await a.getAllAsync("SELECT x.utang_id, x.tanggal, x.nilai, GROUP_CONCAT(x.id) AS ids, COUNT(*) AS n FROM (\n       SELECT j.id, j.sumber_id AS utang_id, j.tanggal, SUM(je.kredit - je.debit) AS nilai\n         FROM journal j JOIN journal_entry je ON je.journal_id = j.id\n        WHERE je.account_id = ? AND j.sumber_transaksi = 'UTANG_BUNGA' AND j.status = 'POSTED'\n          AND j.reversal_of_id IS NULL\n        GROUP BY j.id, j.sumber_id, j.tanggal\n     ) x WHERE x.nilai > 0 GROUP BY x.utang_id, x.tanggal, x.nilai HAVING COUNT(*) > 1",n),r=new Map;for(const a of i){const n={tanggal:a.tanggal,nilai:a.nilai,ids:a.ids,n:a.n},t=r.get(a.utang_id);t?t.push(n):r.set(a.utang_id,[n])}return r}async function M(a){const n=await a.getAllAsync("SELECT p.utang_id AS utang_id, p.id, p.tanggal, p.bunga, p.journal_id\n       FROM utang_pembayaran p LEFT JOIN journal j ON j.id = p.journal_id\n      WHERE p.bunga > 0\n        AND (p.journal_id IS NULL OR j.id IS NULL OR j.status NOT IN ('POSTED','REVERSED'))"),t=new Map;for(const a of n){const n={id:a.id,tanggal:a.tanggal,bunga:a.bunga,journal_id:a.journal_id},i=t.get(a.utang_id);i?i.push(n):t.set(a.utang_id,[n])}return t}async function K(a,n,t){const i=n.filter(a=>!!a);if(0===i.length)return[];const r=i.map(()=>'?').join(','),u=await a.getAllAsync(`SELECT j.id, j.nomor_jurnal, j.tanggal, j.sumber_transaksi,\n            COALESCE((SELECT SUM(je.kredit - je.debit) FROM journal_entry je\n                       WHERE je.journal_id = j.id AND je.account_id = ?), 0) AS nilai\n       FROM journal j WHERE j.id IN (${r})`,t,...i),o=new Map(u.map(a=>[a.id,a])),s=[];for(const a of i){const n=o.get(a);n&&s.push({journalId:n.id,nomorJurnal:n.nomor_jurnal,tanggal:n.tanggal,sumberTransaksi:n.sumber_transaksi,nilai:n.nilai})}return s}},967,[778,958,959,962,966,828,961,968,785,910]);
 __d(function(g,_r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"LHU_KLASIFIKASI_LABEL",{enumerable:!0,get:function(){return o}}),Object.defineProperty(e,"DEFAULT_NORMAL_BALANCE",{enumerable:!0,get:function(){return s}}),e.listAccounts=async function(n={}){const t=await(0,a.getDb)(),r=['is_active = 1'],o=[];if(n.search){r.push('(kode LIKE ? OR nama LIKE ?)');const a=`%${n.search}%`;o.push(a,a)}return(await t.getAllAsync(`SELECT id, kode, nama, kategori, normal_balance FROM account WHERE ${r.join(' AND ')} ORDER BY kode ASC`,...o)).map(a=>({id:a.id,kode:a.kode,nama:a.nama,kategori:a.kategori,normalBalance:a.normal_balance}))},e.getAccountsForPenerimaanPenghasilanLain=async function(){const n=await(0,a.getDb)(),t=c.map(()=>'?').join(',');return(await n.getAllAsync(`SELECT id, kode, nama, kategori, normal_balance FROM account\n     WHERE is_active = 1 AND kode IN (${t})\n     ORDER BY kode ASC`,...c)).map(a=>({id:a.id,kode:a.kode,nama:a.nama,kategori:a.kategori,normalBalance:a.normal_balance}))},e.getAccountsUntukKewajiban=async function(){const n=await(0,a.getDb)(),t=await n.getFirstAsync("SELECT account_id FROM account_mapping WHERE transaction_type = 'SIMPANAN_SUKARELA' AND role = 'KREDIT_DEFAULT'"),r=t?.account_id??null;return(await n.getAllAsync(`SELECT id, kode, nama, kategori, normal_balance FROM account\n     WHERE is_active = 1 AND kategori = 'LIABILITAS' ${r?'AND id != ?':''}\n     ORDER BY kode ASC`,...r?[r]:[])).map(a=>({id:a.id,kode:a.kode,nama:a.nama,kategori:a.kategori,normalBalance:a.normal_balance}))},e.listAllAccounts=u,e.getAccountById=k,e.createAccount=async function(o,s){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,o,'pengaturan','create');const c=s.kode.trim(),u=s.nama.trim();if(!c)throw new Error('Kode akun wajib diisi.');if(!u)throw new Error('Nama akun wajib diisi.');(0,r.assertKodeAkunTidakKonflikPolicy)(c);if(await a.getFirstAsync("SELECT id FROM account WHERE kode = ?",c))throw new Error(`Kode akun "${c}" sudah dipakai akun lain.`);if(s.parentId){if(!await a.getFirstAsync("SELECT id FROM account WHERE id = ?",s.parentId))throw new Error('Akun induk (parent) tidak ditemukan.')}const A=(0,n.newId)(),E=(new Date).toISOString();await a.runAsync("INSERT INTO account (id, kode, nama, kategori, sub_kategori, parent_id, normal_balance, is_active, is_system, created_at, updated_at)\n       VALUES (?,?,?,?,?,?,?,1,0,?,?)",A,c,u,s.kategori,s.subKategori??null,s.parentId??null,s.normalBalance,E,E);const l=await k(A);if(!l)throw new Error('Gagal membaca akun yang baru dibuat.');return l})},e.updateAccount=async function(n,o,s){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,n,'pengaturan','edit');const c=s.kode.trim(),u=s.nama.trim();if(!c)throw new Error('Kode akun wajib diisi.');if(!u)throw new Error('Nama akun wajib diisi.');const k=await a.getFirstAsync("SELECT kode, kategori, normal_balance, is_system FROM account WHERE id = ?",o);if(!k)throw new Error('Akun tidak ditemukan.');if(await A(o)||!!k.is_system){if(c!==k.kode)throw new Error(k.is_system?'Kode akun sistem tidak dapat diubah \u2014 dipakai mapping transaksi otomatis.':'Kode akun tidak dapat diubah karena sudah dipakai di jurnal/mapping transaksi. Histori lama harus tetap merujuk kode yang sama.');if(s.kategori!==k.kategori)throw new Error(k.is_system?'Tipe/kategori akun sistem tidak dapat diubah \u2014 dipakai mapping transaksi otomatis.':'Tipe/kategori akun tidak dapat diubah karena sudah dipakai di jurnal \u2014 mengubahnya akan membuat histori laporan lama salah baca.');if(s.normalBalance!==k.normal_balance)throw new Error(k.is_system?'Saldo normal akun sistem tidak dapat diubah \u2014 dipakai mapping transaksi otomatis.':'Saldo normal akun tidak dapat diubah karena sudah dipakai di jurnal \u2014 mengubahnya akan membuat histori laporan lama salah baca.')}c!==k.kode&&(0,r.assertKodeAkunTidakKonflikPolicy)(c);if(await a.getFirstAsync("SELECT id FROM account WHERE kode = ? AND id != ?",c,o))throw new Error(`Kode akun "${c}" sudah dipakai akun lain.`);if(s.parentId){if(s.parentId===o)throw new Error('Akun tidak boleh menjadi induk dirinya sendiri.');if(!await a.getFirstAsync("SELECT id FROM account WHERE id = ?",s.parentId))throw new Error('Akun induk (parent) tidak ditemukan.')}await a.runAsync("UPDATE account SET kode = ?, nama = ?, kategori = ?, sub_kategori = ?, parent_id = ?, normal_balance = ?, updated_at = ? WHERE id = ?",c,u,s.kategori,s.subKategori??null,s.parentId??null,s.normalBalance,(new Date).toISOString(),o)})},e.setAccountActive=async function(n,r,o){const s=await(0,a.getDb)();await(0,t.requirePermission)(s,n,'pengaturan','edit');const c=await s.getFirstAsync("SELECT is_system, is_active FROM account WHERE id = ?",r);if(!c)throw new Error('Akun tidak ditemukan.');if(!o&&c.is_system)throw new Error('Akun inti (system) yang dipakai mapping otomatis tidak dapat dinonaktifkan.');if(!!c.is_active===o)return;await s.runAsync("UPDATE account SET is_active = ?, updated_at = ? WHERE id = ?",o?1:0,(new Date).toISOString(),r)},e.setLhuKlasifikasi=async function(n,r,o){return(0,a.withTransaction)(async a=>{await(0,t.requirePermission)(a,n,'pengaturan','edit');const s=await a.getFirstAsync("SELECT kode, kategori FROM account WHERE id = ?",r);if(!s)throw new Error('Akun tidak ditemukan.');if('4-1000'===s.kode||'5-2200'===s.kode)throw new Error('Akun ini sudah punya baris tersendiri di LHU dan tidak perlu diklasifikasikan.');if(o){const a='PENDAPATAN_USAHA_LAIN'===o||'HASIL_INVESTASI'===o||'PENDAPATAN_LAIN'===o,n='BEBAN_USAHA'===o||'BEBAN_LAIN'===o;if('PENDAPATAN'===s.kategori&&!a)throw new Error('Klasifikasi ini hanya berlaku untuk akun Beban.');if('BEBAN'===s.kategori&&!n)throw new Error('Klasifikasi ini hanya berlaku untuk akun Pendapatan.');if('PENDAPATAN'!==s.kategori&&'BEBAN'!==s.kategori)throw new Error('Klasifikasi LHU hanya berlaku untuk akun Pendapatan/Beban.')}await a.runAsync("UPDATE account SET lhu_klasifikasi = ?, updated_at = ? WHERE id = ?",o,(new Date).toISOString(),r)})},e.listAkunPendapatanLainnya=async function(){return(await u()).filter(a=>'PENDAPATAN'===a.kategori&&a.isActive&&!a.isSystem)},e.isAccountInUse=A;var a=_r(d[0]),n=_r(d[1]),t=_r(d[2]),r=_r(d[3]);const o={PENDAPATAN_USAHA_LAIN:'Pendapatan Usaha Lain',HASIL_INVESTASI:'Hasil Investasi',PENDAPATAN_LAIN:'Pendapatan Lain',BEBAN_USAHA:'Beban Usaha',BEBAN_LAIN:'Beban Lain'},s={ASET:'DEBIT',LIABILITAS:'KREDIT',EKUITAS:'KREDIT',PENDAPATAN:'KREDIT',BEBAN:'DEBIT'};const c=['4-2000','4-3000'];async function u(n={}){const t=await(0,a.getDb)(),r=[],o=[];if(n.search){r.push('(a.kode LIKE ? OR a.nama LIKE ?)');const a=`%${n.search}%`;o.push(a,a)}'AKTIF'===n.status?r.push('a.is_active = 1'):'NONAKTIF'===n.status&&r.push('a.is_active = 0');const s=r.length?`WHERE ${r.join(' AND ')}`:'';return(await t.getAllAsync(`SELECT a.id, a.kode, a.nama, a.kategori, a.sub_kategori, a.parent_id, a.normal_balance, a.is_active, a.is_system,\n            a.lhu_klasifikasi, p.nama as parent_nama\n     FROM account a\n     LEFT JOIN account p ON p.id = a.parent_id\n     ${s}\n     ORDER BY a.kode ASC`,...o)).map(a=>({id:a.id,kode:a.kode,nama:a.nama,kategori:a.kategori,subKategori:a.sub_kategori,parentId:a.parent_id,parentNama:a.parent_nama,normalBalance:a.normal_balance,isActive:!!a.is_active,isSystem:!!a.is_system,lhuKlasifikasi:a.lhu_klasifikasi??null}))}async function k(a){return(await u()).find(n=>n.id===a)??null}async function A(n){const t=await(0,a.getDb)(),r=await t.getFirstAsync("SELECT COUNT(*) as cnt FROM journal_entry WHERE account_id = ?",n);if((r?.cnt??0)>0)return!0;const o=await t.getFirstAsync("SELECT COUNT(*) as cnt FROM account_mapping WHERE account_id = ?",n);return(o?.cnt??0)>0}},968,[778,785,828,969]);
 __d(function(g,r,i,a,m,_e,d){"use strict";Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"KODE_POLICY_CONFLICT",{enumerable:!0,get:function(){return n}}),Object.defineProperty(_e,"KODE_COA_DIMINTA_ITEM_14",{enumerable:!0,get:function(){return e}}),Object.defineProperty(_e,"CoaPolicyConflictError",{enumerable:!0,get:function(){return t}}),_e.cariKonflikKodeAkun=s,_e.assertKodeAkunTidakKonflikPolicy=function(n){const e=s(n);if(e)throw new t(e)};const n='POLICY_CONFLICT',e=[{kode:'1-660',nama:'Tanah Properti Investasi',akunExisting:['1-1660'],policy:'KEPUTUSAN 02 (OPTION A \u2014 TANPA PEMECAHAN, DITEGASKAN RC-S54 T15)',keputusan:'DITAMBAHKAN',alasan:'Properti investasi tetap satu akun 1-1660; pemisahan tanah/bangunan dilakukan di DATA (jenis_objek_properti), bukan akun.'},{kode:'1-661',nama:'Bangunan Properti Investasi',akunExisting:['1-1660'],policy:'KEPUTUSAN 02 (OPTION A \u2014 TANPA PEMECAHAN, DITEGASKAN RC-S54 T15)',keputusan:'DITAMBAHKAN',alasan:'Properti investasi tetap satu akun 1-1660; penyusutan bangunan memakai kontra-akun 1-1670.'},{kode:'1-220',nama:'Piutang Pendapatan Investasi',akunExisting:['1-1220'],policy:'KEPUTUSAN 01-A',keputusan:'DITAMBAHKAN',alasan:'Sudah ada sebagai 1-1220 (format X-NNNN); tidak di-renumber.'},{kode:'1-230',nama:'Piutang Dividen',akunExisting:['1-1220'],policy:'KEPUTUSAN 01-A (TIDAK DIPERLUKAN \u2014 diserap 1-1220)',keputusan:'DITAMBAHKAN',alasan:'Dividen diakui pada 4-1300; sisi piutangnya 1-1220. Akun keempat berfungsi identik.'},{kode:'1-240',nama:'Piutang Bagi Hasil',akunExisting:['1-1240'],policy:'KEPUTUSAN 01-A',keputusan:'DITAMBAHKAN',alasan:'Sudah ada sebagai 1-1240; tidak di-renumber.'},{kode:'1-250',nama:'Piutang Pendapatan Sewa',akunExisting:['1-1250'],policy:'KEPUTUSAN 01-A',keputusan:'DITAMBAHKAN',alasan:'Sudah ada sebagai 1-1250; tidak di-renumber.'},{kode:'4-1510',nama:'Pendapatan Bunga Deposito',akunExisting:['4-1510'],policy:'KEPUTUSAN 01-B DIREVISI RC-S70.6 (AKUN SPESIFIK \u2014 Deposito Berjangka)',keputusan:'DITAMBAHKAN',alasan:'Pendapatan bunga Deposito Berjangka (BUNGA_DEPOSITO) diposting ke 4-1510; 4-1500 bukan target transaksi baru. Jurnal historis 4-1500 tidak dipindahkan.'},{kode:'4-1520',nama:'Pendapatan Bunga Investasi',akunExisting:['4-1520'],policy:'KEPUTUSAN 01-B DIREVISI RC-S70.6 (AKUN SPESIFIK \u2014 Usaha Lain)',keputusan:'DITAMBAHKAN',alasan:'Pendapatan bunga investasi Usaha Lain (BUNGA_USAHA_LAIN) diposting ke 4-1520; 4-1500 bukan target transaksi baru. Jurnal historis 4-1500 tidak dipindahkan.'},{kode:'4-1530',nama:'Pendapatan Dividen',akunExisting:['4-1300'],policy:'KEPUTUSAN 01-B (USE EXISTING)',keputusan:'DITAMBAHKAN',alasan:'Dividen/hasil investasi memakai 4-1300; baris LHU identik (HASIL_INVESTASI).'},{kode:'4-1540',nama:'Pendapatan Jasa (Bagian SHU)',akunExisting:['4-1300'],policy:'KEPUTUSAN 04-A (income account 4-1300; menggantikan baris 4-1540 -> 4-1700 pada 01-B, RC-S54 T15)',keputusan:'DITAMBAHKAN',alasan:'Bagian SHU diakui Dr 1-1220 / Cr 4-1300 (hasil investasi atas penyertaan); 1-1240/4-1700 dicadangkan untuk imbal hasil tetap.'},{kode:'4-2100',nama:'Keuntungan Perubahan Nilai Wajar Properti Investasi',akunExisting:[],policy:'RC-S88 (MODEL NILAI WAJAR SAK EP 16 \u2014 menggantikan KEPUTUSAN 03 model biaya)',keputusan:'DITAMBAHKAN',alasan:'Keuntungan perubahan nilai wajar properti investasi (mapping NILAI_WAJAR_PROPERTI_INVESTASI/KREDIT_KEUNTUNGAN).'},{kode:'5-5000',nama:'Kerugian Nilai Wajar Properti Investasi',akunExisting:[],policy:'RC-S88 (MODEL NILAI WAJAR SAK EP 16 \u2014 menggantikan KEPUTUSAN 03 model biaya)',keputusan:'DITAMBAHKAN',alasan:'Kerugian perubahan nilai wajar properti investasi (mapping NILAI_WAJAR_PROPERTI_INVESTASI/DEBIT_KERUGIAN).'}];class t extends Error{kode=n;constructor(e){const t=e.akunExisting.length>0?` Gunakan akun existing: ${e.akunExisting.join(' / ')}.`:'';super(`${n}: kode akun "${e.kode}" (${e.nama}) bertentangan dengan ${e.policy}. ${e.alasan}${t} Perubahan memerlukan keputusan kebijakan.`),this.name='CoaPolicyConflictError',this.kodeAkun=e.kode,this.policy=e.policy}}function s(n){const t=n.trim(),s=e.find(n=>n.kode===t)??null;return s&&'DITAMBAHKAN'!==s.keputusan?s:null}},969,[]);
@@ -13082,12 +14170,19 @@ async function listSimpananHistori(opts = {}) {
  * Prioritas 3/E yang membuat exclusion clause ini diperlukan.)
  */
 /** Saldo dihitung dari transaksi, TIDAK disimpan manual (PRD §10). */
-async function getSaldoSimpanan(db, anggotaId, jenis) {
+async function getSaldoSimpanan(db, anggotaId, jenis, 
+/**
+ * RC-S133.6.4 — bila diisi, saldo dihitung dari transaksi bertanggal
+ * <= tanggal ini (saldo PER TANGGAL itu, bukan saldo hari ini). Dipakai
+ * penilaian syarat pinjaman bertanggal lampau. Tidak diisi = perilaku
+ * lama persis (seluruh transaksi).
+ */
+sampaiTanggal) {
     const row = await db.getFirstAsync(`SELECT COALESCE(SUM(CASE WHEN tipe = 'SETOR' THEN nominal
                                WHEN tipe = 'TARIK' THEN -nominal
                                ELSE 0 END), 0) as total
      FROM simpanan_transaksi
-     WHERE anggota_id = ? AND jenis = ? AND ${SIMPANAN_TIDAK_DIKOREKSI_CLAUSE}`, anggotaId, jenis);
+     WHERE anggota_id = ? AND jenis = ? AND ${SIMPANAN_TIDAK_DIKOREKSI_CLAUSE}${sampaiTanggal ? ' AND tanggal <= ?' : ''}`, ...(sampaiTanggal ? [anggotaId, jenis, sampaiTanggal] : [anggotaId, jenis]));
     return row?.total ?? 0;
 }
 /**
@@ -13096,9 +14191,11 @@ async function getSaldoSimpanan(db, anggotaId, jenis) {
  * tarik simpanan sukarela, tanpa layar perlu mengimpor expo-sqlite
  * sendiri (PRD §44: akses SQL harus lewat repositories/services).
  */
-async function getSaldoSimpananAnggota(anggotaId, jenis) {
+async function getSaldoSimpananAnggota(anggotaId, jenis, 
+/** RC-S133.6.4 — saldo per tanggal ini (tidak diisi = saldo hari ini / seluruh transaksi). */
+sampaiTanggal) {
     const db = await (0, db_1.getDb)();
-    return getSaldoSimpanan(db, anggotaId, jenis);
+    return getSaldoSimpanan(db, anggotaId, jenis, sampaiTanggal);
 }
 /**
  * Rekap saldo simpanan (pokok/wajib/sukarela) per anggota — dipakai
@@ -15266,7 +16363,7 @@ __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{v
 __d(function(g,_r,i,a,_m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.jenisTransaksiBerjangka=function(n){return'JATUH_TEMPO'===n?'JATUH_TEMPO':'AKTIF'===n?'PENARIKAN_DINI':'SELESAI'},e.badgeKontrak=function(n,t){switch(n){case'JATUH_TEMPO':return{label:'Jatuh Tempo',keterangan:'Siap dicairkan',nada:'OK'};case'AKTIF':return{label:'Penarikan Dini',keterangan:t?'Sebelum jatuh tempo':'Kebijakan belum ditetapkan',nada:'WARN'};case'DICAIRKAN':return{label:'Sudah dicairkan',keterangan:'Kontrak selesai',nada:'MUTED'};default:return{label:'Dibatalkan',keterangan:'Kontrak tidak berlaku',nada:'MUTED'}}},e.ringkasanKonfirmasiDini=function(n){const t=[{label:'Pokok',nilai:n.pokokBruto,jenis:'TAMBAH'},{label:'Bunga',nilai:n.bungaAkrualKontrak,jenis:'TAMBAH'}];0!==n.penyesuaianRate&&t.push({label:'Penyesuaian bunga',nilai:Math.abs(n.penyesuaianRate),jenis:n.penyesuaianRate<0?'KURANG':'TAMBAH'});return t.push({label:'Bunga hangus',nilai:n.bungaHangus,jenis:'KURANG'},{label:'Penalti',nilai:n.penalti,jenis:'KURANG'},{label:'Biaya administrasi',nilai:n.biayaAdmin,jenis:'KURANG'},{label:'Total diterima anggota',nilai:n.totalPayout,jenis:'TOTAL'}),t},e.alokasiPembayaranDini=function(n){return{pokok:n.pokokDibayar,bunga:n.bungaDibayar}},e.ringkasanKonfirmasiJatuhTempo=function(n){if(n.pencairanPokokSaja)return[{label:'Pokok Simpanan Berjangka',nilai:n.pokok,jenis:'TAMBAH'},{label:'Total diterima tunai',nilai:n.totalPencairan,jenis:'TOTAL'}];return[{label:'Pokok',nilai:n.pokok,jenis:'TAMBAH'},{label:'Bunga',nilai:n.bungaBelumDipindahkan??n.bungaTerakru,jenis:'TAMBAH'},{label:'Total diterima anggota',nilai:n.totalPencairan,jenis:'TOTAL'}]},e.ringkasanBungaKeSukarela=function(n){return n.pencairanPokokSaja?[{label:'Bunga sudah di Simpanan Sukarela (bruto)',nilai:String(n.bungaSudahDiSukarela??0)},{label:'Bunga terutang, dipindahkan ke Sukarela saat pencairan',nilai:String(n.bungaBelumDipindahkan??0)},{label:'PPh Pasal 4(2) sudah dipotong',nilai:String(n.pphSudahDipotong??0)}]:[]},e.tanggalRingkas=function(t){const l=/^(\d{4})-(\d{2})-(\d{2})$/.exec(t??'');return l?`${parseInt(l[3],10)} ${n[parseInt(l[2],10)-1]??l[2]} ${l[1]}`:t??'-'};const n=['Jan','Feb','Mar','Apr','Mei','Jun','Jul','Agu','Sep','Okt','Nov','Des']},1342,[]);
 __d(function(g,_r,i,a,m,_e,d){"use strict";function e(e){return e&&e.__esModule?e:{default:e}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return E}});var l=_r(d[0]),t=e(_r(d[1])),n=e(_r(d[2])),s=e(_r(d[3])),r=e(_r(d[4])),o=e(_r(d[5])),u=e(_r(d[6])),c=e(_r(d[7])),p=e(_r(d[8])),f=e(_r(d[9])),h=_r(d[10]),j=_r(d[11]),y=_r(d[12]),x=e(_r(d[13])),b=e(_r(d[14])),A=e(_r(d[15])),S=e(_r(d[16])),P=_r(d[17]),T=_r(d[18]),N=_r(d[19]),R=_r(d[20]),w=_r(d[21]),k=_r(d[22]),L=_r(d[23]),C=_r(d[24]),U=_r(d[25]),v=e(_r(d[26])),J=e(_r(d[27])),K=_r(d[28]);const B=()=>{};function E(){const[e,c]=(0,l.useState)('BARU'),L=(0,j.useNavigation)(),E=(0,N.useAppStore)(e=>e.currentUser),[z,D]=(0,l.useState)(null),[V,W]=(0,l.useState)([]),[G,O]=(0,l.useState)(null),[H,M]=(0,l.useState)([]),[_,F]=(0,l.useState)(null),[$,Y]=(0,l.useState)(!1),[q,Q]=(0,l.useState)('ANGSURAN'),[X,Z]=(0,l.useState)(null),[aa,ea]=(0,l.useState)(!1),[la,ta]=(0,l.useState)(''),[na,sa]=(0,l.useState)(''),[ra,ia]=(0,l.useState)('JASA_KONTRAKTUAL'),oa=(0,l.useMemo)(()=>{if(!X)return null;try{return(0,T.terapkanBiayaTambahanPelunasan)(X,''===la?0:la,''===na?0:na)}catch{return X}},[X,la,na]),[da,ua]=(0,l.useState)(''),[ca,ma]=(0,l.useState)(null),[ga,pa]=(0,l.useState)((0,C.getTanggalLokalHariIni)()),[fa,ha]=(0,l.useState)({}),[ja,ya]=(0,l.useState)(!1),[xa,ba]=(0,l.useState)(!1);(0,l.useEffect)(()=>{O(null),M([]),F(null),Q('ANGSURAN'),Z(null),ta(''),sa(''),ia('JASA_KONTRAKTUAL'),z?(0,T.listPinjaman)({anggotaId:z.anggotaId,status:'AKTIF',limit:100}).then(W):W([])},[z]),(0,l.useEffect)(()=>{F(null),ua(''),Q('ANGSURAN'),Z(null),ta(''),sa(''),ia('JASA_KONTRAKTUAL'),G?(ba(!0),(0,T.getJadwalAngsuran)(G.id).then(e=>M(e.filter(e=>'LUNAS'!==e.status))).finally(()=>ba(!1))):M([])},[G]),(0,l.useEffect)(()=>{if('PELUNASAN'!==q||!G)return;let e=!1;return ea(!0),(async()=>{try{const l=await(0,P.getDb)(),t=await(0,T.hitungTotalPelunasan)(l,G.id,ga,{metodeJasaPelunasan:ra});if(e)return;Z(t)}catch(l){if(e)return;(0,R.notify)('Gagal',l instanceof Error?l.message:'Gagal menghitung total pelunasan.')}finally{e||ea(!1)}})(),()=>{e=!0}},[q,G,ga,ra]);const Aa='PELUNASAN'===q?oa?.totalPelunasan??'':da,Sa=e=>{Q(e),F(null),ua(''),Z(null),ta(''),sa(''),ia('JASA_KONTRAKTUAL')},Pa=(0,l.useCallback)(e=>ta(e),[]),Ta=(0,l.useCallback)(e=>sa(e),[]),Na=e=>{F(e);const l=e.total-e.pokokTerbayar-e.jasaTerbayar;ua(l>0?l:'')},Ra=()=>{const e={};return z||(e.anggota='Anggota wajib dipilih'),G||(e.pinjaman='Pinjaman wajib dipilih'),'ANGSURAN'!==q||_||(e.jadwal='Angsuran ke berapa wajib dipilih'),'PELUNASAN'===q&&(!oa||oa.totalPelunasan<=0)&&(e.jadwal='Pinjaman ini sudah lunas.'),(''===Aa||Aa<=0)&&(e.nominal='Nominal harus lebih dari 0'),ca||(e.rekening='Rekening tujuan penerimaan wajib dipilih'),ga||(e.tanggal='Tanggal wajib diisi'),ha(e),0===Object.keys(e).length},wa=async()=>{if(G&&_&&ca&&E&&''!==da){ya(!0);try{await(0,T.bayarAngsuran)({pinjamanId:G.id,jadwalId:_.id,tanggal:ga,nominal:da,sumberDana:'BANK'===ca.jenis?'BANK':'KAS',bankAccountId:'BANK'===ca.jenis?ca.id:void 0,createdBy:E.id}),(0,R.notify)('Berhasil','Pembayaran piutang anggota berhasil dicatat.',[{text:'OK',onPress:()=>L.goBack()}])}catch(e){(0,R.notify)('Gagal',e instanceof Error?e.message:'Terjadi kesalahan.')}finally{ya(!1)}}},ka=async()=>{if(G&&ca&&E){ya(!0);try{const e=await(0,T.lunasiPinjaman)({pinjamanId:G.id,tanggal:ga,sumberDana:'BANK'===ca.jenis?'BANK':'KAS',bankAccountId:'BANK'===ca.jenis?ca.id:void 0,createdBy:E.id,penaltiPelunasan:''===la?0:la,administrasiPelunasan:''===na?0:na,metodeJasaPelunasan:ra});(0,R.notify)('Berhasil',`Pinjaman ${G.nomorPinjaman} berhasil dilunasi sebesar ${(0,w.formatRupiah)(e.totalPelunasan)}. Status pinjaman: LUNAS.`,[{text:'OK',onPress:()=>L.goBack()}])}catch(e){(0,R.notify)('Gagal',e instanceof Error?e.message:'Terjadi kesalahan.')}finally{ya(!1)}}};return(0,K.jsx)(t.default,{varian:"layar",style:{flex:1},children:(0,K.jsxs)(o.default,{keyboardShouldPersistTaps:"handled",style:I.container,contentContainerStyle:{padding:k.spacing.lg},children:[(0,K.jsx)(J.default,{value:e,onChange:c,menu:"ANGSURAN"}),'RIWAYAT'===e?(0,K.jsx)(v.default,{menu:"ANGSURAN"}):(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(x.default,{value:z,onChange:D,error:fa.anggota}),z&&(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(s.default,{style:I.label,children:"Pinjaman Aktif *"}),(0,K.jsxs)(r.default,{style:[I.selector,fa.pinjaman&&I.selectorError],onPress:()=>V.length>0&&Y(!0),children:[(0,K.jsx)(y.Ionicons,{name:"cash-outline",size:18,color:k.colors.textMuted,style:{marginRight:k.spacing.sm}}),(0,K.jsx)(s.default,{style:G?I.selectorText:I.selectorPlaceholder,children:G?`${G.nomorPinjaman} \xb7 sisa piutang ${(0,w.formatRupiah)(G.sisaPiutang)}`:V.length>0?'Pilih pinjaman aktif...':'Anggota ini tidak punya pinjaman aktif'})]}),fa.pinjaman&&(0,K.jsx)(s.default,{style:I.errorText,children:fa.pinjaman})]}),G&&(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(s.default,{style:[I.label,{marginTop:k.spacing.md}],children:"Jenis Pembayaran"}),(0,K.jsxs)(n.default,{style:I.jenisRow,children:[(0,K.jsxs)(r.default,{style:I.radioRow,onPress:()=>Sa('ANGSURAN'),children:[(0,K.jsx)(n.default,{style:[I.radioOuter,'ANGSURAN'===q&&I.radioOuterActive],children:'ANGSURAN'===q&&(0,K.jsx)(n.default,{style:I.radioInner})}),(0,K.jsx)(s.default,{style:I.radioLabel,children:"Angsuran"})]}),(0,K.jsxs)(r.default,{style:I.radioRow,onPress:()=>Sa('PELUNASAN'),children:[(0,K.jsx)(n.default,{style:[I.radioOuter,'PELUNASAN'===q&&I.radioOuterActive],children:'PELUNASAN'===q&&(0,K.jsx)(n.default,{style:I.radioInner})}),(0,K.jsx)(s.default,{style:I.radioLabel,children:"Pelunasan"})]})]})]}),G&&'ANGSURAN'===q&&(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(s.default,{style:[I.label,{marginTop:k.spacing.md}],children:"Angsuran Ke *"}),xa?(0,K.jsx)(p.default,{style:{marginVertical:k.spacing.md}}):(0,K.jsxs)(n.default,{style:I.jadwalList,children:[H.map(e=>{const l=e.total-e.pokokTerbayar-e.jasaTerbayar,t=_?.id===e.id;return(0,K.jsxs)(r.default,{style:[I.jadwalRow,t&&I.jadwalRowActive],onPress:()=>Na(e),children:[(0,K.jsxs)(n.default,{style:{flex:1},children:[(0,K.jsxs)(s.default,{style:I.jadwalNomor,children:["Angsuran ke-",e.nomorAngsuran]}),(0,K.jsxs)(s.default,{style:I.jadwalSub,children:["Jatuh tempo ",e.tanggalJatuhTempo]})]}),(0,K.jsx)(s.default,{style:I.jadwalSisa,children:(0,w.formatRupiah)(l)})]},e.id)}),0===H.length&&(0,K.jsx)(s.default,{style:I.emptyText,children:"Tidak ada jadwal yang belum lunas."})]}),fa.jadwal&&(0,K.jsx)(s.default,{style:I.errorText,children:fa.jadwal})]}),G&&'PELUNASAN'===q&&(0,K.jsxs)(n.default,{style:{marginTop:k.spacing.md},children:[(0,K.jsx)(s.default,{style:I.label,children:"Metode Pelunasan *"}),(0,K.jsx)(n.default,{style:I.metodeGroup,children:[{value:'JASA_TERUTANG',judul:'Jasa Terutang',deskripsi:'Hanya jasa yang periodenya SUDAH jatuh tempo per tanggal pelunasan yang ditagih. Sisa jasa kontraktual masa depan dirabat (tidak ditagih).',nilai:oa?.jasaSudahJatuhTempo},{value:'JASA_KONTRAKTUAL',judul:'Jasa Kontraktual',deskripsi:'Seluruh sisa jasa sesuai kontrak ditagih, termasuk periode yang belum jatuh tempo.',nilai:oa?.jasaTerutang}].map(e=>{const l=ra===e.value;return(0,K.jsxs)(r.default,{style:[I.metodeCard,l&&I.metodeCardActive],onPress:()=>ia(e.value),accessibilityRole:"radio",accessibilityState:{selected:l},accessibilityLabel:`Metode ${e.judul}`,children:[(0,K.jsxs)(n.default,{style:I.metodeHeaderRow,children:[(0,K.jsx)(n.default,{style:[I.radioOuter,l&&I.radioOuterActive],children:l&&(0,K.jsx)(n.default,{style:I.radioInner})}),(0,K.jsx)(s.default,{style:[I.metodeJudul,l&&I.metodeJudulActive],children:e.judul}),void 0!==e.nilai&&(0,K.jsx)(s.default,{style:I.metodeNilai,children:(0,w.formatRupiah)(e.nilai)})]}),(0,K.jsx)(s.default,{style:I.metodeDeskripsi,children:e.deskripsi})]},e.value)})}),aa&&!oa?(0,K.jsx)(p.default,{style:{marginVertical:k.spacing.md}}):oa&&oa.totalPelunasan>0?(0,K.jsxs)(n.default,{style:I.pelunasanCard,children:[(0,K.jsxs)(n.default,{style:I.pelunasanHeaderRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanTitle,children:"RINCIAN PELUNASAN"}),aa&&(0,K.jsx)(p.default,{size:"small",color:k.colors.primary})]}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Pokok Tersisa"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.pokokTersisa)})]}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Jasa Terutang (sudah jatuh tempo)"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.jasaSudahJatuhTempo)})]}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Jasa Kontraktual (seluruh sisa)"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.jasaTerutang)})]}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsxs)(s.default,{style:[I.pelunasanLabel,I.pelunasanLabelKuat],children:["Jasa Ditagih (",'JASA_TERUTANG'===oa.metodeJasaPelunasan?'Terutang':'Kontraktual',")"]}),(0,K.jsx)(s.default,{style:[I.pelunasanValue,I.pelunasanLabelKuat],children:(0,w.formatRupiah)(oa.jasaDitagih)})]}),oa.rabatJasa>0&&(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:[I.pelunasanLabel,I.pelunasanRabat],children:"Rabat Jasa (tidak ditagih)"}),(0,K.jsxs)(s.default,{style:[I.pelunasanValue,I.pelunasanRabat],children:["\u2212",(0,w.formatRupiah)(oa.rabatJasa)]})]}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Denda"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.denda)})]}),oa.penaltiPelunasan>0&&(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Penalti Pelunasan"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.penaltiPelunasan)})]}),oa.administrasiPelunasan>0&&(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanLabel,children:"Administrasi Pelunasan"}),(0,K.jsx)(s.default,{style:I.pelunasanValue,children:(0,w.formatRupiah)(oa.administrasiPelunasan)})]}),(0,K.jsx)(n.default,{style:I.pelunasanDivider}),(0,K.jsxs)(n.default,{style:I.pelunasanRow,children:[(0,K.jsx)(s.default,{style:I.pelunasanTotalLabel,children:"TOTAL PELUNASAN"}),(0,K.jsx)(s.default,{style:I.pelunasanTotalValue,children:(0,w.formatRupiah)(oa.totalPelunasan)})]})]}):aa?null:(0,K.jsx)(s.default,{style:I.emptyText,children:"Pinjaman ini sudah lunas."}),(0,K.jsx)(s.default,{style:[I.label,{marginTop:k.spacing.md}],children:"Biaya Penalti Pelunasan (opsional)"}),(0,K.jsx)(A.default,{value:la,onChangeValue:Pa}),(0,K.jsx)(s.default,{style:[I.label,{marginTop:k.spacing.sm}],children:"Biaya Administrasi Pelunasan (opsional)"}),(0,K.jsx)(A.default,{value:na,onChangeValue:Ta}),fa.jadwal&&(0,K.jsx)(s.default,{style:I.errorText,children:fa.jadwal})]}),('ANGSURAN'===q&&_||'PELUNASAN'===q&&oa&&oa.totalPelunasan>0)&&(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(s.default,{style:[I.label,{marginTop:k.spacing.md}],children:'PELUNASAN'===q?'Nominal Diterima (Rp) \u2014 Total Pelunasan':'Nominal Diterima (Rp) *'}),(0,K.jsx)(A.default,{value:Aa,onChangeValue:'PELUNASAN'===q?B:ua,error:fa.nominal,editable:'PELUNASAN'!==q}),(0,K.jsxs)(n.default,{style:{marginTop:k.spacing.md},children:[(0,K.jsx)(b.default,{label:"Diterima Ke",value:ca,onChange:ma}),fa.rekening&&(0,K.jsx)(s.default,{style:I.errorText,children:fa.rekening})]}),(0,K.jsx)(s.default,{style:I.label,children:"Tanggal *"}),(0,K.jsx)(S.default,{value:ga,onChange:pa,error:fa.tanggal,maximumDate:(0,U.getWaktuSekarang)()}),(0,K.jsx)(r.default,{style:[I.submitButton,ja&&I.disabled],onPress:()=>{ja||Ra()&&('PELUNASAN'===q&&oa?(0,R.notify)('Konfirmasi Pelunasan',`Metode: ${'JASA_TERUTANG'===oa.metodeJasaPelunasan?'Jasa Terutang':'Jasa Kontraktual'}.\n\nTotal pelunasan ${(0,w.formatRupiah)(oa.totalPelunasan)}`+(oa.rabatJasa>0?`, dengan rabat jasa kontraktual ${(0,w.formatRupiah)(oa.rabatJasa)} yang tidak ditagih.`:'.')+"\n\nSetelah transaksi berhasil, pinjaman akan berstatus LUNAS. Lanjutkan?",[{text:'Batal',style:'cancel'},{text:'Ya, Lunasi',style:'destructive',onPress:ka}]):wa())},disabled:ja,children:ja?(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(p.default,{color:k.colors.white}),(0,K.jsx)(s.default,{style:I.submitText,children:'PELUNASAN'===q?'Memproses pelunasan...':'Memproses...'})]}):(0,K.jsxs)(K.Fragment,{children:[(0,K.jsx)(y.Ionicons,{name:"save-outline",size:18,color:k.colors.white}),(0,K.jsx)(s.default,{style:I.submitText,children:'PELUNASAN'===q?'Lunasi Pinjaman':'Terima Pembayaran'})]})})]}),(0,K.jsx)(f.default,{visible:$,animationType:"slide",onRequestClose:()=>Y(!1),children:(0,K.jsxs)(h.SafeAreaView,{style:I.modalContainer,edges:['top','bottom'],children:[(0,K.jsxs)(n.default,{style:I.modalHeader,children:[(0,K.jsx)(s.default,{style:I.modalTitle,children:"Pilih Pinjaman"}),(0,K.jsx)(r.default,{onPress:()=>Y(!1),children:(0,K.jsx)(y.Ionicons,{name:"close",size:22,color:k.colors.textMuted})})]}),(0,K.jsx)(u.default,{keyboardShouldPersistTaps:"handled",data:V,keyExtractor:e=>e.id,contentContainerStyle:{paddingHorizontal:k.spacing.lg,paddingTop:k.spacing.md},renderItem:({item:e})=>(0,K.jsxs)(r.default,{style:I.jadwalRow,onPress:()=>{O(e),Y(!1)},children:[(0,K.jsxs)(n.default,{style:{flex:1},children:[(0,K.jsx)(s.default,{style:I.jadwalNomor,children:e.nomorPinjaman}),(0,K.jsxs)(s.default,{style:I.jadwalSub,children:["Plafon ",(0,w.formatRupiah)(e.jumlahPinjaman)]})]}),(0,K.jsx)(s.default,{style:I.jadwalSisa,children:(0,w.formatRupiah)(e.sisaPiutang)})]})})]})})]})]})})}const I=c.default.create({container:{flex:1,backgroundColor:k.colors.background},label:{fontSize:13,color:k.colors.text,fontWeight:'600',marginBottom:k.spacing.sm},errorText:{color:k.colors.danger,fontSize:12,marginTop:k.spacing.xs},selector:{flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:k.colors.border,backgroundColor:k.colors.surface,borderRadius:k.radius.sm,paddingHorizontal:k.spacing.md,paddingVertical:12},selectorError:{borderColor:k.colors.danger},selectorText:{fontSize:15,color:k.colors.text},selectorPlaceholder:{fontSize:15,color:k.colors.placeholder},jadwalList:{marginBottom:k.spacing.sm},jadwalRow:{flexDirection:'row',alignItems:'center',gap:k.spacing.sm,paddingVertical:12,paddingHorizontal:k.spacing.md,borderWidth:1,borderColor:k.colors.border,borderRadius:k.radius.sm,backgroundColor:k.colors.surface,marginBottom:k.spacing.sm},jadwalRowActive:{borderColor:k.colors.primary,backgroundColor:k.colors.primaryLight},jadwalNomor:{fontSize:14,fontWeight:'700',color:k.colors.text},jadwalSub:{fontSize:12,color:k.colors.textMuted,marginTop:2},jadwalSisa:{fontSize:13,fontWeight:'700',color:k.colors.primary},emptyText:{textAlign:'center',color:k.colors.textMuted,marginTop:k.spacing.md},jenisRow:{flexDirection:'row',gap:k.spacing.lg,marginBottom:k.spacing.sm},radioRow:{flexDirection:'row',alignItems:'center',gap:8},radioOuter:{width:20,height:20,borderRadius:10,borderWidth:2,borderColor:k.colors.border,alignItems:'center',justifyContent:'center'},radioOuterActive:{borderColor:k.colors.primary},radioInner:{width:10,height:10,borderRadius:5,backgroundColor:k.colors.primary},radioLabel:{fontSize:14,color:k.colors.text,fontWeight:'600'},pelunasanCard:{borderWidth:1,borderColor:k.colors.primary,backgroundColor:k.colors.primaryLight,borderRadius:k.radius.md,padding:k.spacing.md},pelunasanTitle:{fontSize:12,fontWeight:'700',color:k.colors.primary,letterSpacing:.5,marginBottom:k.spacing.sm},pelunasanRow:{flexDirection:'row',justifyContent:'space-between',paddingVertical:4},pelunasanLabel:{fontSize:13,color:k.colors.textMuted},pelunasanValue:{fontSize:13,color:k.colors.text,fontWeight:'600'},pelunasanDivider:{height:1,backgroundColor:k.colors.border,marginVertical:k.spacing.sm},pelunasanHeaderRow:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginBottom:k.spacing.sm},pelunasanLabelKuat:{fontWeight:'700',color:k.colors.text},pelunasanRabat:{color:k.colors.warning,fontWeight:'700'},metodeGroup:{gap:k.spacing.sm,marginBottom:k.spacing.md},metodeCard:{borderWidth:1,borderColor:k.colors.border,backgroundColor:k.colors.surface,borderRadius:k.radius.md,padding:k.spacing.md},metodeCardActive:{borderColor:k.colors.primary,backgroundColor:k.colors.primaryLight},metodeHeaderRow:{flexDirection:'row',alignItems:'center',gap:k.spacing.sm},metodeJudul:{fontSize:14,fontWeight:'600',color:k.colors.text,flex:1},metodeJudulActive:{color:k.colors.primary,fontWeight:'700'},metodeNilai:{fontSize:13,fontWeight:'700',color:k.colors.text},metodeDeskripsi:{fontSize:11,color:k.colors.textMuted,lineHeight:16,marginTop:6,marginLeft:28},pelunasanTotalLabel:{fontSize:14,fontWeight:'700',color:k.colors.text},pelunasanTotalValue:{fontSize:16,fontWeight:'700',color:k.colors.primary},modalContainer:{flex:1,backgroundColor:k.colors.background},modalHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:k.spacing.lg,paddingVertical:k.spacing.md,borderBottomWidth:1,borderBottomColor:k.colors.border,backgroundColor:k.colors.surface},modalTitle:Object.assign({},L.modalUi.title),submitButton:{flexDirection:'row',gap:8,backgroundColor:k.colors.primary,borderRadius:k.radius.sm,paddingVertical:14,alignItems:'center',justifyContent:'center',marginTop:k.spacing.xl,marginBottom:40},disabled:{opacity:.6},submitText:{color:k.colors.white,fontWeight:'700',fontSize:15}})},1343,[11,858,81,232,477,287,279,19,475,483,13,119,678,1344,1294,1297,913,778,1345,794,765,910,772,1295,918,882,1302,1306,6]);
 __d(function(g,r,i,a,m,_e,d){"use strict";function e(e){return e&&e.__esModule?e:{default:e}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return z}});var o=r(d[0]),t=e(r(d[1])),l=e(r(d[2])),n=e(r(d[3])),s=e(r(d[4])),c=e(r(d[5])),u=e(r(d[6])),f=e(r(d[7])),x=r(d[8]),p=r(d[9]),h=r(d[10]),b=r(d[11]),y=r(d[12]),j=r(d[13]),T=e(r(d[14])),S=e(r(d[15])),C=r(d[16]);function z({value:e,onChange:c,error:j}){const[z,P]=(0,o.useState)(!1),[I,A]=(0,o.useState)(''),[B,W]=(0,o.useState)([]),[v,H]=(0,o.useState)(!1);return(0,o.useEffect)(()=>{if(!z)return;H(!0);const e=setTimeout(async()=>{try{W(await(0,h.listAnggotaDenganPiutangAktif)({search:I}))}finally{H(!1)}},200);return()=>clearTimeout(e)},[I,z]),(0,C.jsxs)(t.default,{style:w.field,children:[(0,C.jsx)(l.default,{style:w.label,children:"Anggota (dengan piutang outstanding) *"}),(0,C.jsxs)(n.default,{accessibilityRole:"button",style:[w.selector,j&&w.selectorError],onPress:()=>P(!0),children:[(0,C.jsx)(p.Ionicons,{name:"person-outline",size:18,color:y.colors.textMuted,style:{marginRight:y.spacing.sm}}),(0,C.jsx)(l.default,{style:e?w.selectorText:w.selectorPlaceholder,children:e?`${e.namaAnggota} (${e.nomorAnggota})`:'Pilih anggota...'}),(0,C.jsx)(p.Ionicons,{name:"chevron-down",size:y.iconSize.md,color:y.colors.textMuted,style:k})]}),j&&(0,C.jsx)(l.default,{style:w.errorText,children:j}),(0,C.jsx)(u.default,{visible:z,animationType:"slide",onRequestClose:()=>P(!1),children:(0,C.jsx)(x.SafeAreaView,{style:w.modalContainer,edges:['top','bottom'],children:(0,C.jsxs)(S.default,{varian:"dialog",style:{flex:1},children:[(0,C.jsxs)(t.default,{style:w.modalHeader,children:[(0,C.jsx)(l.default,{style:w.modalTitle,children:"Pilih Anggota"}),(0,C.jsx)(n.default,{style:w.closeIcon,onPress:()=>P(!1),children:(0,C.jsx)(p.Ionicons,{name:"close",size:22,color:y.colors.textMuted})})]}),(0,C.jsx)(t.default,{style:{paddingHorizontal:y.spacing.lg},children:(0,C.jsx)(T.default,{placeholder:"Cari nama, nomor anggota, atau NIK...",placeholderTextColor:y.colors.placeholder,value:I,onChangeText:A,autoFocus:!0})}),v&&(0,C.jsx)(f.default,{style:{marginTop:16}}),!v&&(0,C.jsx)(s.default,{keyboardShouldPersistTaps:"handled",data:B,keyExtractor:e=>e.anggotaId,contentContainerStyle:{paddingHorizontal:y.spacing.lg},renderItem:({item:e})=>(0,C.jsxs)(n.default,{style:w.row,onPress:()=>{c(e),P(!1)},children:[(0,C.jsx)(l.default,{style:w.rowNama,children:e.namaAnggota}),(0,C.jsxs)(l.default,{style:w.rowSub,children:[e.nomorAnggota," \xb7 ",e.jumlahPinjamanAktif," pinjaman aktif"]}),(0,C.jsxs)(l.default,{style:w.rowSisa,children:["Sisa piutang: ",(0,b.formatRupiah)(e.totalSisaPiutang)]})]}),ListEmptyComponent:(0,C.jsxs)(l.default,{style:w.emptyText,children:["Tidak ada anggota dengan piutang outstanding",I?' yang cocok dengan pencarian.':'.']})}),(0,C.jsx)(t.default,{style:w.footer,children:(0,C.jsx)(n.default,{style:w.closeButton,onPress:()=>P(!1),children:(0,C.jsx)(l.default,{style:w.closeButtonText,children:"Tutup"})})})]})})})]})}const k={flexShrink:0},w=c.default.create({field:{marginBottom:y.spacing.md},label:{fontSize:13,color:y.colors.text,fontWeight:'600',marginBottom:y.spacing.sm},selector:{gap:8,flexDirection:'row',alignItems:'center',borderWidth:1,borderColor:y.colors.border,backgroundColor:y.colors.surface,borderRadius:y.radius.sm,paddingHorizontal:y.spacing.md,paddingVertical:12},selectorError:{borderColor:y.colors.danger},selectorText:{flex:1,fontSize:15,color:y.colors.text},selectorPlaceholder:{flex:1,fontSize:15,color:y.colors.placeholder},errorText:{color:y.colors.danger,fontSize:12,marginTop:y.spacing.xs},modalContainer:{flex:1,backgroundColor:y.colors.background},modalHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:y.spacing.lg,paddingVertical:y.spacing.md,borderBottomWidth:1,borderBottomColor:y.colors.border,backgroundColor:y.colors.surface},modalTitle:Object.assign({},j.modalUi.title),closeIcon:Object.assign({},j.modalUi.closeIcon),row:{paddingVertical:12,borderBottomWidth:1,borderBottomColor:y.colors.border},rowNama:{fontSize:15,fontWeight:'600',color:y.colors.text},rowSub:{fontSize:12,color:y.colors.textMuted,marginTop:2},rowSisa:{fontSize:12,fontWeight:'700',color:y.colors.primary,marginTop:2},emptyText:{textAlign:'center',color:y.colors.textMuted,marginTop:24,paddingHorizontal:y.spacing.lg},footer:{padding:y.spacing.lg,borderTopWidth:1,borderTopColor:y.colors.border,backgroundColor:y.colors.surface},closeButton:{borderRadius:y.radius.sm,paddingVertical:14,alignItems:'center',backgroundColor:y.colors.background,borderWidth:1,borderColor:y.colors.border},closeButtonText:{color:y.colors.text,fontWeight:'700'}})},1344,[11,81,232,477,279,19,483,475,13,678,1345,910,772,1295,954,858,6]);
-__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/ScheduleLifecycle":return _$r(909);case "@/database/db":return _$r(778);case "@/accounting/AccountingEngine":return _$r(958);case "@/accounting/AccountMapping":return _$r(959);case "@/accounting/PinjamanCalculator":return _$r(1346);case "@/services/LiquidityService":return _$r(962);case "@/services/LoanEligibilityService":return _$r(1347);case "@/validators/BusinessRuleEngine":return _$r(966);case "@/services/PermissionService":return _$r(828);case "@/services/LoanImpairmentService":return _$r(965);case "@/services/AkrualJasaPinjamanService":return _$r(1314);case "@/services/EirAccountingService":return _$r(1315);case "@/utils/id":return _$r(785);case "date-fns":return _$r(977);case "@/accounting/InstallmentDate":return _$r(1348);case "@/utils/tanggal":return _$r(918);case "@/services/AkadUlangPresentasi":return _$r(1349);case "@/services/KoperasiMasterService":return _$r(951);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/ScheduleLifecycle":return _$r(909);case "@/database/db":return _$r(778);case "@/accounting/AccountingEngine":return _$r(958);case "@/accounting/AccountMapping":return _$r(959);case "@/accounting/PinjamanCalculator":return _$r(1346);case "@/services/LiquidityService":return _$r(962);case "@/services/LoanEligibilityService":return _$r(1347);case "@/validators/BusinessRuleEngine":return _$r(966);case "@/services/PermissionService":return _$r(828);case "@/services/LoanImpairmentService":return _$r(965);case "@/services/AkrualJasaPinjamanService":return _$r(1314);case "@/services/EirAccountingService":return _$r(1315);case "@/utils/id":return _$r(785);case "date-fns":return _$r(977);case "@/accounting/InstallmentDate":return _$r(1348);case "@/utils/tanggal":return _$r(918);case "@/accounting/PenyelesaianPinjaman":return _$r(9018);case "@/services/AkadUlangPresentasi":return _$r(1349);case "@/services/KoperasiMasterService":return _$r(951);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
 exports.METODE_JASA_PELUNASAN_DEFAULT=exports.LABEL_JENIS_AGUNAN=exports.LABEL_TUJUAN_PINJAMAN=void 0;
@@ -15317,6 +16414,7 @@ const id_1 = require("@/utils/id");
 const date_fns_1 = require("date-fns");
 const InstallmentDate_1 = require("@/accounting/InstallmentDate");
 const tanggal_1 = require("@/utils/tanggal");
+const PenyelesaianPinjaman_1 = require("@/accounting/PenyelesaianPinjaman");
 const AkadUlangPresentasi_1 = require("@/services/AkadUlangPresentasi");
 const KoperasiMasterService_1 = require("@/services/KoperasiMasterService");
 /**
@@ -15375,12 +16473,23 @@ async function ajukanPinjaman(input) {
         // baru dibuat saat pencairan, sesuai desain awal) — ini murni gate
         // "boleh/tidak boleh mengajukan", dijalankan SEBELUM baris
         // `pinjaman` diinsert sama sekali.
-        const cekEligibilitas = await (0, LoanEligibilityService_1.checkEligibilitasPinjaman)(db, {
+        //
+        // RC-S133.6.4 — syarat dinilai pada TANGGAL PENGAJUAN (`input.tanggal`),
+        // bukan hari ini. Untuk tanggal hari ini hasilnya sama dengan sebelumnya.
+        const cekEligibilitas = await (0, LoanEligibilityService_1.evaluasiEligibilitasPinjaman)(db, {
             anggotaId: input.anggotaId,
             jumlahDiajukan: input.jumlahPinjaman,
+            tanggal: input.tanggal,
         });
-        if (!cekEligibilitas.valid)
-            throw new Error(cekEligibilitas.reason);
+        let peringatanSyarat = [];
+        if (!cekEligibilitas.valid) {
+            if (input.modeEligibilitas === 'PERINGATAN') {
+                peringatanSyarat = cekEligibilitas.alasan.map(BusinessRuleEngine_1.alasanSebagaiPeringatan);
+            }
+            else {
+                throw new Error(cekEligibilitas.alasan[0]);
+            }
+        }
         // RC-S54 item 24 & 25 — validasi tujuan & agunan, SEBELUM satu baris
         // pun ditulis. Keduanya murni data pengajuan: nol dampak pada
         // jurnal, pencairan, angsuran, restrukturisasi, maupun write-off.
@@ -15427,7 +16536,7 @@ async function ajukanPinjaman(input) {
           (id, pinjaman_id, nomor_angsuran, tanggal_jatuh_tempo, pokok, jasa, denda, total, status)
          VALUES (?,?,?,?,?,?,?,?,?)`, (0, id_1.newId)(), id, row.nomorAngsuran, tanggalAngsuran, row.pokok, row.jasa, 0, row.total, 'BELUM_BAYAR');
         }
-        return { id, nomorPinjaman };
+        return { id, nomorPinjaman, peringatanSyarat };
     });
 }
 /**
@@ -16707,6 +17816,8 @@ async function getPinjamanDetail(pinjamanId) {
         tujuanDetail: (row.tujuan_detail ?? null),
         /** RC-S72 — prefill form Edit Pinjaman; kosong = tanpa agunan. */
         agunan: await getAgunanPinjaman(db, pinjamanId),
+        /** RC-S133.6.4 (v82) — pencatatan penyelesaian ke Pengadilan/asuransi; null bila tidak ada. */
+        penyelesaian: (0, PenyelesaianPinjaman_1.bacaPenyelesaianDariRow)(pinjamanId, row),
     };
 }
 function kelompokkanJadwalAngsuran(item) {
@@ -17366,9 +18477,177 @@ function wajibkanTujuanPinjaman(input) {
     return { tujuanPinjaman: hasil.tujuanPinjaman, tujuanDetail: hasil.tujuanDetail };
 }
 
-},1345,[909,778,958,959,1346,962,1347,966,828,965,1314,1315,785,977,1348,918,1349,951]);
+},1345,[909,778,958,959,1346,962,1347,966,828,965,1314,1315,785,977,1348,918,9018,1349,951]);
 __d(function(g,r,_i,a,m,_e,d){"use strict";Object.defineProperty(_e,'__esModule',{value:!0}),_e.hitungJadwalAngsuran=function(n){const{jumlahPinjaman:e,tenor:t,persentaseJasaPerPeriode:u,metode:l}=n;if(t<=0)throw new Error('Tenor harus lebih besar dari 0.');if(e<=0)throw new Error('Jumlah pinjaman harus lebih besar dari 0.');switch(l){case'FLAT':return o(e,t,u);case'MENURUN':return i(e,t,u);case'EFEKTIF':return s(e,t,u);case'CUSTOM':return[];default:throw new Error(`Metode jasa tidak dikenal: ${l}`)}},_e.hitungDenda=function(n){if(!n.aktif||n.hariTerlambat<=0)return 0;switch(n.tipe){case'NOMINAL':case'PER_PERIODE':return(0,u.roundToRupiah)(n.nilai);case'PERSENTASE':return(0,u.roundToRupiah)(new t.default(n.sisaTagihan).mul(n.nilai).div(100));case'PER_HARI':return(0,u.roundToRupiah)(new t.default(n.nilai).mul(n.hariTerlambat));default:return 0}},_e.hitungTotalBarisCustom=function(n){return n.map(n=>Object.assign({},n,{total:n.pokok+n.jasa}))},_e.validasiJadwalCustom=function(n,e,t){const o=[];0===n.length&&o.push('Jadwal angsuran custom minimal harus punya 1 periode.');n.forEach((n,e)=>{n.nomorAngsuran!==e+1&&o.push(`Nomor angsuran harus berurutan 1..N tanpa lompat \u2014 ditemukan urutan tidak sesuai di posisi ${e+1}.`),n.pokok<0&&o.push(`Periode ${n.nomorAngsuran}: pokok tidak boleh negatif.`),n.jasa<0&&o.push(`Periode ${n.nomorAngsuran}: bunga tidak boleh negatif.`),0===n.pokok&&0===n.jasa&&o.push(`Periode ${n.nomorAngsuran}: total angsuran tidak boleh 0.`),n.tanggalJatuhTempo&&!isNaN(new Date(n.tanggalJatuhTempo).getTime())||o.push(`Periode ${n.nomorAngsuran}: tanggal jatuh tempo tidak valid.`)});let i=t;for(const e of n)e.tanggalJatuhTempo&&!isNaN(new Date(e.tanggalJatuhTempo).getTime())&&(e.tanggalJatuhTempo<=i&&o.push(`Periode ${e.nomorAngsuran}: tanggal jatuh tempo (${e.tanggalJatuhTempo}) harus setelah periode sebelumnya (${i}).`),i=e.tanggalJatuhTempo);const s=(0,u.sum)(n.map(n=>n.pokok)),l=(0,u.sum)(n.map(n=>n.jasa));s!==e&&o.push(`Total pokok seluruh periode (${(0,u.formatRupiah)(s)}) harus PERSIS SAMA dengan jumlah pinjaman (${(0,u.formatRupiah)(e)}).`);return{valid:0===o.length,errors:o,jumlahPeriode:n.length,totalPokok:s,totalJasa:l,totalAngsuran:s+l}};var n,e=r(d[0]),t=(n=e)&&n.__esModule?n:{default:n},u=r(d[1]);function o(n,e,o){const i=new t.default(n).div(e),s=new t.default(n).mul(o).div(100);return l(e,n,Array.from({length:e},()=>(0,u.roundToRupiah)(i)),Array.from({length:e},()=>(0,u.roundToRupiah)(s)))}function i(n,e,o){const i=new t.default(n).div(e);let s=new t.default(n);const h=[],p=[];for(let n=0;n<e;n++){const n=s.mul(o).div(100);h.push((0,u.roundToRupiah)(i)),p.push((0,u.roundToRupiah)(n)),s=s.minus(i)}return l(e,n,h,p)}function s(n,e,o){const i=new t.default(o).div(100),s=new t.default(n),h=e;let p;if(i.isZero())p=s.div(h);else{const n=new t.default(1).plus(i).pow(-h);p=s.mul(i).div(new t.default(1).minus(n))}let f=s;const c=[],T=[];for(let n=0;n<h;n++){const n=f.mul(i),e=p.minus(n);c.push((0,u.roundToRupiah)(e)),T.push((0,u.roundToRupiah)(n)),f=f.minus(e)}return l(e,n,c,T)}function l(n,e,t,o){const i=e-(0,u.sum)(t);return 0!==i&&(t[n-1]+=i),t.map((n,e)=>({nomorAngsuran:e+1,pokok:n,jasa:o[e],total:n+o[e]}))}},1346,[911,910]);
-__d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.getTotalSaldoSimpanan=u,e.getTotalOutstanding=s,e.getTunggakanAnggota=A,e.checkEligibilitasPinjaman=async function(n,c){const j=await n.getFirstAsync("SELECT status FROM anggota WHERE id = ?",c.anggotaId);if(!j)return{valid:!1,reason:'Anggota tidak ditemukan.'};const[_,k,p,T,h,S,N,I,O,M]=await Promise.all([(0,t.getSaldoSimpanan)(n,c.anggotaId,'POKOK'),(0,t.getSaldoSimpanan)(n,c.anggotaId,'WAJIB'),u(n,c.anggotaId),s(n,c.anggotaId),A(n,c.anggotaId),(0,l.getPolicyValue)('MINIMUM_SALDO_SIMPANAN_PINJAMAN'),(0,l.getPolicyValue)('MAX_PINJAMAN_PER_ANGGOTA'),(0,l.getPolicyValue)('MAX_OUTSTANDING_PER_ANGGOTA'),(0,l.getPolicyValue)('MAX_TUNGGAKAN_AKTIF'),(0,l.getPolicyValue)('OVERDUE_LIMIT_HARI')]);return(0,o.validateAll)((0,o.checkAnggotaAktif)(j.status),(0,o.checkKepemilikanSimpananPokokWajib)(_,k),(0,o.checkSaldoSimpananMinimum)(p,S),(0,o.checkLimitPinjaman)(c.jumlahDiajukan,N),(0,o.checkLimitOutstanding)(T,c.jumlahDiajukan,I),(0,o.checkBatasTunggakan)({jumlahTunggakanAktif:h.jumlahTunggakanAktif,hariTerlambatMaksimum:h.hariTerlambatMaksimum,limitJumlahTunggakan:O,limitHariTerlambat:M}))};var n=r(d[0]),t=r(d[1]),l=r(d[2]),o=r(d[3]);async function u(n,l){const[o,u,s]=await Promise.all([(0,t.getSaldoSimpanan)(n,l,'POKOK'),(0,t.getSaldoSimpanan)(n,l,'WAJIB'),(0,t.getSaldoSimpanan)(n,l,'SUKARELA')]);return o+u+s}async function s(t,l){const o=await t.getFirstAsync(`SELECT COALESCE(SUM(aj.total - aj.pokok_terbayar - aj.jasa_terbayar), 0) as total\n     FROM angsuran_jadwal aj JOIN pinjaman p ON p.id = aj.pinjaman_id\n     WHERE p.anggota_id = ? AND p.status = 'AKTIF' AND ${(0,n.sqlJadwalBukanObsolete)('aj')}`,l);return o?.total??0}async function A(t,l){const o=await t.getFirstAsync(`SELECT COUNT(*) as jumlah, MAX(julianday('now') - julianday(aj.tanggal_jatuh_tempo)) as hari_max\n     FROM angsuran_jadwal aj JOIN pinjaman p ON p.id = aj.pinjaman_id\n     WHERE p.anggota_id = ? AND p.status = 'AKTIF' AND ${(0,n.sqlJadwalCurrent)('aj')}\n       AND aj.tanggal_jatuh_tempo < date('now')`,l);return{jumlahTunggakanAktif:o?.jumlah??0,hariTerlambatMaksimum:o?.hari_max?Math.floor(o.hari_max):0}}},1347,[909,974,963,966]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/ScheduleLifecycle":return _$r(909);case "@/services/SimpananService":return _$r(974);case "@/services/AccountingPolicyService":return _$r(963);case "@/utils/tanggal":return _$r(918);case "@/validators/BusinessRuleEngine":return _$r(966);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.getTotalSaldoSimpanan=getTotalSaldoSimpanan;
+exports.getTotalOutstanding=getTotalOutstanding;
+exports.getTunggakanAnggota=getTunggakanAnggota;
+exports.getTotalOutstandingPerTanggal=getTotalOutstandingPerTanggal;
+exports.getTunggakanAnggotaPerTanggal=getTunggakanAnggotaPerTanggal;
+exports.evaluasiEligibilitasPinjaman=evaluasiEligibilitasPinjaman;
+exports.checkEligibilitasPinjaman=checkEligibilitasPinjaman;
+const ScheduleLifecycle_1 = require("@/accounting/ScheduleLifecycle");
+const SimpananService_1 = require("@/services/SimpananService");
+const AccountingPolicyService_1 = require("@/services/AccountingPolicyService");
+const tanggal_1 = require("@/utils/tanggal");
+const BusinessRuleEngine_1 = require("@/validators/BusinessRuleEngine");
+/**
+ * LoanEligibilityService — Phase 6 (AUDIT_INTERNAL.md §5:
+ * "LoanEligibilityService: MISSING", §3.2: "ajukanPinjaman() validasi
+ * HANYA requirePermission()"). Sama seperti LiquidityService: I/O di
+ * sini, logika murninya di validators/BusinessRuleEngine.ts (Phase 3).
+ */
+/** Total saldo simpanan anggota (pokok+wajib+sukarela) — dasar syarat minimum pengajuan. */
+async function getTotalSaldoSimpanan(db, anggotaId, 
+/** RC-S133.6.4 — saldo PER TANGGAL ini; tidak diisi = saldo seluruh transaksi (perilaku lama). */
+sampaiTanggal) {
+    const [pokok, wajib, sukarela] = await Promise.all([
+        (0, SimpananService_1.getSaldoSimpanan)(db, anggotaId, 'POKOK', sampaiTanggal),
+        (0, SimpananService_1.getSaldoSimpanan)(db, anggotaId, 'WAJIB', sampaiTanggal),
+        (0, SimpananService_1.getSaldoSimpanan)(db, anggotaId, 'SUKARELA', sampaiTanggal),
+    ]);
+    return pokok + wajib + sukarela;
+}
+/** Total sisa pinjaman berjalan (outstanding) anggota — semua pinjaman berstatus AKTIF. */
+async function getTotalOutstanding(db, anggotaId) {
+    const row = await db.getFirstAsync(
+    // BUG-08/BUG-12: WAJIB mengecualikan jadwal obsolete. Tanpa ini,
+    // jadwal lama hasil akad ulang (DIRESTRUKTURISASI) & jadwal yang
+    // sudah dihapusbukukan (DIHAPUSBUKU) ikut dijumlahkan bersama
+    // jadwal penggantinya sehingga outstanding anggota berlipat.
+    `SELECT COALESCE(SUM(aj.total - aj.pokok_terbayar - aj.jasa_terbayar), 0) as total
+     FROM angsuran_jadwal aj JOIN pinjaman p ON p.id = aj.pinjaman_id
+     WHERE p.anggota_id = ? AND p.status = 'AKTIF' AND ${(0, ScheduleLifecycle_1.sqlJadwalBukanObsolete)('aj')}`, anggotaId);
+    return row?.total ?? 0;
+}
+/** Ringkasan tunggakan anggota — jumlah baris angsuran terlambat + hari keterlambatan paling lama. */
+async function getTunggakanAnggota(db, anggotaId) {
+    const row = await db.getFirstAsync(`SELECT COUNT(*) as jumlah, MAX(julianday('now') - julianday(aj.tanggal_jatuh_tempo)) as hari_max
+     FROM angsuran_jadwal aj JOIN pinjaman p ON p.id = aj.pinjaman_id
+     WHERE p.anggota_id = ? AND p.status = 'AKTIF' AND ${(0, ScheduleLifecycle_1.sqlJadwalCurrent)('aj')}
+       AND aj.tanggal_jatuh_tempo < date('now')`, anggotaId);
+    return {
+        jumlahTunggakanAktif: row?.jumlah ?? 0,
+        hariTerlambatMaksimum: row?.hari_max ? Math.floor(row.hari_max) : 0,
+    };
+}
+/** Pembayaran angsuran yang masih berlaku (bukan yang dikoreksi/dibalik) — definisi sama dengan KoreksiTransaksiService. */
+const PEMBAYARAN_BERLAKU = (alias) => `${alias}.reversal_of_id IS NULL AND ${alias}.id NOT IN (SELECT reversal_of_id FROM angsuran_pembayaran WHERE reversal_of_id IS NOT NULL)`;
+/**
+ * RC-S133.6.4 — sisa pinjaman berjalan anggota PER TANGGAL tertentu.
+ *
+ * Direkonstruksi dari data yang ada, bukan disimpan: pinjaman anggota yang
+ * tanggalnya <= `tanggal` (status AKTIF atau LUNAS sekarang), sisa = total
+ * jadwal berlaku dikurangi pembayaran bertanggal <= `tanggal`. Pinjaman yang
+ * baru dibuat SESUDAH tanggal itu tidak ikut (belum ada saat itu).
+ *
+ * Keterbatasan (diungkapkan di dokumen rilis): tidak ada riwayat status per
+ * tanggal, sehingga jadwal yang kemudian digantikan akad ulang / dihapusbukukan
+ * dinilai dengan jadwal yang berlaku sekarang; sisa tidak pernah negatif.
+ */
+async function getTotalOutstandingPerTanggal(db, anggotaId, tanggal) {
+    const row = await db.getFirstAsync(`SELECT COALESCE(SUM(CASE
+              -- Pinjaman yang sudah LUNAS dan pembayaran terakhirnya jatuh
+              -- pada/sebelum tanggal ini: lunas saat itu, walau pelunasan
+              -- dipercepat dengan rabat jasa membuat jumlah bayar < kontrak.
+              WHEN x.status = 'LUNAS' AND x.bayar_terakhir IS NOT NULL AND x.bayar_terakhir <= ? THEN 0
+              WHEN x.kontrak - x.bayar > 0 THEN x.kontrak - x.bayar
+              ELSE 0 END), 0) as total
+     FROM (
+       SELECT p.status as status,
+              (SELECT COALESCE(SUM(aj.total), 0) FROM angsuran_jadwal aj
+                WHERE aj.pinjaman_id = p.id AND ${(0, ScheduleLifecycle_1.sqlJadwalBukanObsolete)('aj')}) as kontrak,
+              (SELECT COALESCE(SUM(ap.porsi_pokok + ap.porsi_jasa), 0) FROM angsuran_pembayaran ap
+                WHERE ap.pinjaman_id = p.id AND ap.tanggal <= ? AND ${PEMBAYARAN_BERLAKU('ap')}) as bayar,
+              (SELECT MAX(ap.tanggal) FROM angsuran_pembayaran ap
+                WHERE ap.pinjaman_id = p.id AND ${PEMBAYARAN_BERLAKU('ap')}) as bayar_terakhir
+       FROM pinjaman p
+       WHERE p.anggota_id = ? AND p.tanggal <= ? AND p.status IN ('AKTIF','LUNAS')
+     ) x`, tanggal, tanggal, anggotaId, tanggal);
+    return row?.total ?? 0;
+}
+/**
+ * RC-S133.6.4 — tunggakan anggota PER TANGGAL tertentu: baris jadwal yang
+ * jatuh temponya SEBELUM `tanggal` dan belum terbayar penuh oleh pembayaran
+ * bertanggal <= `tanggal`. Pinjaman yang sudah dilunasi (pelunasan dipercepat)
+ * pada/sebelum tanggal itu tidak dihitung. Keterbatasan sama dengan
+ * `getTotalOutstandingPerTanggal`.
+ */
+async function getTunggakanAnggotaPerTanggal(db, anggotaId, tanggal) {
+    const row = await db.getFirstAsync(`SELECT COUNT(*) as jumlah, MAX(julianday(?) - julianday(aj.tanggal_jatuh_tempo)) as hari_max
+     FROM angsuran_jadwal aj JOIN pinjaman p ON p.id = aj.pinjaman_id
+     WHERE p.anggota_id = ? AND p.tanggal <= ? AND p.status IN ('AKTIF','LUNAS')
+       AND ${(0, ScheduleLifecycle_1.sqlJadwalBukanObsolete)('aj')}
+       AND aj.tanggal_jatuh_tempo < ?
+       AND (aj.pokok + aj.jasa) > (
+         SELECT COALESCE(SUM(ap.porsi_pokok + ap.porsi_jasa), 0) FROM angsuran_pembayaran ap
+          WHERE ap.jadwal_id = aj.id AND ap.tanggal <= ? AND ${PEMBAYARAN_BERLAKU('ap')})
+       AND NOT EXISTS (
+         SELECT 1 FROM angsuran_pembayaran ap2
+          WHERE ap2.pinjaman_id = p.id AND ap2.jadwal_id IS NULL AND ap2.tanggal <= ? AND ${PEMBAYARAN_BERLAKU('ap2')})`, tanggal, anggotaId, tanggal, tanggal, tanggal, tanggal);
+    return {
+        jumlahTunggakanAktif: row?.jumlah ?? 0,
+        hariTerlambatMaksimum: row?.hari_max ? Math.floor(row.hari_max) : 0,
+    };
+}
+/**
+ * Evaluasi kelayakan pengajuan pinjaman — mengembalikan SEMUA syarat yang
+ * tidak terpenuhi dan tanggal yang dipakai menilai.
+ *
+ * RC-S133.6.4 — SYARAT DINILAI PADA TANGGAL PENGAJUAN, bukan hari ini:
+ *  - `tanggal` hari ini / masa depan / tidak diisi -> dinilai dengan keadaan
+ *    sekarang, dengan kueri yang SAMA dengan sebelumnya (hasil tidak berubah);
+ *  - `tanggal` lampau -> saldo simpanan, sisa pinjaman berjalan, dan
+ *    tunggakan direkonstruksi PER TANGGAL itu. Yang tidak punya riwayat
+ *    tanggal (status keanggotaan sekarang, kebijakan/limit yang berlaku
+ *    sekarang) tetap memakai keadaan sekarang.
+ */
+async function evaluasiEligibilitasPinjaman(db, params) {
+    const hariIni = params.tanggalHariIni ?? (0, tanggal_1.getTanggalLokalHariIni)();
+    const perTanggalLampau = !!params.tanggal && params.tanggal < hariIni;
+    const sampai = perTanggalLampau ? params.tanggal : undefined;
+    const tanggalPenilaian = sampai ?? hariIni;
+    const anggota = await db.getFirstAsync(`SELECT status FROM anggota WHERE id = ?`, params.anggotaId);
+    if (!anggota) {
+        return { valid: false, alasan: ['Anggota tidak ditemukan.'], tanggalPenilaian, perTanggalLampau };
+    }
+    const [saldoPokok, saldoWajib, saldoSimpanan, outstanding, tunggakan, saldoMinimum, limitPinjaman, limitOutstanding, limitJumlahTunggakan, limitHariTerlambat] = await Promise.all([
+        (0, SimpananService_1.getSaldoSimpanan)(db, params.anggotaId, 'POKOK', sampai),
+        (0, SimpananService_1.getSaldoSimpanan)(db, params.anggotaId, 'WAJIB', sampai),
+        getTotalSaldoSimpanan(db, params.anggotaId, sampai),
+        sampai ? getTotalOutstandingPerTanggal(db, params.anggotaId, sampai) : getTotalOutstanding(db, params.anggotaId),
+        sampai ? getTunggakanAnggotaPerTanggal(db, params.anggotaId, sampai) : getTunggakanAnggota(db, params.anggotaId),
+        (0, AccountingPolicyService_1.getPolicyValue)('MINIMUM_SALDO_SIMPANAN_PINJAMAN'),
+        (0, AccountingPolicyService_1.getPolicyValue)('MAX_PINJAMAN_PER_ANGGOTA'),
+        (0, AccountingPolicyService_1.getPolicyValue)('MAX_OUTSTANDING_PER_ANGGOTA'),
+        (0, AccountingPolicyService_1.getPolicyValue)('MAX_TUNGGAKAN_AKTIF'),
+        (0, AccountingPolicyService_1.getPolicyValue)('OVERDUE_LIMIT_HARI'),
+    ]);
+    // Urutan SAMA dengan sebelumnya: alasan pertama = alasan yang dulu dilempar.
+    const alasan = (0, BusinessRuleEngine_1.collectFailures)((0, BusinessRuleEngine_1.checkAnggotaAktif)(anggota.status), (0, BusinessRuleEngine_1.checkKepemilikanSimpananPokokWajib)(saldoPokok, saldoWajib), (0, BusinessRuleEngine_1.checkSaldoSimpananMinimum)(saldoSimpanan, saldoMinimum), (0, BusinessRuleEngine_1.checkLimitPinjaman)(params.jumlahDiajukan, limitPinjaman), (0, BusinessRuleEngine_1.checkLimitOutstanding)(outstanding, params.jumlahDiajukan, limitOutstanding), (0, BusinessRuleEngine_1.checkBatasTunggakan)({
+        jumlahTunggakanAktif: tunggakan.jumlahTunggakanAktif,
+        hariTerlambatMaksimum: tunggakan.hariTerlambatMaksimum,
+        limitJumlahTunggakan,
+        limitHariTerlambat,
+    }));
+    return { valid: alasan.length === 0, alasan, tanggalPenilaian, perTanggalLampau };
+}
+/**
+ * Cek kelayakan pengajuan pinjaman — gabungan SEMUA rule domain Loan
+ * (member active, saving balance, loan limit, outstanding limit,
+ * overdue limit). Dipanggil dari `ajukanPinjaman()`. Semua limit
+ * default 0 (tidak membatasi) lewat AccountingPolicyService — admin
+ * yang mengaktifkan lewat Pengaturan, bukan angka yang dikarang di sini.
+ */
+async function checkEligibilitasPinjaman(db, params) {
+    const hasil = await evaluasiEligibilitasPinjaman(db, params);
+    return hasil.valid ? { valid: true } : { valid: false, reason: hasil.alasan[0] };
+}
+
+},1347,[909,974,963,918,966]);
 __d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "date-fns":return _$r(977);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
@@ -19503,8 +20782,1513 @@ __d(function(g,r,i,a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{v
 __d(function(g,r,i,_a,_m,e,_d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.tanggalPanjang=u,e.barisKetentuanProduk=P,e.butirKesepakatan=v,e.buildBuktiPenempatanHtml=function(a,o){const k='BUKTI PENEMPATAN SIMPANAN BERJANGKA',p=a.kontrak.nomorTransaksi,m=[{label:'Nomor kontrak',nilai:p},{label:'Tanggal penempatan',nilai:u(a.kontrak.tanggalMulai)},{label:'Tenor',nilai:`${a.kontrak.tenorBulan} bulan`},{label:'Tanggal jatuh tempo',nilai:u(a.kontrak.tanggalJatuhTempo)},{label:'Nominal pokok',nilai:s(a.kontrak.nominal)},{label:'Terbilang',nilai:(0,n.terbilangRupiah)(a.kontrak.nominal)},{label:'Suku bunga kontrak',nilai:a.kontrak.rateKontrak>0?`${(0,t.formatPersen)(a.kontrak.rateKontrak)} per tahun`:'Tanpa bunga'},{label:'Bunga selama tenor (bruto)',nilai:`${s(a.kontrak.totalBungaKontrak)} (pokok \xd7 suku bunga \xd7 tenor/12)`},{label:'Sumber dana',nilai:a.kontrak.sumberDana}];a.kontrak.nomorJurnal&&m.push({label:'Referensi jurnal',nilai:a.kontrak.nomorJurnal});const d=`\n    ${(0,l.htmlKop)(a.koperasi)}\n    <h1>${(0,l.escapeHtmlDokumen)(k)}</h1>\n    <div class="subjudul">Nomor: ${(0,l.escapeHtmlDokumen)(p)}</div>\n    <div class="blok"><h2>A. Identitas Anggota / Penyimpan</h2>${(0,l.htmlKv)(h(a.anggota))}</div>\n    <div class="blok"><h2>B. Rincian Penempatan</h2>${(0,l.htmlKv)(m)}</div>\n    <div class="blok"><h2>C. Ketentuan Produk</h2>${(0,l.htmlKv)(P(a.kebijakan))}</div>\n    <div class="blok">\n      <h2>D. Pernyataan dan Kesepakatan</h2>\n      <p class="pembukaan">Dengan menandatangani bukti ini, Anggota/Penyimpan dan Koperasi menyatakan dan menyepakati bahwa:</p>\n      <ol class="kesepakatan">${v(a.kebijakan).map(a=>`<li>${(0,l.escapeHtmlDokumen)(a)}</li>`).join('')}</ol>\n    </div>\n    <div class="blok">\n      ${b(a.anggota.nama,a.koperasi,a.pengurus)}\n      ${c(p,o.tanggalCetak,'Bukti ini dicetak dari data kontrak yang tersimpan di KOPKU.')}\n    </div>`;return A((0,l.htmlDokumenKontrak)({judulTab:`${k} \u2014 ${p}`,nomorDokumen:p,body:d}))},e.buildBuktiPencairanHtml=function(a,o){const k='BUKTI PENCAIRAN SIMPANAN BERJANGKA',p=a.pencairan,m=p.nomorReferensi,d=[{label:'Nomor kontrak',nilai:a.kontrak.nomorTransaksi},{label:'Tanggal penempatan',nilai:u(a.kontrak.tanggalMulai)},{label:'Tanggal jatuh tempo',nilai:u(a.kontrak.tanggalJatuhTempo)},{label:'Tanggal pencairan',nilai:u(a.kontrak.tanggalPencairan)},{label:'Suku bunga kontrak',nilai:a.kontrak.rateKontrak>0?`${(0,t.formatPersen)(a.kontrak.rateKontrak)} per tahun`:'Tanpa bunga'},{label:'Versi kebijakan produk',nilai:a.kebijakan.policyVersi??'Belum ditetapkan (kontrak lama)'}],P=[{label:'Pokok dicairkan kepada anggota',nilai:s(p.pokokDicairkan)},{label:'Bunga selama tenor (bruto)',nilai:s(p.bungaSelamaTenor)},{label:'Bunga pasca jatuh tempo (bruto)',nilai:s(p.bungaPascaJatuhTempo)},{label:'Bunga dikreditkan ke Simpanan Sukarela (bruto)',nilai:`${s(p.bungaKeSukarelaBruto)} (${p.jumlahJurnalPemindahan} jurnal pemindahan)`},{label:'PPh Pasal 4 ayat (2) atas bunga tersebut',nilai:s(p.pphAtasPemindahan)},{label:'Bunga neto masuk Simpanan Sukarela',nilai:s(p.bungaKeSukarelaNeto)}];(p.bungaDibayarTunai>0||0!==p.pphSaatPencairan)&&P.push({label:'Bunga dibayar tunai saat pencairan (bruto)',nilai:s(p.bungaDibayarTunai)},{label:'PPh Pasal 4 ayat (2) saat pencairan',nilai:s(p.pphSaatPencairan)});P.push({label:'Bunga belum dibayarkan',nilai:p.bungaTidakDibayarkan>0?s(p.bungaTidakDibayarkan):'Tidak ada'},{label:'TOTAL UANG KELUAR DARI KAS/BANK',nilai:s(p.totalKeluarKasBank)},{label:'Terbilang',nilai:(0,n.terbilangRupiah)(p.totalKeluarKasBank)},{label:'Sumber dana',nilai:p.sumberDana}),p.nomorJurnal&&P.push({label:'Referensi jurnal pencairan',nilai:p.nomorJurnal});const v=`\n    ${(0,l.htmlKop)(a.koperasi)}\n    <h1>${(0,l.escapeHtmlDokumen)(k)}</h1>\n    <div class="subjudul">Nomor: ${(0,l.escapeHtmlDokumen)(m)}</div>\n    <div class="blok"><h2>A. Identitas Anggota / Penyimpan</h2>${(0,l.htmlKv)(h(a.anggota))}</div>\n    <div class="blok"><h2>B. Kontrak</h2>${(0,l.htmlKv)(d)}</div>\n    <div class="blok"><h2>C. Rincian Pencairan</h2>${(0,l.htmlKv)(P)}\n      <div class="sorot">Pokok Simpanan Berjangka dibayarkan kepada anggota. Bunga yang telah menjadi hak anggota dikreditkan ke Simpanan Sukarela\n      setelah dipotong PPh, sehingga tidak dibayarkan lagi pada pencairan ini.</div>\n      ${p.alasanTidakDibayarkan?`<div class="catatan">${(0,l.escapeHtmlDokumen)(p.alasanTidakDibayarkan)}</div>`:''}\n    </div>\n    <div class="blok">\n      ${b(a.anggota.nama,a.koperasi,a.pengurus)}\n      ${c(m,o.tanggalCetak,`Pencairan kontrak ${a.kontrak.nomorTransaksi}. Angka dibaca dari jurnal & bukti potong yang tersimpan.`)}\n    </div>`;return A((0,l.htmlDokumenKontrak)({judulTab:`${k} \u2014 ${m}`,nomorDokumen:m,body:v}))};var a=r(_d[0]),n=r(_d[1]),t=r(_d[2]),l=r(_d[3]),o=r(_d[4]);const k=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];function u(a){const n=/^(\d{4})-(\d{2})-(\d{2})/.exec(a??'');return n?`${parseInt(n[3],10)} ${k[parseInt(n[2],10)-1]} ${n[1]}`:a??'-'}const s=n=>(0,a.formatRupiah)(n),p="\n  .ttd2 { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }\n  .ttd2 td { width: 50%; vertical-align: top; padding: 0 10px; text-align: center; }\n  .ttd2 .peran { font-weight: 700; letter-spacing: .3px; }\n  .ttd2 .sub { font-size: 8.5pt; color: #5b6670; margin-top: 2px; }\n  .ttd2 .tgl { font-size: 9pt; margin-top: 6px; }\n  .ttd2 .ruang { height: 74px; position: relative; }\n  .ttd2 .stempel { position: absolute; left: 50%; top: 8px; transform: translateX(-50%); width: 92px; height: 58px;\n    border: 0.8px dashed #b8c0c8; border-radius: 6px; font-size: 7pt; color: #9aa4ad; display: flex; align-items: center; justify-content: center; }\n  .ttd2 .garis { border-bottom: 0.8px solid #1f2328; margin: 0 18px; }\n  .ttd2 .nama { margin-top: 4px; font-weight: 700; }\n  .ttd2 .jabatan { font-size: 9pt; color: #3d4650; }\n  ol.kesepakatan { margin: 4px 0 0 18px; padding: 0; }\n  ol.kesepakatan li { margin: 3px 0; text-align: justify; }\n  .sorot { background: #f3f7f4; border-left: 3px solid #1B5E20; padding: 6px 9px; margin: 8px 0; }\n",m='(.............................................)';function d(a){return`<td>\n      <div class="peran">${(0,l.escapeHtmlDokumen)(a.peran)}</div>\n      <div class="sub">${(0,l.escapeHtmlDokumen)(a.sub)}</div>\n      <div class="tgl">Tanggal: ........................................</div>\n      <div class="ruang">${a.stempel?'<div class="stempel">Stempel koperasi</div>':''}</div>\n      <div class="garis"></div>\n      <div class="nama">${a.nama&&a.nama.trim()?(0,l.escapeHtmlDokumen)(a.nama):m}</div>\n      <div class="jabatan">${(0,l.escapeHtmlDokumen)(a.jabatan)}</div>\n    </td>`}function b(a,n,t){return`<table class="ttd2"><tr>\n      ${d({peran:'ANGGOTA / PENYIMPAN',sub:'Pemilik simpanan berjangka',nama:a,jabatan:'Anggota'})}\n      ${d({peran:'KETUA KOPERASI',sub:n.nama,nama:t.KETUA?.nama??null,jabatan:'Ketua',stempel:!0})}\n    </tr></table>`}function c(a,n,t){return`<div class="footer">\n      <table><tr>\n        <td class="kiri">No. Dokumen ${(0,l.escapeHtmlDokumen)(a)}<br />${(0,l.escapeHtmlDokumen)(t)}</td>\n        <td class="kanan">Dicetak ${(0,l.escapeHtmlDokumen)(n)}</td>\n      </tr></table>\n      <div class="identitas">Dicetak dengan <b>${(0,l.escapeHtmlDokumen)(o.NAMA_APLIKASI_CETAK)}</b> \xb7 ${(0,l.escapeHtmlDokumen)(o.KETERANGAN_APLIKASI_CETAK)}</div>\n    </div>`}function h(a){const n=[{label:'Nama anggota',nilai:a.nama},{label:'Nomor anggota',nilai:a.nomorAnggota}];return a.nik&&n.push({label:'NIK',nilai:a.nik}),a.alamat&&n.push({label:'Alamat',nilai:a.alamat}),n}function P(a){if('LEGACY_POLICY_REVIEW_REQUIRED'===a.statusPolicy||!a.policyVersi)return[{label:'Kebijakan produk',nilai:'Belum ditetapkan \u2014 kontrak dibuat sebelum kebijakan produk tersedia (perlu peninjauan pengurus)'},{label:'Setelah jatuh tempo',nilai:'Tidak diperpanjang otomatis; pokok tetap disimpan sampai dicairkan; tanpa bunga pasca jatuh tempo sampai pengurus menetapkan kebijakan'}];const n=[{label:'Versi kebijakan produk',nilai:`${a.policyVersi}${a.berlakuMulai?` (berlaku mulai ${u(a.berlakuMulai)})`:''}`}];return a.dasarPenetapan&&n.push({label:'Dasar penetapan',nilai:a.dasarPenetapan}),n.push({label:'Perpanjangan otomatis',nilai:a.autoRenewal?'Ya':'Tidak'},{label:'Bunga pasca jatuh tempo',nilai:a.bungaPascaAktif&&a.ratePascaJatuhTempo?`Ya \u2014 ${(0,t.formatPersen)(a.ratePascaJatuhTempo)} per tahun atas pokok, per bulan kalender penuh, selama belum dicairkan`:'Tidak'},{label:'Pemindahan bunga',nilai:'Bunga yang sudah menjadi hak anggota dikreditkan ke Simpanan Sukarela setelah dipotong PPh Pasal 4 ayat (2)'},{label:'Kapitalisasi bunga ke pokok',nilai:'Tidak'},{label:'Ketentuan pencairan',nilai:'Pokok dicairkan kepada anggota pada atau setelah tanggal jatuh tempo atas permintaan anggota'}),'LEGACY_POLICY_DITERAPKAN'===a.statusPolicy&&a.pascaMulaiEfektif&&n.push({label:'Diterapkan pada kontrak lama',nilai:`Efektif ${u(a.pascaMulaiEfektif)} (tanpa perhitungan surut)`}),n}function v(a){const n=[];return a.autoRenewal||n.push('Status jatuh tempo tidak berarti pokok dicairkan secara otomatis dan kontrak tidak diperpanjang secara otomatis; pokok tetap tersimpan sebagai Simpanan Berjangka sampai Anggota/Penyimpan mengajukan pencairan.'),n.push(a.policyVersi?`Perlakuan setelah jatuh tempo mengikuti kebijakan produk versi ${a.policyVersi} yang berlaku pada kontrak ini: ${(0,t.ringkasanPerlakuanPascaJatuhTempo)({autoRenewal:!!a.autoRenewal,bungaPascaAktif:!!a.bungaPascaAktif,ratePascaJatuhTempo:a.ratePascaJatuhTempo})}`:'Perlakuan setelah jatuh tempo mengikuti kebijakan produk yang ditetapkan pengurus koperasi untuk kontrak ini.'),n.push('Bunga yang telah menjadi hak Anggota/Penyimpan dapat dikreditkan ke Simpanan Sukarela atas nama Anggota/Penyimpan setelah dipotong Pajak Penghasilan sesuai ketentuan yang berlaku.'),n.push('Bunga tidak ditambahkan ke pokok Simpanan Berjangka kecuali terdapat kebijakan tertulis koperasi yang secara tegas menyatakan demikian.'),n.push('Dokumen ini mencerminkan ketentuan kebijakan produk (snapshot) yang dipakai saat kontrak dibuat; perubahan kebijakan koperasi di kemudian hari tidak mengubah ketentuan kontrak ini.'),n}function A(a){return a.replace('</style>',`${p}</style>`)}},1435,[910,1436,1279,948,940]);
 __d(function(g,r,i,a,_m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),e.terbilang=n,e.terbilangRupiah=function(t){return`${n(t)} rupiah`},e.namaHari=function(t){const u=/^(\d{4})-(\d{2})-(\d{2})/.exec(t??'');return u?l[new Date(Date.UTC(Number(u[1]),Number(u[2])-1,Number(u[3]))).getUTCDay()]:'-'};const t=['','satu','dua','tiga','empat','lima','enam','tujuh','delapan','sembilan','sepuluh','sebelas'];function u(n){return n<12?t[n]:n<20?`${u(n-10)} belas`:n<100?`${u(Math.floor(n/10))} puluh ${u(n%10)}`:n<200?`seratus ${u(n-100)}`:n<1e3?`${u(Math.floor(n/100))} ratus ${u(n%100)}`:n<2e3?`seribu ${u(n-1e3)}`:n<1e6?`${u(Math.floor(n/1e3))} ribu ${u(n%1e3)}`:n<1e9?`${u(Math.floor(n/1e6))} juta ${u(n%1e6)}`:n<1e12?`${u(Math.floor(n/1e9))} miliar ${u(n%1e9)}`:`${u(Math.floor(n/1e12))} triliun ${u(n%1e12)}`}function n(t){if(!Number.isSafeInteger(t)||t<0)throw new Error(`Terbilang hanya untuk bilangan bulat tidak negatif: ${t}`);return 0===t?'nol':u(t).replace(/\s+/g,' ').trim()}const l=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu']},1436,[]);
 __d(function(g,r,i,a,m,_e,d){"use strict";function e(e){return e&&e.__esModule?e:{default:e}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return P}});var t=r(d[0]),n=e(r(d[1])),o=e(r(d[2])),l=e(r(d[3])),s=e(r(d[4])),c=e(r(d[5])),u=e(r(d[6])),f=r(d[7]),x=r(d[8]),h=r(d[9]),p=r(d[10]),b=r(d[11]),y=e(r(d[12])),j=e(r(d[13])),T=r(d[14]),C=r(d[15]),A=r(d[16]),k=r(d[17]),w=r(d[18]),I=r(d[19]);const S={DIAJUKAN:{label:'Diajukan',bg:k.colors.background,fg:k.colors.textMuted},DISETUJUI:{label:'Disetujui',bg:k.colors.warningBg,fg:k.colors.warning},AKTIF:{label:'Aktif',bg:k.colors.primaryLight,fg:k.colors.primary},LUNAS:{label:'Lunas',bg:k.colors.background,fg:k.colors.textFaint},MACET:{label:'Macet',bg:k.colors.dangerBg,fg:k.colors.danger},DITOLAK:{label:'Ditolak',bg:k.colors.dangerBg,fg:k.colors.danger}},v=[{value:null,label:'Semua'},{value:'AKTIF',label:'Aktif'},{value:'BELUM_AKTIF',label:'Belum Aktif'},{value:'DIBATALKAN',label:'Dibatalkan'}];function P(){const e=(0,T.useSafeAreaInsets)(),u=(0,f.useNavigation)(),P=(0,p.useAppStore)(e=>e.koperasi),[D,L]=(0,t.useState)(''),[R,K]=(0,t.useState)(null),[M,B]=(0,t.useState)([]),[E,F]=(0,t.useState)(!0),[W,O]=(0,t.useState)(null),U=(0,t.useCallback)(async(e,t)=>{F(!0),O(null);try{const n=await(0,x.listPinjaman)({search:e||void 0,statusKategori:t??void 0,limit:1e5});B(n)}catch(e){O(e instanceof Error?e.message:'Gagal memuat daftar pinjaman.')}finally{F(!1)}},[]);(0,t.useEffect)(()=>{const e=setTimeout(()=>U(D,R),250);return()=>clearTimeout(e)},[D,R,U]),(0,t.useEffect)(()=>u.addListener('focus',()=>U(D,R)),[u,U,D,R]);const H=(0,t.useMemo)(()=>P&&M.length>0?(0,b.buildPinjamanExport)({namaKoperasi:P.nama,standarAkuntansi:P.standarAkuntansi},M,(0,w.getTanggalLokalHariIni)()):null,[P,M]);(0,t.useLayoutEffect)(()=>{u.setOptions({headerRight:()=>(0,I.jsx)(y.default,{variant:"header",label:"Export",data:H})})},[u,H]);const _=(0,t.useMemo)(()=>M.reduce((e,t)=>e+('AKTIF'===t.status||'MACET'===t.status?t.sisaPiutang:0),0),[M]);return(0,I.jsxs)(n.default,{style:z.container,children:[(0,I.jsx)(j.default,{wrapStyle:z.search,placeholder:"Cari nomor pinjaman, nama, atau nomor anggota...",value:D,onChangeText:L}),(0,I.jsx)(n.default,{style:z.filterRow,children:v.map(e=>(0,I.jsx)(s.default,{style:[z.filterChip,R===e.value&&z.filterChipActive],onPress:()=>K(e.value),children:(0,I.jsx)(o.default,{style:[z.filterChipText,R===e.value&&z.filterChipTextActive],children:e.label})},e.label))}),!E&&!W&&M.length>0&&(0,I.jsxs)(n.default,{style:z.summaryRow,children:[(0,I.jsxs)(o.default,{style:z.summaryText,children:[(0,I.jsx)(o.default,{style:z.summaryStrong,children:M.length})," pinjaman"]}),(0,I.jsxs)(o.default,{style:z.summaryText,children:["Sisa piutang ",(0,I.jsx)(o.default,{style:z.summaryStrong,children:(0,h.formatRupiah)(_)})]})]}),E&&(0,I.jsx)(c.default,{style:z.center}),!E&&W&&(0,I.jsxs)(n.default,{style:z.center,children:[(0,I.jsx)(o.default,{style:z.errorText,children:W}),(0,I.jsx)(s.default,{onPress:()=>U(D,R),children:(0,I.jsx)(o.default,{style:z.retry,children:"Coba lagi"})})]}),!E&&!W&&0===M.length&&(0,I.jsx)(n.default,{style:z.center,children:(0,I.jsx)(o.default,{style:z.emptyText,children:D||R?'Tidak ada pinjaman yang cocok dengan pencarian/filter ini.':'Belum ada pinjaman. Tekan + untuk mengajukan pinjaman baru.'})}),!E&&!W&&M.length>0&&(0,I.jsx)(l.default,{data:M,keyExtractor:e=>e.id,contentContainerStyle:[z.listContent,{paddingBottom:96+e.bottom}],renderItem:({item:e,index:t})=>{const l=S[e.status]??{label:e.status,bg:k.colors.background,fg:k.colors.text},c='AKTIF'===e.status||'MACET'===e.status;return(0,I.jsxs)(s.default,{style:z.card,activeOpacity:.7,onPress:()=>u.navigate('PinjamanDetail',{pinjamanId:e.id}),accessibilityRole:"button",accessibilityLabel:`Pinjaman nomor ${t+1}, ${e.namaAnggota}, ${e.nomorPinjaman}`,children:[(0,I.jsxs)(n.default,{style:z.cardTop,children:[(0,I.jsxs)(n.default,{style:z.cardIdentitas,children:[(0,I.jsx)(o.default,{style:z.nama,numberOfLines:1,children:e.namaAnggota}),(0,I.jsx)(o.default,{style:z.nomorPinjaman,numberOfLines:1,children:e.nomorPinjaman})]}),(0,I.jsx)(n.default,{style:z.nomorUrut,children:(0,I.jsx)(o.default,{style:z.nomorUrutText,children:t+1})})]}),(0,I.jsx)(n.default,{style:z.cardDivider}),(0,I.jsxs)(n.default,{style:z.cardNilai,children:[(0,I.jsxs)(n.default,{style:z.nilaiKolom,children:[(0,I.jsx)(o.default,{style:z.nilaiLabel,children:"Plafon"}),(0,I.jsx)(o.default,{style:z.nominal,children:(0,h.formatRupiah)(e.jumlahPinjaman)})]}),(0,I.jsxs)(n.default,{style:[z.nilaiKolom,z.nilaiKolomKanan],children:[(0,I.jsx)(o.default,{style:z.nilaiLabel,children:"Sisa Piutang"}),(0,I.jsx)(o.default,{style:[z.nominal,c&&z.sisa],children:c?(0,h.formatRupiah)(e.sisaPiutang):'\u2014'})]})]}),(0,I.jsxs)(n.default,{style:z.cardFooter,children:[(0,I.jsx)(n.default,{style:[z.badge,{backgroundColor:l.bg}],children:(0,I.jsx)(o.default,{style:[z.badgeText,{color:l.fg}],children:l.label})}),(0,I.jsxs)(n.default,{style:z.metaRow,children:[(0,I.jsx)(C.Ionicons,{name:"time-outline",size:13,color:k.colors.textMuted}),(0,I.jsxs)(o.default,{style:z.meta,children:[e.tenor," ",e.satuanTenor.toLowerCase()]}),!!e.tanggalJatuhTempo&&(0,I.jsxs)(I.Fragment,{children:[(0,I.jsx)(o.default,{style:z.metaDot,children:"\xb7"}),(0,I.jsx)(C.Ionicons,{name:"calendar-outline",size:13,color:k.colors.textMuted}),(0,I.jsx)(o.default,{style:z.meta,children:(0,A.formatTanggalIndonesia)(e.tanggalJatuhTempo)})]})]})]})]})}}),(0,I.jsx)(s.default,{style:[z.fab,{bottom:24+e.bottom}],onPress:()=>u.navigate('PinjamanForm'),accessibilityRole:"button",accessibilityLabel:"Ajukan Pinjaman",children:(0,I.jsx)(C.Ionicons,{name:"add",size:28,color:k.colors.white})})]})}const z=u.default.create({container:{flex:1,backgroundColor:k.colors.background},search:{margin:k.spacing.md},filterRow:{flexDirection:'row',flexWrap:'wrap',gap:8,paddingHorizontal:k.spacing.md,marginBottom:k.spacing.sm},filterChip:{paddingHorizontal:k.spacing.md,paddingVertical:6,borderRadius:k.radius.pill,borderWidth:1,borderColor:k.colors.border,backgroundColor:k.colors.surface},filterChipActive:{backgroundColor:k.colors.primary,borderColor:k.colors.primary},filterChipText:{fontSize:12,color:k.colors.text},filterChipTextActive:{color:k.colors.white},center:{flex:1,alignItems:'center',justifyContent:'center',padding:k.spacing.xl},emptyText:{color:k.colors.textMuted,textAlign:'center'},errorText:{color:k.colors.danger,marginBottom:k.spacing.sm,textAlign:'center'},retry:{color:k.colors.primary,fontWeight:'700',textAlign:'center'},summaryRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',paddingHorizontal:k.spacing.lg,paddingBottom:k.spacing.sm},summaryText:{fontSize:12,color:k.colors.textMuted},summaryStrong:{fontWeight:'700',color:k.colors.text},listContent:{paddingHorizontal:k.spacing.md,paddingTop:k.spacing.xs,gap:k.spacing.sm},card:Object.assign({backgroundColor:k.colors.surface,borderRadius:k.radius.md,borderWidth:1,borderColor:k.colors.border,padding:k.spacing.md},k.elevation.card),cardTop:{flexDirection:'row',alignItems:'flex-start',gap:k.spacing.sm},cardIdentitas:{flex:1,minWidth:0},nama:{fontSize:15,fontWeight:'700',color:k.colors.text},nomorPinjaman:{fontSize:12,color:k.colors.textMuted,marginTop:2,fontVariant:['tabular-nums']},nomorUrut:{minWidth:28,height:28,paddingHorizontal:6,borderRadius:14,backgroundColor:k.colors.primaryLight,alignItems:'center',justifyContent:'center'},nomorUrutText:{fontSize:12,fontWeight:'700',color:k.colors.primary,fontVariant:['tabular-nums']},cardDivider:{height:1,backgroundColor:k.colors.border,marginVertical:k.spacing.sm},cardNilai:{flexDirection:'row',gap:k.spacing.md},nilaiKolom:{flex:1},nilaiKolomKanan:{alignItems:'flex-end'},nilaiLabel:{fontSize:11,color:k.colors.textMuted,marginBottom:2},nominal:{fontSize:14,fontWeight:'700',color:k.colors.text,fontVariant:['tabular-nums']},sisa:{color:k.colors.danger},cardFooter:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',marginTop:k.spacing.sm,gap:k.spacing.sm},badge:{paddingHorizontal:k.spacing.sm,paddingVertical:3,borderRadius:k.radius.pill},badgeText:{fontSize:11,fontWeight:'700'},metaRow:{flexDirection:'row',alignItems:'center',gap:4,flexShrink:1},meta:{fontSize:11,color:k.colors.textMuted},metaDot:{fontSize:11,color:k.colors.textFaint,marginHorizontal:2},fab:{position:'absolute',right:20,bottom:24,width:56,height:56,borderRadius:28,backgroundColor:k.colors.primary,alignItems:'center',justifyContent:'center',elevation:4,shadowColor:'#000',shadowOpacity:.15,shadowRadius:6,shadowOffset:{width:0,height:3}}})},1437,[11,81,232,279,477,475,19,119,1345,910,794,921,931,954,13,678,913,772,918,6]);
-__d(function(g,r,i,a,m,_e,d){"use strict";function e(e){return e&&e.__esModule?e:{default:e}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return O}});var n=r(d[0]),t=e(r(d[1])),l=r(d[2]),o=e(r(d[3])),s=e(r(d[4])),u=e(r(d[5])),c=e(r(d[6])),p=e(r(d[7])),f=e(r(d[8])),j=e(r(d[9])),h=r(d[10]),b=e(r(d[11])),x=e(r(d[12])),y=e(r(d[13])),k=r(d[14]),A=r(d[15]),T=r(d[16]),v=r(d[17]),S=r(d[18]),C=r(d[19]),I=e(r(d[20])),P=e(r(d[21])),w=e(r(d[22])),N=r(d[23]),R=r(d[24]),D=r(d[25]),B=r(d[26]);const M=[{value:'EFEKTIF',label:'Efektif'},{value:'FLAT',label:'Flat'},{value:'MENURUN',label:'Menurun'},{value:'CUSTOM',label:'Custom'}],E=[{value:'HARI',label:'Hari'},{value:'MINGGU',label:'Minggu'},{value:'BULAN',label:'Bulan'}],L=[{value:'TIDAK_ADA',label:'Tidak ada'},{value:'NOMINAL',label:'Nominal tetap'},{value:'PERSENTASE',label:'Persentase'}];function O(){const e=(0,h.useNavigation)(),p=(0,h.useRoute)(),C=(0,v.useAppStore)(e=>e.currentUser),I=p.params?.pinjamanId,O=!!I,[H,V]=(0,n.useState)(O),[G,$]=(0,n.useState)(null),[q,Y]=(0,n.useState)((0,D.getTanggalLokalHariIni)()),[Q,X]=(0,n.useState)(null),[Z,aa]=(0,n.useState)(''),[ea,ia]=(0,n.useState)(!1),[na,ta]=(0,n.useState)(null),[la,ra]=(0,n.useState)(''),[oa,sa]=(0,n.useState)(''),[da,ua]=(0,n.useState)(''),[ca,ma]=(0,n.useState)(''),[ga,pa]=(0,n.useState)(''),[fa,ja]=(0,n.useState)('BULAN'),[ha,ba]=(0,n.useState)('FLAT'),[xa,ya]=(0,n.useState)(!1),[ka,Aa]=(0,n.useState)(''),[Ta,va]=(0,n.useState)('TIDAK_ADA'),[Sa,Ca]=(0,n.useState)(''),[Ia,Pa]=(0,n.useState)('SEPARATE_SERVICE'),[wa,Na]=(0,n.useState)(!1),Ra=e=>{if(va(e),'TIDAK_ADA'===e)return Pa('SEPARATE_SERVICE'),void Na(!1);Na(!0)},[Da,Ba]=(0,n.useState)(!1),[Ma,Ea]=(0,n.useState)(''),[La,Oa]=(0,n.useState)(''),[Ja,za]=(0,n.useState)({}),[Wa,_a]=(0,n.useState)(!1);(0,n.useEffect)(()=>{e.setOptions({title:O?'Edit Pinjaman':'Ajukan Pinjaman'})},[O,e]),(0,n.useEffect)(()=>{if(!I)return;let n=!1;return(async()=>{try{const t=await(0,A.getPinjamanDetail)(I);if(!t)return(0,N.notify)('Gagal','Pinjaman tidak ditemukan.'),void e.goBack();if('DIAJUKAN'!==t.status&&'DISETUJUI'!==t.status)return(0,N.notify)('Gagal','Pinjaman yang sudah dicairkan tidak bisa diedit lewat sini.'),void e.goBack();const l=await(0,k.getAnggotaById)(t.anggotaId);if(n)return;$(l),Y(t.tanggal),ma(t.jumlahPinjaman),pa(String(t.tenor)),ja(t.satuanTenor),ba(t.metodeJasa),Aa(String(t.persentaseJasa)),va(t.biayaAdminTipe),Ca(t.biayaAdminNilai?String(t.biayaAdminNilai):''),Pa(t.biayaAdminKlasifikasi),Ba(t.dendaAktif),Ea(t.dendaNilai||''),Oa(t.keterangan??''),X(t.tujuanPinjaman),aa(t.tujuanDetail??'');const o=t.agunan[0];ia(!!o),o&&(ta(o.jenisAgunan),ra(o.pemilik),sa(o.nomorDokumen),ua(o.nilaiAgunan))}catch(n){(0,N.notify)('Gagal',n instanceof Error?n.message:'Gagal memuat data pinjaman.'),e.goBack()}finally{n||V(!1)}})(),()=>{n=!0}},[I,e]);const[Fa,Ka]=(0,n.useState)(null);(0,n.useEffect)(()=>{if(!G)return void Ka(null);let e=!1;return(async()=>{const[n,t]=await Promise.all([(0,T.getSaldoSimpananAnggota)(G.id,'POKOK'),(0,T.getSaldoSimpananAnggota)(G.id,'WAJIB')]);if(e)return;const l=[];n<=0&&l.push('Simpanan Pokok'),t<=0&&l.push('Simpanan Wajib'),Ka(l.length>0?`Anggota ini belum memiliki ${l.join(' dan ')} \u2014 pengajuan akan ditolak.`:null)})(),()=>{e=!0}},[G]);const Ua=()=>{const e={};G||(e.anggota='Anggota wajib dipilih'),Q||(e.tujuanPinjaman='Tujuan pinjaman wajib dipilih'),'LAINNYA'!==Q||Z.trim()||(e.tujuanDetail='Detail tujuan wajib diisi bila memilih Lainnya'),ea&&(na||(e.jenisAgunan='Jenis agunan wajib dipilih'),la.trim()||(e.pemilikAgunan='Pemilik agunan wajib diisi'),oa.trim()||(e.nomorDokumenAgunan='Nomor dokumen wajib diisi'),(''===da||da<0)&&(e.nilaiAgunan='Nilai agunan wajib diisi (tidak boleh negatif)')),(''===ca||ca<=0)&&(e.jumlahPinjaman='Jumlah pinjaman harus lebih dari 0');const n=parseInt(ga,10);(!ga||isNaN(n)||n<=0)&&(e.tenor='Tenor harus lebih dari 0');const t=parseFloat(ka||'0');return(isNaN(t)||t<0)&&(e.persentaseJasa='Persentase jasa tidak valid'),za(e),0===Object.keys(e).length};if(H)return(0,B.jsx)(o.default,{style:U.loadingWrap,children:(0,B.jsx)(f.default,{color:S.colors.primary})});const Ha=J(Ta,Sa,ca),Va=M.find(e=>e.value===ha)?.label??ha,Ga=E.find(e=>e.value===fa)?.label.toLowerCase()??'',$a=parseInt(ga,10);return(0,B.jsx)(t.default,{varian:"layar",style:{flex:1},children:(0,B.jsxs)(c.default,{keyboardShouldPersistTaps:"handled",style:U.container,contentContainerStyle:U.content,children:[(0,B.jsxs)(o.default,{style:U.intro,children:[(0,B.jsx)(l.Ionicons,{name:"information-circle-outline",size:18,color:S.colors.primary}),(0,B.jsx)(s.default,{style:U.introText,children:O?'Perbarui data pengajuan yang belum dicairkan. Anggota tidak dapat diubah.':'Lengkapi data pengajuan pinjaman. Kolom bertanda * wajib diisi.'})]}),(0,B.jsxs)(W,{nomor:1,icon:"person-outline",title:"Anggota & Tanggal",children:[(0,B.jsx)(b.default,{value:G,onChange:$,error:Ja.anggota,disabled:O}),Fa&&(0,B.jsxs)(o.default,{style:U.warningBox,children:[(0,B.jsx)(l.Ionicons,{name:"alert-circle-outline",size:16,color:S.colors.danger}),(0,B.jsx)(s.default,{style:U.warningText,children:Fa})]}),(0,B.jsx)(s.default,{style:U.label,children:"Tanggal Pengajuan *"}),(0,B.jsx)(y.default,{value:q,onChange:Y})]}),(0,B.jsxs)(W,{nomor:2,icon:"flag-outline",title:"Tujuan Pinjaman",required:!0,children:[(0,B.jsx)(o.default,{style:U.chipRow,children:Object.keys(A.LABEL_TUJUAN_PINJAMAN).map(e=>(0,B.jsx)(z,{label:A.LABEL_TUJUAN_PINJAMAN[e],active:Q===e,onPress:()=>X(e)},e))}),Ja.tujuanPinjaman&&(0,B.jsx)(w.default,{message:Ja.tujuanPinjaman}),'LAINNYA'===Q&&(0,B.jsxs)(o.default,{style:U.subField,children:[(0,B.jsx)(s.default,{style:U.label,children:"Detail Tujuan *"}),(0,B.jsx)(P.default,{style:U.input,value:Z,onChangeText:aa,placeholder:"Jelaskan tujuan pinjaman",placeholderTextColor:S.colors.placeholder,invalid:!!Ja.tujuanDetail}),Ja.tujuanDetail&&(0,B.jsx)(w.default,{message:Ja.tujuanDetail})]})]}),(0,B.jsxs)(W,{nomor:3,icon:"cash-outline",title:"Rincian Pinjaman",children:[(0,B.jsx)(s.default,{style:U.label,children:"Jumlah Pinjaman (Rp) *"}),(0,B.jsx)(o.default,{style:U.fieldGap,children:(0,B.jsx)(x.default,{value:ca,onChangeValue:ma,error:Ja.jumlahPinjaman})}),(0,B.jsxs)(o.default,{style:U.twoCol,children:[(0,B.jsx)(o.default,{style:U.tenorCol,children:(0,B.jsx)(K,{label:"Tenor *",value:ga,onChangeText:pa,keyboardType:"number-pad",error:Ja.tenor})}),(0,B.jsxs)(o.default,{style:U.satuanCol,children:[(0,B.jsx)(s.default,{style:U.label,children:"Satuan"}),(0,B.jsx)(_,{options:E,value:fa,onChange:e=>ja(e)})]})]}),(0,B.jsx)(s.default,{style:U.label,children:"Metode Jasa"}),(0,B.jsx)(_,{options:M,value:ha,onChange:e=>{return ba(n=e),void('FLAT'===n&&ya(!0));var n}}),'CUSTOM'===ha&&(0,B.jsxs)(o.default,{style:U.hintBox,children:[(0,B.jsx)(l.Ionicons,{name:"calendar-outline",size:14,color:S.colors.textMuted}),(0,B.jsx)(s.default,{style:U.hint,children:"Setelah pinjaman diajukan, susun jadwal angsuran custom (jumlah periode, tanggal jatuh tempo, pokok, dan bunga tiap periode) dari layar Detail Pinjaman sebelum dicairkan."})]}),(0,B.jsx)(o.default,{style:U.fieldTop,children:(0,B.jsx)(K,{label:"Persentase Jasa per Periode/Bulan (%) *",value:ka,onChangeText:Aa,keyboardType:"decimal-pad",error:Ja.persentaseJasa})})]}),(0,B.jsxs)(W,{nomor:4,icon:"receipt-outline",title:"Biaya & Denda",children:[(0,B.jsx)(s.default,{style:U.label,children:"Biaya Administrasi"}),(0,B.jsx)(_,{options:L,value:Ta,onChange:e=>Ra(e)}),'NOMINAL'===Ta&&(0,B.jsxs)(o.default,{style:U.subField,children:[(0,B.jsx)(s.default,{style:U.label,children:"Nominal Biaya Admin (Rp)"}),(0,B.jsx)(x.default,{value:''===Sa?'':parseInt(Sa,10),onChangeValue:e=>Ca(''===e?'':e.toString())})]}),'PERSENTASE'===Ta&&(0,B.jsx)(o.default,{style:U.subField,children:(0,B.jsx)(K,{label:"Persentase Biaya Admin (%)",value:Sa,onChangeText:Ca,keyboardType:"number-pad"})}),'TIDAK_ADA'!==Ta&&(0,B.jsxs)(u.default,{style:U.klasifikasiSummary,onPress:()=>Na(!0),children:[(0,B.jsxs)(o.default,{style:{flex:1},children:[(0,B.jsx)(s.default,{style:U.klasifikasiSummaryLabel,children:"Metode Jasa Biaya Administrasi"}),(0,B.jsx)(s.default,{style:U.klasifikasiSummaryValue,children:'INTEGRAL_FINANCIAL_INSTRUMENT'===Ia?'Jasa Integral':'Jasa Terpisah'}),(0,B.jsx)(s.default,{style:U.klasifikasiSummaryHint,children:'INTEGRAL_FINANCIAL_INSTRUMENT'===Ia?'Fee ditangguhkan & diamortisasi sepanjang tenor (EIR).':'Fee diakui penuh sebagai pendapatan saat pencairan.'})]}),(0,B.jsx)(s.default,{style:U.klasifikasiSummaryUbah,children:"Ubah"})]}),(0,B.jsx)(o.default,{style:U.sectionDivider}),(0,B.jsx)(s.default,{style:U.label,children:"Denda Keterlambatan"}),(0,B.jsx)(_,{options:[{value:'TIDAK',label:'Tidak Aktif'},{value:'AKTIF',label:'Aktif'}],value:Da?'AKTIF':'TIDAK',onChange:e=>Ba('AKTIF'===e)}),Da&&(0,B.jsxs)(o.default,{style:U.subField,children:[(0,B.jsx)(s.default,{style:U.label,children:"Denda per Hari Terlambat (Rp)"}),(0,B.jsx)(x.default,{value:Ma,onChangeValue:Ea})]})]}),(0,B.jsxs)(W,{nomor:5,icon:"shield-checkmark-outline",title:"Agunan / Jaminan",required:!0,children:[(0,B.jsx)(_,{options:[{value:'TIDAK',label:'Tidak Ada'},{value:'ADA',label:'Ada'}],value:ea?'ADA':'TIDAK',onChange:e=>ia('ADA'===e)}),ea&&(0,B.jsxs)(o.default,{style:U.subField,children:[(0,B.jsx)(s.default,{style:U.label,children:"Jenis Agunan *"}),(0,B.jsx)(o.default,{style:U.chipRow,children:Object.keys(A.LABEL_JENIS_AGUNAN).map(e=>(0,B.jsx)(z,{label:A.LABEL_JENIS_AGUNAN[e],active:na===e,onPress:()=>ta(e)},e))}),Ja.jenisAgunan&&(0,B.jsx)(w.default,{message:Ja.jenisAgunan}),(0,B.jsx)(s.default,{style:[U.label,U.fieldTop],children:"Pemilik *"}),(0,B.jsx)(P.default,{style:U.input,value:la,onChangeText:ra,placeholder:"Nama pemilik agunan",placeholderTextColor:S.colors.placeholder,invalid:!!Ja.pemilikAgunan}),Ja.pemilikAgunan&&(0,B.jsx)(w.default,{message:Ja.pemilikAgunan}),(0,B.jsx)(s.default,{style:[U.label,U.fieldTop],children:"Nomor Dokumen *"}),(0,B.jsx)(P.default,{style:U.input,value:oa,onChangeText:sa,placeholder:"Nomor sertifikat / BPKB / bilyet",placeholderTextColor:S.colors.placeholder,invalid:!!Ja.nomorDokumenAgunan}),Ja.nomorDokumenAgunan&&(0,B.jsx)(w.default,{message:Ja.nomorDokumenAgunan}),(0,B.jsx)(s.default,{style:[U.label,U.fieldTop],children:"Nilai Agunan (Rp) *"}),(0,B.jsx)(x.default,{value:da,onChangeValue:ua,error:Ja.nilaiAgunan})]})]}),(0,B.jsx)(W,{nomor:6,icon:"document-text-outline",title:"Catatan",children:(0,B.jsx)(K,{label:"Keterangan",value:La,onChangeText:Oa,multiline:!0})}),(0,B.jsxs)(o.default,{style:U.summaryCard,children:[(0,B.jsx)(s.default,{style:U.summaryTitle,children:"Ringkasan Pengajuan"}),(0,B.jsx)(F,{label:"Anggota",value:G?.namaLengkap??'\u2014'}),(0,B.jsx)(F,{label:"Jumlah pinjaman",value:''===ca?'\u2014':(0,R.formatRupiah)(ca)}),(0,B.jsx)(F,{label:"Tenor",value:Number.isFinite($a)&&$a>0?`${$a} ${Ga}`:'\u2014'}),(0,B.jsx)(F,{label:"Metode jasa",value:ka?`${Va} \xb7 ${ka}% / periode`:Va}),(0,B.jsx)(F,{label:"Biaya administrasi",value:'TIDAK_ADA'===Ta?'Tidak ada':(0,R.formatRupiah)(Ha.biayaAdmin)}),(0,B.jsx)(o.default,{style:U.summaryDivider}),(0,B.jsx)(F,{label:"Kas diterima anggota",value:(0,R.formatRupiah)(Ha.kasDiterima),strong:!0})]}),(0,B.jsx)(u.default,{style:[U.submitButton,Wa&&U.disabled],onPress:async()=>{if(Ua()&&G&&C&&''!==ca){_a(!0);try{let n;if(O&&I)await(0,A.editPinjaman)({pinjamanId:I,tanggal:q,jumlahPinjaman:ca,tenor:parseInt(ga,10),satuanTenor:fa,metodeJasa:ha,persentaseJasa:parseFloat(ka||'0'),biayaAdminTipe:Ta,biayaAdminNilai:parseInt(Sa||'0',10),biayaAdminKlasifikasi:Ia,tujuanPinjaman:Q??void 0,tujuanDetail:'LAINNYA'===Q?Z.trim():void 0,agunan:ea&&na&&''!==da?{jenisAgunan:na,pemilik:la.trim(),nomorDokumen:oa.trim(),nilaiAgunan:da}:null,dendaAktif:Da,dendaTipe:Da?'PER_HARI':void 0,dendaNilai:''===Ma?0:Ma,keterangan:La||void 0,actingUserId:C.id}),n=I;else{const e=await(0,A.ajukanPinjaman)({anggotaId:G.id,tanggal:q,jumlahPinjaman:ca,tenor:parseInt(ga,10),satuanTenor:fa,metodeJasa:ha,persentaseJasa:parseFloat(ka||'0'),biayaAdminTipe:Ta,biayaAdminNilai:parseInt(Sa||'0',10),biayaAdminKlasifikasi:Ia,tujuanPinjaman:Q??void 0,tujuanDetail:'LAINNYA'===Q?Z.trim():void 0,agunan:ea&&na&&''!==da?{jenisAgunan:na,pemilik:la.trim(),nomorDokumen:oa.trim(),nilaiAgunan:da}:void 0,dendaAktif:Da,dendaTipe:Da?'PER_HARI':void 0,dendaNilai:''===Ma?0:Ma,keterangan:La||void 0,createdBy:C.id});n=e.id}O?(0,N.notify)('Berhasil','Perubahan pinjaman berhasil disimpan.',[{text:'OK',onPress:()=>e.replace('PinjamanDetail',{pinjamanId:n})}]):(0,N.notify)('Berhasil','Pengajuan pinjaman & jadwal angsuran berhasil dibuat.',[{text:'OK',onPress:()=>e.replace('PinjamanDetail',{pinjamanId:n})}])}catch(e){(0,N.notify)('Gagal',e instanceof Error?e.message:'Terjadi kesalahan.')}finally{_a(!1)}}},disabled:Wa,accessibilityRole:"button",children:Wa?(0,B.jsx)(f.default,{color:S.colors.white}):(0,B.jsxs)(B.Fragment,{children:[(0,B.jsx)(l.Ionicons,{name:O?'save-outline':'paper-plane-outline',size:18,color:S.colors.white}),(0,B.jsx)(s.default,{style:U.submitText,children:O?'Simpan Perubahan':'Ajukan Pinjaman'})]})}),(0,B.jsx)(j.default,{visible:wa,transparent:!0,animationType:"fade",onRequestClose:()=>Na(!1),children:(0,B.jsx)(o.default,{style:U.flatModalOverlay,children:(0,B.jsxs)(o.default,{style:U.jasaModalCard,children:[(0,B.jsx)(s.default,{style:U.flatModalTitle,children:"Metode Jasa Biaya Administrasi"}),(0,B.jsx)(s.default,{style:U.jasaModalIntro,children:"Pilih bagaimana biaya administrasi pencairan diperlakukan dalam pembukuan. Pilihan ini menentukan akun dan waktu pengakuan pendapatannya."}),(0,B.jsx)(c.default,{keyboardShouldPersistTaps:"handled",style:{maxHeight:380},children:[{value:'SEPARATE_SERVICE',judul:'Jasa Terpisah',ringkas:'Jasa administrasi berdiri sendiri, terpisah dari pokok pinjaman.',poin:['Diakui PENUH sebagai Pendapatan Administrasi pada tanggal pencairan.','Jasa ditampilkan terpisah dari pokok; tidak memengaruhi jadwal angsuran.','Tidak memerlukan pengukuran suku bunga efektif (EIR).']},{value:'INTEGRAL_FINANCIAL_INSTRUMENT',judul:'Jasa Integral',ringkas:'Jasa menyatu dengan pengukuran instrumen pinjaman.',poin:['TIDAK diakui sebagai pendapatan saat pencairan; dibukukan sebagai Pendapatan Diterima Dimuka.','Diamortisasi sepanjang tenor memakai suku bunga efektif (EIR) yang dihitung sistem.','Sisa fee yang belum teramortisasi diselesaikan otomatis saat pelunasan dipercepat.']}].map(e=>{const n=Ia===e.value,t=J(Ta,Sa,ca);return(0,B.jsxs)(u.default,{style:[U.jasaOptionCard,n&&U.jasaOptionCardActive],onPress:()=>Pa(e.value),accessibilityRole:"radio",accessibilityState:{selected:n},children:[(0,B.jsxs)(o.default,{style:U.jasaOptionHeader,children:[(0,B.jsx)(o.default,{style:[U.radioOuter,n&&U.radioOuterActive],children:n&&(0,B.jsx)(o.default,{style:U.radioInner})}),(0,B.jsx)(s.default,{style:[U.jasaOptionJudul,n&&U.jasaOptionJudulActive],children:e.judul})]}),(0,B.jsx)(s.default,{style:U.jasaOptionRingkas,children:e.ringkas}),e.poin.map(e=>(0,B.jsxs)(s.default,{style:U.jasaOptionPoin,children:["\u2022  ",e]},e)),(0,B.jsxs)(o.default,{style:U.jasaPreviewBox,children:[(0,B.jsxs)(o.default,{style:U.jasaPreviewRow,children:[(0,B.jsx)(s.default,{style:U.jasaPreviewLabel,children:"Biaya administrasi"}),(0,B.jsx)(s.default,{style:U.jasaPreviewValue,children:(0,R.formatRupiah)(t.biayaAdmin)})]}),(0,B.jsxs)(o.default,{style:U.jasaPreviewRow,children:[(0,B.jsx)(s.default,{style:U.jasaPreviewLabel,children:"Kas diterima anggota"}),(0,B.jsx)(s.default,{style:U.jasaPreviewValue,children:(0,R.formatRupiah)(t.kasDiterima)})]}),(0,B.jsxs)(o.default,{style:U.jasaPreviewRow,children:[(0,B.jsx)(s.default,{style:U.jasaPreviewLabel,children:"Pengakuan saat pencairan"}),(0,B.jsx)(s.default,{style:U.jasaPreviewValue,children:'SEPARATE_SERVICE'===e.value?`Pendapatan ${(0,R.formatRupiah)(t.biayaAdmin)}`:`Ditangguhkan ${(0,R.formatRupiah)(t.biayaAdmin)}`})]})]})]},e.value)})}),(0,B.jsx)(u.default,{style:U.flatModalButton,onPress:()=>Na(!1),children:(0,B.jsx)(s.default,{style:U.flatModalButtonText,children:"Gunakan Metode Ini"})})]})})}),(0,B.jsx)(j.default,{visible:xa,transparent:!0,animationType:"fade",onRequestClose:()=>ya(!1),children:(0,B.jsx)(o.default,{style:U.flatModalOverlay,children:(0,B.jsxs)(o.default,{style:U.flatModalCard,children:[(0,B.jsx)(s.default,{style:U.flatModalTitle,children:"Metode FLAT"}),(0,B.jsx)(s.default,{style:U.flatModalBody,children:"Metode FLAT digunakan untuk perhitungan jadwal jasa kontraktual. Untuk pelaporan akuntansi, pengakuan pendapatan dan pengukuran pinjaman mengikuti kebijakan akuntansi dan ketentuan SAK EP yang berlaku."}),(0,B.jsx)(u.default,{style:U.flatModalButton,onPress:()=>ya(!1),children:(0,B.jsx)(s.default,{style:U.flatModalButtonText,children:"Saya Mengerti"})})]})})})]})})}function J(e,n,t){const l=''===t?0:t,o=parseFloat(n||'0'),s=Number.isFinite(o)&&o>0?o:0;let u=0;return'NOMINAL'===e?u=Math.trunc(s):'PERSENTASE'===e&&(u=Math.round(l*s/100)),{biayaAdmin:u,kasDiterima:Math.max(0,l-u)}}function z({label:e,active:n,onPress:t}){return(0,B.jsxs)(u.default,{style:[U.chip,n&&U.chipActive],onPress:t,accessibilityRole:"radio",accessibilityState:{selected:n},children:[n&&(0,B.jsx)(l.Ionicons,{name:"checkmark",size:14,color:S.colors.white}),(0,B.jsx)(s.default,{style:[U.chipText,n&&U.chipTextActive],children:e})]})}function W({nomor:e,icon:n,title:t,required:u,children:c}){return(0,B.jsxs)(o.default,{style:U.section,children:[(0,B.jsxs)(o.default,{style:U.sectionHeader,children:[(0,B.jsx)(o.default,{style:U.sectionNomor,children:(0,B.jsx)(s.default,{style:U.sectionNomorText,children:e})}),(0,B.jsx)(l.Ionicons,{name:n,size:18,color:S.colors.primary}),(0,B.jsxs)(s.default,{style:U.sectionTitle,children:[t,u?' *':'']})]}),c]})}function _({options:e,value:n,onChange:t}){return(0,B.jsx)(o.default,{style:U.segmented,children:e.map(e=>{const l=e.value===n;return(0,B.jsx)(u.default,{style:[U.segment,l&&U.segmentActive],onPress:()=>t(e.value),accessibilityRole:"radio",accessibilityState:{selected:l},children:(0,B.jsx)(s.default,{style:[U.segmentText,l&&U.segmentTextActive],numberOfLines:1,children:e.label})},e.value)})})}function F({label:e,value:n,strong:t}){return(0,B.jsxs)(o.default,{style:U.summaryRow,children:[(0,B.jsx)(s.default,{style:[U.summaryLabel,t&&U.summaryLabelStrong],children:e}),(0,B.jsx)(s.default,{style:[U.summaryValue,t&&U.summaryValueStrong],numberOfLines:1,children:n})]})}function K({label:e,value:n,onChangeText:t,error:l,multiline:o,keyboardType:s}){return(0,B.jsx)(I.default,{label:e,error:l,value:n,onChangeText:t,multiline:o,keyboardType:s,noIcon:!o})}const U=p.default.create({container:{flex:1,backgroundColor:S.colors.background},content:{padding:S.spacing.md,paddingBottom:S.spacing.xxl},loadingWrap:{flex:1,alignItems:'center',justifyContent:'center',backgroundColor:S.colors.background},intro:{flexDirection:'row',alignItems:'center',gap:S.spacing.sm,backgroundColor:S.colors.primaryLight,borderRadius:S.radius.md,paddingHorizontal:S.spacing.md,paddingVertical:S.spacing.sm+2,marginBottom:S.spacing.md},introText:{flex:1,fontSize:12,color:S.colors.primaryDark,lineHeight:17},section:Object.assign({backgroundColor:S.colors.surface,borderRadius:S.radius.md,borderWidth:1,borderColor:S.colors.border,padding:S.spacing.md,marginBottom:S.spacing.md},S.elevation.card),sectionHeader:{flexDirection:'row',alignItems:'center',gap:S.spacing.sm,paddingBottom:S.spacing.sm,marginBottom:S.spacing.md,borderBottomWidth:1,borderBottomColor:S.colors.border},sectionNomor:{width:22,height:22,borderRadius:11,backgroundColor:S.colors.primary,alignItems:'center',justifyContent:'center'},sectionNomorText:{color:S.colors.white,fontSize:11,fontWeight:'700'},sectionTitle:{flex:1,fontSize:15,fontWeight:'700',color:S.colors.text},sectionDivider:{height:1,backgroundColor:S.colors.border,marginVertical:S.spacing.md},subField:{marginTop:S.spacing.md},fieldGap:{marginBottom:S.spacing.md},fieldTop:{marginTop:S.spacing.md},warningBox:{flexDirection:'row',alignItems:'flex-start',gap:S.spacing.sm,backgroundColor:S.colors.dangerBg,borderRadius:S.radius.sm,padding:S.spacing.md,marginTop:S.spacing.sm,marginBottom:S.spacing.md},warningText:{flex:1,color:S.colors.danger,fontSize:12,lineHeight:17},twoCol:{flexDirection:'row',gap:S.spacing.md},tenorCol:{flex:2},satuanCol:{flex:3},chipRow:{flexDirection:'row',flexWrap:'wrap',gap:8},chip:{flexDirection:'row',alignItems:'center',gap:4,paddingHorizontal:14,paddingVertical:8,borderRadius:S.radius.pill,borderWidth:1,borderColor:S.colors.border,backgroundColor:S.colors.surface},chipActive:{backgroundColor:S.colors.primary,borderColor:S.colors.primary},chipText:{fontSize:12,color:S.colors.text},chipTextActive:{color:S.colors.white,fontWeight:'600'},segmented:{flexDirection:'row',backgroundColor:S.colors.background,borderRadius:S.radius.sm,borderWidth:1,borderColor:S.colors.border,padding:3,gap:3},segment:{flex:1,minHeight:38,alignItems:'center',justifyContent:'center',borderRadius:S.radius.sm-2,paddingHorizontal:4},segmentActive:{backgroundColor:S.colors.primary},segmentText:{fontSize:12,fontWeight:'600',color:S.colors.textMuted},segmentTextActive:{color:S.colors.white},label:{fontSize:13,color:S.colors.text,fontWeight:'600',marginBottom:6},input:Object.assign({},C.formUi.inputStandalone),hintBox:{flexDirection:'row',alignItems:'flex-start',gap:6,backgroundColor:S.colors.background,borderRadius:S.radius.sm,padding:S.spacing.sm,marginTop:S.spacing.sm},hint:{flex:1,fontSize:12,color:S.colors.textMuted,lineHeight:17},summaryCard:{backgroundColor:S.colors.surface,borderRadius:S.radius.md,borderWidth:1,borderColor:S.colors.primary,padding:S.spacing.md,marginBottom:S.spacing.md},summaryTitle:{fontSize:13,fontWeight:'700',color:S.colors.primary,marginBottom:S.spacing.sm},summaryRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:S.spacing.md,paddingVertical:3},summaryLabel:{fontSize:12,color:S.colors.textMuted},summaryLabelStrong:{color:S.colors.text,fontWeight:'700'},summaryValue:{flexShrink:1,fontSize:13,color:S.colors.text,fontWeight:'600',textAlign:'right'},summaryValueStrong:{fontSize:15,color:S.colors.primary,fontWeight:'700'},summaryDivider:{height:1,backgroundColor:S.colors.border,marginVertical:S.spacing.xs},submitButton:Object.assign({flexDirection:'row',gap:S.spacing.sm,backgroundColor:S.colors.primary,borderRadius:S.radius.md,paddingVertical:15,alignItems:'center',justifyContent:'center',marginBottom:S.spacing.xl},S.elevation.card),disabled:{opacity:.6},submitText:{color:S.colors.white,fontWeight:'700',fontSize:15},flatModalOverlay:{flex:1,backgroundColor:'rgba(0,0,0,0.4)',alignItems:'center',justifyContent:'center',padding:S.spacing.lg},flatModalCard:{width:'100%',maxWidth:380,backgroundColor:S.colors.surface,borderRadius:S.radius.md,padding:S.spacing.lg},flatModalTitle:{fontSize:16,fontWeight:'700',color:S.colors.text,marginBottom:S.spacing.sm},flatModalBody:{fontSize:13,color:S.colors.textMuted,lineHeight:19,marginBottom:S.spacing.lg},flatModalButton:{backgroundColor:S.colors.primary,borderRadius:S.radius.sm,paddingVertical:12,alignItems:'center'},flatModalButtonText:{color:S.colors.white,fontWeight:'700',fontSize:14},klasifikasiSummary:{flexDirection:'row',alignItems:'center',gap:S.spacing.sm,borderWidth:1,borderColor:S.colors.primary,backgroundColor:S.colors.primaryLight,borderRadius:S.radius.md,padding:S.spacing.md,marginBottom:S.spacing.md},klasifikasiSummaryLabel:{fontSize:11,color:S.colors.textMuted,fontWeight:'700',letterSpacing:.3},klasifikasiSummaryValue:{fontSize:14,color:S.colors.primary,fontWeight:'700',marginTop:2},klasifikasiSummaryHint:{fontSize:11,color:S.colors.textMuted,marginTop:2,lineHeight:15},klasifikasiSummaryUbah:{fontSize:12,color:S.colors.primary,fontWeight:'700'},jasaModalCard:{width:'100%',maxWidth:420,backgroundColor:S.colors.surface,borderRadius:S.radius.md,padding:S.spacing.lg},jasaModalIntro:{fontSize:12,color:S.colors.textMuted,lineHeight:17,marginBottom:S.spacing.md},jasaOptionCard:{borderWidth:1,borderColor:S.colors.border,borderRadius:S.radius.md,padding:S.spacing.md,marginBottom:S.spacing.sm,backgroundColor:S.colors.surface},jasaOptionCardActive:{borderColor:S.colors.primary,backgroundColor:S.colors.primaryLight},jasaOptionHeader:{flexDirection:'row',alignItems:'center',gap:S.spacing.sm},jasaOptionJudul:{fontSize:14,fontWeight:'600',color:S.colors.text,flex:1},jasaOptionJudulActive:{color:S.colors.primary,fontWeight:'700'},jasaOptionRingkas:{fontSize:12,color:S.colors.text,marginTop:6,marginLeft:28,lineHeight:17},jasaOptionPoin:{fontSize:11,color:S.colors.textMuted,marginTop:4,marginLeft:28,lineHeight:16},jasaPreviewBox:{marginTop:S.spacing.sm,marginLeft:28,borderTopWidth:1,borderTopColor:S.colors.border,paddingTop:S.spacing.sm,gap:3},jasaPreviewRow:{flexDirection:'row',justifyContent:'space-between',gap:S.spacing.sm},jasaPreviewLabel:{fontSize:11,color:S.colors.textMuted,flex:1},jasaPreviewValue:{fontSize:11,color:S.colors.text,fontWeight:'700'},radioOuter:{width:20,height:20,borderRadius:10,borderWidth:2,borderColor:S.colors.border,alignItems:'center',justifyContent:'center'},radioOuterActive:{borderColor:S.colors.primary},radioInner:{width:10,height:10,borderRadius:5,backgroundColor:S.colors.primary}})},1438,[11,858,678,81,232,477,287,19,475,483,119,1337,1297,913,920,1345,974,794,772,879,881,1300,1301,765,910,918,6]);
-__d(function(g,_r,i,_a,_m,_e,_d){"use strict";function a(a){return a&&a.__esModule?a:{default:a}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return W}});var e=_r(_d[0]),t=a(_r(_d[1])),n=a(_r(_d[2])),l=a(_r(_d[3])),s=a(_r(_d[4])),r=a(_r(_d[5])),o=a(_r(_d[6])),d=a(_r(_d[7])),u=a(_r(_d[8])),c=a(_r(_d[9])),m=_r(_d[10]),h=_r(_d[11]),f=_r(_d[12]),p=_r(_d[13]),x=a(_r(_d[14])),k=a(_r(_d[15])),b=_r(_d[16]),j=_r(_d[17]),y=_r(_d[18]),T=a(_r(_d[19])),S=a(_r(_d[20])),A=_r(_d[21]),w=_r(_d[22]),B=_r(_d[23]),P=_r(_d[24]),C=_r(_d[25]),I=a(_r(_d[26])),U=_r(_d[27]),R=_r(_d[28]),v=_r(_d[29]),J=_r(_d[30]),L=_r(_d[31]),D=_r(_d[32]);function K(a){try{return(0,v.calculateMaturityDate)(a.tanggal,a.tenor,a.satuanTenor)}catch{return null}}function M(a,e){return a.dibuatDariAkadUlangId&&e?{utama:`Periode ${e.periode} dari ${e.jumlah}`,internal:`No. jadwal internal ${a.nomorAngsuran}`}:{utama:`Angsuran ke-${a.nomorAngsuran}`,internal:null}}const z={BELUM_BAYAR:A.colors.textMuted,SEBAGIAN:A.colors.warning,LUNAS:A.colors.primary,TERLAMBAT:A.colors.danger};function W(){const a=(0,h.useNavigation)(),o=(0,h.useRoute)(),y=(0,j.useAppStore)(a=>a.currentUser),T=(0,j.useAppStore)(a=>a.koperasi),{pinjamanId:w}=o.params??{},[B,v]=(0,e.useState)(null),[K,z]=(0,e.useState)([]),[W,_]=(0,e.useState)(!0),[q,Y]=(0,e.useState)(null),[Q,X]=(0,e.useState)(''),[Z,aa]=(0,e.useState)(!1),[ea,ta]=(0,e.useState)(!1),[na,la]=(0,e.useState)(!1),[sa,ia]=(0,e.useState)(!1),[ra,oa]=(0,e.useState)('BARU'),[da,ua]=(0,e.useState)(null),[ca,ga]=(0,e.useState)(''),[ma,ha]=(0,e.useState)(!1),[fa,pa]=(0,e.useState)(''),[xa,ka]=(0,e.useState)(!1),[ba,ja]=(0,e.useState)(''),[ya,Ta]=(0,e.useState)(!1),[Sa,Aa]=(0,e.useState)(!1),[wa,Ba]=(0,e.useState)((0,P.getTanggalLokalHariIni)()),[Pa,Ca]=(0,e.useState)(''),[Ia,Ua]=(0,e.useState)('BULAN'),[Ra,va]=(0,e.useState)('FLAT'),[Ja,La]=(0,e.useState)(''),[Da,Ka]=(0,e.useState)(''),[Ma,za]=(0,e.useState)(null),[Wa,Ha]=(0,e.useState)(null),[Ea,Na]=(0,e.useState)(null),[Oa,Fa]=(0,e.useState)([]),[Va,Ga]=(0,e.useState)(!1),[$a,qa]=(0,e.useState)(!1),Ya=(0,e.useMemo)(()=>{const a=[],e=[],t=[],n=[];for(const l of K)switch((0,p.kelompokkanJadwalAngsuran)(l)){case'AKTIF':a.push(l);break;case'AKAD_ULANG':e.push(l);break;case'RESTRUKTURISASI':t.push(l);break;default:n.push(l)}return{aktif:a,akadUlang:e,restrukturisasi:t,dihapusbuku:n}},[K]),Qa=(0,e.useMemo)(()=>(0,J.ringkasPosisiAkadUlang)(K),[K]),Xa=(0,e.useMemo)(()=>(0,J.hitungPeriodeRelatifAkadUlang)(K),[K]),Za=(0,e.useCallback)(async()=>{if(!w)return qa(!0),void _(!1);_(!0);try{const[a,e]=await Promise.all([(0,p.getPinjamanDetail)(w),(0,p.getJadwalAngsuran)(w)]);v(a),z(e),a||qa(!0)}catch(a){qa(!0),(0,m.notify)('Gagal',a instanceof Error?a.message:'Gagal memuat detail pinjaman.')}finally{_(!1)}},[w]);(0,C.useFocusRefresh)(()=>{Za()},[Za]);const ae=(0,e.useMemo)(()=>{if(!B)return null;const a=[...Oa].sort((a,e)=>a.createdAt<e.createdAt?-1:a.createdAt>e.createdAt?1:0)[0],e=(0,J.jadwalMilikAkadAwal)(K),t=(0,J.statusDokumenAkadAwal)(B.status),n=(0,J.tentukanStatusJadwalKontrak)(e);return{sifat:t,tenor:(0,J.formatTenor)(a?a.tenorLama:B.tenor,a?a.satuanTenorLama:B.satuanTenor),jasa:`${(0,J.labelMetodeJasa)(a?a.metodeJasaLama:B.metodeJasa)} ${(0,J.formatPersenJasa)(a?a.persentaseJasaLama:B.persentaseJasa)}`,statusLabel:'BELUM_DICAIRKAN'===t?'SIAP DITANDATANGANI':'DIGANTIKAN'===n?'DIGANTIKAN':'BERLAKU'===n?'BERLAKU':(0,J.labelStatusEventAkadUlang)(n),berlaku:'FINAL'===t&&'BERLAKU'===n}},[B,K,Oa]),[ee,te]=(0,e.useState)([]);(0,e.useEffect)(()=>{if(!B?.tanggal)return;let a=!1;return(0,U.getSusunanPengurusInti)(B.tanggal).then(e=>{a||te((0,R.jabatanIntiKosong)(e).filter(a=>'KETUA'===a))}).catch(()=>{a||te([])}),()=>{a=!0}},[B?.tanggal]);const ne=(0,e.useMemo)(()=>(0,J.nomorUrutEventAkadUlang)(Oa),[Oa]),le=(0,e.useMemo)(()=>(0,J.validasiFormAkadUlang)({tanggal:wa,tenorText:Pa,satuanTenor:Ia,metodeJasa:Ra,persentaseText:Ja,keterangan:Da}),[wa,Pa,Ia,Ra,Ja,Da]),se=(0,e.useCallback)(async()=>{const a=await(0,p.getRiwayatAkadUlang)(w);Fa(a)},[w]);(0,C.useFocusRefresh)(()=>{se()},[se]);const ie=a=>{const e=a.total-a.pokokTerbayar-a.jasaTerbayar;X(e.toString()),Y(a)};return W?(0,D.jsx)(t.default,{style:$.center,children:(0,D.jsx)(r.default,{})}):$a||!B?(0,D.jsxs)(t.default,{style:$.center,children:[(0,D.jsx)(f.Ionicons,{name:"alert-circle-outline",size:32,color:A.colors.textMuted}),(0,D.jsx)(n.default,{style:$.notFoundText,children:"Pinjaman tidak ditemukan. Data mungkin sudah dihapus atau ID tidak valid."}),(0,D.jsx)(s.default,{style:$.notFoundButton,onPress:()=>a.goBack(),children:(0,D.jsx)(n.default,{style:$.notFoundButtonText,children:"Kembali"})})]}):(0,D.jsxs)(t.default,{style:{flex:1},children:[(0,D.jsxs)(l.default,{keyboardShouldPersistTaps:"handled",style:$.container,contentContainerStyle:{padding:16},children:[(0,D.jsx)(n.default,{style:$.title,children:B.nomorPinjaman}),(0,D.jsxs)(n.default,{style:$.sub,children:[B.namaAnggota," (",B.nomorAnggota,")"]}),(0,D.jsxs)(t.default,{style:$.card,children:[(0,D.jsx)(H,{label:"Jumlah Pinjaman",value:(0,b.formatRupiah)(B.jumlahPinjaman)}),(0,D.jsx)(H,{label:"Tenor",value:`${B.tenor} ${B.satuanTenor.toLowerCase()}`}),(0,D.jsx)(H,{label:"Metode Jasa",value:B.metodeJasa}),(0,D.jsx)(H,{label:"Persentase Jasa",value:`${B.persentaseJasa}% / periode`}),(0,D.jsx)(H,{label:"Status",value:B.status,bold:!0})]}),'CUSTOM'===B.metodeJasa&&('DIAJUKAN'===B.status||'DISETUJUI'===B.status)&&(0,D.jsx)(s.default,{style:[$.actionButton,$.actionButtonSecondary],onPress:()=>a.navigate('PinjamanJadwalCustom',{pinjamanId:w}),children:(0,D.jsx)(n.default,{style:$.actionButtonSecondaryText,children:K.length>0?'Ubah Jadwal Custom':'Susun Jadwal Custom'})}),('DIAJUKAN'===B.status||'DISETUJUI'===B.status)&&(0,D.jsx)(s.default,{style:[$.actionButton,$.actionButtonSecondary],onPress:()=>a.navigate('PinjamanForm',{pinjamanId:w}),children:(0,D.jsx)(n.default,{style:$.actionButtonSecondaryText,children:"Edit Pinjaman"})}),('DIAJUKAN'===B.status||'DISETUJUI'===B.status)&&(0,D.jsx)(s.default,{style:[$.actionButton,$.actionButtonDanger],onPress:()=>ka(!0),children:(0,D.jsx)(n.default,{style:$.actionButtonDangerText,children:"Batalkan Pinjaman"})}),('DIAJUKAN'===B.status||'DISETUJUI'===B.status)&&(0,D.jsx)(s.default,{style:[$.actionButton,'CUSTOM'===B.metodeJasa&&0===K.length&&$.disabled],onPress:()=>{ia(!1),la(!0)},disabled:Z||'CUSTOM'===B.metodeJasa&&0===K.length,children:(0,D.jsx)(n.default,{style:$.actionButtonText,children:'CUSTOM'===B.metodeJasa&&0===K.length?'Susun Jadwal Custom Dulu':'Cairkan Pinjaman'})}),ae&&'TIDAK_TERSEDIA'!==ae.sifat&&(0,D.jsxs)(t.default,{style:$.akadSection,children:[(0,D.jsxs)(t.default,{style:$.akadSectionTitleWrap,children:[(0,D.jsx)(f.Ionicons,{name:"document-text-outline",size:18,color:A.colors.primary}),(0,D.jsx)(n.default,{style:$.akadSectionTitle,children:'Akad & Dokumen'})]}),(0,D.jsxs)(t.default,{style:$.akadBlok,children:[(0,D.jsxs)(t.default,{style:$.akadSectionHeader,children:[(0,D.jsx)(n.default,{style:$.akadBlokJudul,children:"Akad Awal"}),(0,D.jsx)(t.default,{style:[$.statusPill,ae.berlaku?$.statusPillBerlaku:$.statusPillHistoris],children:(0,D.jsx)(n.default,{style:[$.statusPillText,ae.berlaku?$.statusPillTextBerlaku:$.statusPillTextHistoris],children:ae.statusLabel})})]}),(0,D.jsxs)(n.default,{style:$.akadBlokMeta,children:[(0,J.formatTanggalPanjang)(B.tanggal)," \xb7 ",ae.tenor," \xb7 ",ae.jasa]}),(0,D.jsx)(I.default,{pinjamanId:w,dokumen:{jenis:'AWAL'},label:"Export Perjanjian Pinjaman"}),ee.length>0&&(0,D.jsxs)(t.default,{style:$.pengurusPeringatan,children:[(0,D.jsx)(f.Ionicons,{name:"alert-circle-outline",size:16,color:A.colors.warning}),(0,D.jsxs)(n.default,{style:$.pengurusPeringatanText,children:[ee.map(a=>U.LABEL_JABATAN_PENGURUS[a]).join(', ')," belum ditetapkan pada tanggal akad \u2014 nama penanda tangan koperasi akan dicetak kosong. Lengkapi di menu Data \u203a Pengurus."]})]}),(0,D.jsx)(n.default,{style:$.akadExportHint,children:'BELUM_DICAIRKAN'===ae.sifat?'Cetak perjanjian ini dan tandatangani bersama anggota (anggota di atas meterai) sebelum pinjaman dicairkan.':Oa.length>0?'Salinan akad awal untuk arsip \u2014 sudah digantikan akad ulang.':'Akad yang berlaku saat ini.'})]}),('AKTIF'===B.status||Oa.length>0)&&(0,D.jsxs)(t.default,{style:[$.akadBlok,$.akadBlokPemisah],children:[(0,D.jsxs)(t.default,{style:$.akadSectionHeader,children:[(0,D.jsx)(n.default,{style:$.akadBlokJudul,children:"Akad Ulang"}),(0,D.jsx)(t.default,{style:[$.statusPill,Oa.length>0?$.statusPillBerlaku:$.statusPillHistoris],children:(0,D.jsx)(n.default,{style:[$.statusPillText,Oa.length>0?$.statusPillTextBerlaku:$.statusPillTextHistoris],children:Oa.length>0?`${Oa.length}\xd7 akad ulang`:'Belum pernah'})})]}),(0,D.jsx)(n.default,{style:$.akadSectionDesc,children:"Menyusun ulang syarat pinjaman atas sisa pokok. Jadwal lama tetap tersimpan sebagai histori."}),'AKTIF'===B.status&&(0,D.jsxs)(s.default,{style:$.akadPrimaryButton,onPress:()=>{const a=(0,J.preflightAkadUlang)(K);a.boleh?(Ha(null),Ba((0,P.getTanggalLokalHariIni)()),Ca(B?String(B.tenor):''),Ua(B?B.satuanTenor:'BULAN'),va(B&&'CUSTOM'!==B.metodeJasa?B.metodeJasa:'FLAT'),La(B?String(B.persentaseJasa):''),Ka(''),za(null),Na(null),(0,p.getOutstandingPiutangJasa)(w).then(Na),Ta(!0)):(0,m.notify)(a.judul,a.pesan,void 0,'warning')},accessibilityRole:"button",accessibilityLabel:"Akad Ulang",children:[(0,D.jsx)(f.Ionicons,{name:"create-outline",size:18,color:A.colors.white}),(0,D.jsx)(n.default,{style:$.akadPrimaryButtonText,children:"Akad Ulang"})]}),(0,D.jsxs)(t.default,{style:$.akadExportWrap,children:[(0,D.jsx)(I.default,{pinjamanId:w,dokumen:{jenis:'ULANG',akadUlangId:Oa[0]?.id??null},label:Oa.length>1?'Export Dokumen Akad Ulang Terbaru':'Export Dokumen Akad Ulang'}),(0,D.jsx)(n.default,{style:$.akadExportHint,children:Oa.length>0?`Dokumen akad ulang #${ne.get(Oa[0].id)??Oa.length} \xb7 ${(0,J.formatTanggalPanjang)(Oa[0].tanggal)}`:'Tersedia setelah akad ulang pertama disimpan.'})]}),Oa.length>0&&(0,D.jsxs)(s.default,{style:$.riwayatAkadToggle,onPress:()=>Ga(a=>!a),accessibilityRole:"button",accessibilityState:{expanded:Va},children:[(0,D.jsxs)(n.default,{style:$.riwayatAkadLinkText,children:["Riwayat Akad Ulang (",Oa.length,")"]}),(0,D.jsx)(f.Ionicons,{name:Va?'chevron-up':'chevron-down',size:18,color:A.colors.primary})]}),Va&&Oa.map(a=>{const e=(0,J.tentukanStatusEventAkadUlang)(a.id,K),l='BERLAKU'===e,s=(0,J.jadwalMilikAkadUlang)(K,a.id),r=(0,J.jatuhTempoAkhir)(s);return(0,D.jsxs)(t.default,{style:[$.riwayatAkadCard,l&&$.riwayatAkadCardBerlaku],children:[(0,D.jsxs)(t.default,{style:$.riwayatAkadHeader,children:[(0,D.jsxs)(n.default,{style:$.riwayatAkadJudul,children:["AKAD ULANG #",ne.get(a.id)??'-']}),(0,D.jsx)(t.default,{style:[$.statusPill,l?$.statusPillBerlaku:$.statusPillHistoris],children:(0,D.jsx)(n.default,{style:[$.statusPillText,l?$.statusPillTextBerlaku:$.statusPillTextHistoris],children:(0,J.labelStatusEventAkadUlang)(e)})})]}),(0,D.jsx)(n.default,{style:$.riwayatAkadTanggal,children:(0,J.formatTanggalPanjang)(a.tanggal)}),(0,D.jsx)(O,{label:"Tenor",lama:(0,J.formatTenor)(a.tenorLama,a.satuanTenorLama),baru:(0,J.formatTenor)(a.tenorBaru,a.satuanTenorBaru)}),(0,D.jsx)(O,{label:"Metode",lama:(0,J.labelMetodeJasa)(a.metodeJasaLama),baru:(0,J.labelMetodeJasa)(a.metodeJasaBaru)}),(0,D.jsx)(O,{label:"Jasa",lama:(0,J.formatPersenJasa)(a.persentaseJasaLama),baru:(0,J.formatPersenJasa)(a.persentaseJasaBaru)}),(0,D.jsx)(t.default,{style:$.riwayatAkadDivider}),(0,D.jsx)(N,{label:"Sisa pokok saat akad",value:(0,b.formatRupiah)(a.sisaPokok),strong:!0}),(0,D.jsx)(N,{label:"Jumlah periode akad baru",value:s.length>0?`${s.length} periode`:'-'}),(0,D.jsx)(N,{label:"Jatuh tempo akhir",value:(0,J.formatTanggalPanjang)(r)}),a.keterangan?(0,D.jsxs)(n.default,{style:$.riwayatAkadKeterangan,children:["Keterangan: ",a.keterangan]}):null,(0,D.jsx)(t.default,{style:$.riwayatAkadAksi,children:(0,D.jsx)(I.default,{pinjamanId:w,dokumen:{jenis:'ULANG',akadUlangId:a.id},label:"Export Dokumen Akad Ulang",variant:"compact"})})]},a.id)})]})]}),(0,D.jsx)(V,{judul:"Angsuran Aktif",keterangan:"Angsuran berjalan dari akad asli pinjaman ini.",items:Ya.aktif,bagian:"AKTIF",detail:B,koperasi:T,periodeRelatif:Xa,bolehBayar:'AKTIF'===B.status,onBayar:ie,emptyText:Ya.akadUlang.length>0?'Seluruh angsuran akad asli sudah digantikan oleh akad ulang \u2014 lihat bagian Angsuran Akad Ulang di bawah.':'Belum ada jadwal angsuran. Susun jadwal terlebih dahulu sebelum pencairan.'}),Ya.akadUlang.length>0&&(0,D.jsx)(V,{judul:"Angsuran Akad Ulang",keterangan:"Angsuran berjalan yang disusun ulang lewat Akad Ulang. Inilah kewajiban yang berlaku saat ini.",items:Ya.akadUlang,bagian:"AKAD_ULANG",detail:B,koperasi:T,periodeRelatif:Xa,bolehBayar:'AKTIF'===B.status,onBayar:ie,emptyText:""}),Ya.restrukturisasi.length>0&&(0,D.jsx)(V,{judul:"Restrukturisasi (Histori)",keterangan:"Jadwal LAMA yang sudah digantikan oleh akad ulang. Disimpan untuk audit \u2014 tidak ditagih dan tidak ikut dalam export Angsuran Aktif.",items:Ya.restrukturisasi,bagian:"RESTRUKTURISASI",detail:B,koperasi:T,periodeRelatif:Xa,bolehBayar:!1,onBayar:ie,emptyText:"",redup:!0}),Ya.dihapusbuku.length>0&&(0,D.jsx)(V,{judul:"Hapus Buku (Histori)",keterangan:"Angsuran yang piutangnya sudah dihapusbukukan. Disimpan untuk audit.",items:Ya.dihapusbuku,bagian:"RESTRUKTURISASI",detail:B,koperasi:T,periodeRelatif:Xa,bolehBayar:!1,onBayar:ie,emptyText:"",redup:!0})]}),(0,D.jsx)(d.default,{visible:!!q,transparent:!0,animationType:"fade",onRequestClose:()=>Y(null),children:(0,D.jsx)(c.default,{varian:"dialog",style:$.modalOverlay,children:(0,D.jsx)(l.default,{contentContainerStyle:$.modalScrollContent,keyboardShouldPersistTaps:"handled",children:(0,D.jsxs)(t.default,{style:$.modalCard,children:[(0,D.jsxs)(n.default,{style:$.modalTitle,children:["Bayar ",q?M(q,Xa.get(q.id)).utama:'']}),(0,D.jsx)(S.default,{style:$.modalInput,keyboardType:"number-pad",value:Q,onChangeText:X}),(0,D.jsxs)(t.default,{style:$.modalActions,children:[(0,D.jsx)(s.default,{style:$.modalCancel,onPress:()=>Y(null),children:(0,D.jsx)(n.default,{style:$.modalCancelText,children:"Batal"})}),(0,D.jsx)(s.default,{style:$.modalSubmit,onPress:async()=>{if(!q||!y)return;const a=parseInt(Q,10);if(isNaN(a)||a<=0)(0,m.notify)('Nominal tidak valid');else{aa(!0);try{await(0,p.bayarAngsuran)({pinjamanId:w,jadwalId:q.id,tanggal:(0,P.getTanggalLokalHariIni)(),nominal:a,sumberDana:'KAS',createdBy:y.id}),Y(null),await Za()}catch(a){(0,m.notify)('Gagal',a instanceof Error?a.message:'Terjadi kesalahan.')}finally{aa(!1)}}},disabled:Z,children:Z?(0,D.jsx)(r.default,{color:A.colors.white}):(0,D.jsx)(n.default,{style:$.modalSubmitText,children:"Bayar"})})]})]})})})}),(0,D.jsx)(d.default,{visible:na,transparent:!0,animationType:"fade",onRequestClose:()=>la(!1),children:(0,D.jsx)(c.default,{varian:"dialog",style:$.modalOverlay,children:(0,D.jsx)(l.default,{contentContainerStyle:$.modalScrollContent,keyboardShouldPersistTaps:"handled",children:(0,D.jsxs)(t.default,{style:$.modalCard,children:[(0,D.jsx)(t.default,{style:$.akadKonfirmasiIkon,children:(0,D.jsx)(f.Ionicons,{name:"document-text-outline",size:26,color:A.colors.primary})}),(0,D.jsx)(n.default,{style:$.akadKonfirmasiLangkah,children:"Langkah 1 dari 2"}),(0,D.jsx)(n.default,{style:[$.modalTitle,$.akadKonfirmasiJudul],children:"Konfirmasi Tanda Tangan Akad"}),(0,D.jsx)(n.default,{style:$.akadKonfirmasiDesk,children:"Dana hanya boleh dicairkan setelah Perjanjian Pinjaman ditandatangani oleh kedua pihak."}),(0,D.jsxs)(t.default,{style:$.akadKonfirmasiRingkas,children:[(0,D.jsx)(G,{label:"No. Pinjaman",nilai:B.nomorPinjaman}),(0,D.jsx)(G,{pemisah:!0,label:"No. Perjanjian",nilai:(0,J.buatNomorDokumenAkadAwal)(B.nomorPinjaman,B.tanggal)}),(0,D.jsx)(G,{pemisah:!0,label:"Peminjam",nilai:B.namaAnggota}),(0,D.jsx)(G,{pemisah:!0,label:"Jumlah Pinjaman",nilai:(0,b.formatRupiah)(B.jumlahPinjaman),tebal:!0})]}),(0,D.jsx)(t.default,{style:$.akadKonfirmasiCek,children:['Perjanjian Pinjaman sudah dicetak','Anggota sudah menandatangani di atas meterai Rp10.000','Ketua koperasi sudah menandatangani'].map(a=>(0,D.jsxs)(t.default,{style:$.akadKonfirmasiCekBaris,children:[(0,D.jsx)(f.Ionicons,{name:"ellipse-outline",size:8,color:A.colors.textMuted,style:{marginTop:5}}),(0,D.jsx)(n.default,{style:$.akadKonfirmasiCekTeks,children:a})]},a))}),(0,D.jsxs)(u.default,{style:[$.akadPernyataan,sa&&$.akadPernyataanAktif],onPress:()=>ia(a=>!a),accessibilityRole:"checkbox",accessibilityState:{checked:sa},accessibilityLabel:"Akad sudah ditandatangani kedua pihak",children:[(0,D.jsx)(f.Ionicons,{name:sa?'checkbox':'square-outline',size:22,color:sa?A.colors.primary:A.colors.textMuted}),(0,D.jsx)(n.default,{style:$.akadPernyataanTeks,children:"Saya menyatakan akad pinjaman ini sudah ditandatangani oleh anggota dan koperasi."})]}),(0,D.jsx)(t.default,{style:$.akadKonfirmasiExport,children:(0,D.jsx)(I.default,{pinjamanId:w,dokumen:{jenis:'AWAL'},label:"Cetak Perjanjian Pinjaman"})}),(0,D.jsxs)(t.default,{style:$.modalActions,children:[(0,D.jsx)(s.default,{style:$.modalCancel,onPress:()=>la(!1),children:(0,D.jsx)(n.default,{style:$.modalCancelText,children:"Belum"})}),(0,D.jsx)(s.default,{style:[$.modalSubmit,!sa&&$.disabled],onPress:()=>{sa&&(la(!1),oa('BARU'),ua(null),ga(''),ta(!0))},disabled:!sa,accessibilityState:{disabled:!sa},children:(0,D.jsx)(n.default,{style:$.modalSubmitText,children:"Sudah, Lanjutkan"})})]})]})})})}),(0,D.jsx)(d.default,{visible:ea,transparent:!0,animationType:"fade",onRequestClose:()=>ta(!1),children:(0,D.jsx)(c.default,{varian:"dialog",style:$.modalOverlay,children:(0,D.jsx)(l.default,{contentContainerStyle:$.modalScrollContent,keyboardShouldPersistTaps:"handled",children:(0,D.jsxs)(t.default,{style:$.modalCard,children:['BARU'===ra&&(0,D.jsx)(n.default,{style:$.akadKonfirmasiLangkah,children:"Langkah 2 dari 2"}),(0,D.jsx)(n.default,{style:$.modalTitle,children:'BARU'===ra?'Cairkan Pinjaman':'Edit Pencairan \u2014 Ganti Sumber Dana'}),'BARU'===ra&&(0,D.jsxs)(t.default,{style:$.akadTerkonfirmasi,children:[(0,D.jsx)(f.Ionicons,{name:"checkmark-circle",size:16,color:A.colors.primary}),(0,D.jsxs)(n.default,{style:$.akadTerkonfirmasiTeks,children:["Akad sudah ditandatangani \xb7 ",(0,b.formatRupiah)(B.jumlahPinjaman)]})]}),(0,D.jsx)(k.default,{label:"Sumber Dana / Rekening",value:da,onChange:ua}),'EDIT'===ra&&(0,D.jsxs)(D.Fragment,{children:[(0,D.jsx)(n.default,{style:$.modalLabel,children:"Alasan Koreksi *"}),(0,D.jsx)(S.default,{style:[$.modalInput,$.modalInputMultiline],value:ca,onChangeText:ga,multiline:!0,placeholder:"Mis. salah pilih rekening bank"})]}),(0,D.jsxs)(t.default,{style:$.modalActions,children:[(0,D.jsx)(s.default,{style:$.modalCancel,onPress:()=>ta(!1),children:(0,D.jsx)(n.default,{style:$.modalCancelText,children:"Batal"})}),(0,D.jsx)(s.default,{style:[$.modalSubmit,(!da||Z)&&$.disabled],onPress:async()=>{if(y&&da){aa(!0);try{if('BARU'===ra)await(0,p.cairkanPinjaman)({pinjamanId:w,sumberDana:'BANK'===da.jenis?'BANK':'KAS',bankAccountId:'BANK'===da.jenis?da.id:void 0,approvedBy:y.id}),(0,m.notify)('Berhasil','Pinjaman berhasil dicairkan.');else{if(!ca.trim())return(0,m.notify)('Gagal','Alasan koreksi wajib diisi.'),void aa(!1);await(0,p.editPencairanPinjaman)({pinjamanId:w,sumberDana:'BANK'===da.jenis?'BANK':'KAS',bankAccountId:'BANK'===da.jenis?da.id:void 0,alasan:ca.trim(),actingUserId:y.id}),(0,m.notify)('Berhasil','Sumber dana pencairan berhasil dikoreksi.')}ta(!1),await Za()}catch(a){(0,m.notify)('Gagal',a instanceof Error?a.message:'Terjadi kesalahan.')}finally{aa(!1)}}},disabled:!da||Z,children:Z?(0,D.jsx)(r.default,{color:A.colors.white}):(0,D.jsx)(n.default,{style:$.modalSubmitText,children:'BARU'===ra?'Cairkan':'Simpan'})})]})]})})})}),(0,D.jsx)(d.default,{visible:ma,transparent:!0,animationType:"fade",onRequestClose:()=>ha(!1),children:(0,D.jsx)(c.default,{varian:"dialog",style:$.modalOverlay,children:(0,D.jsx)(l.default,{contentContainerStyle:$.modalScrollContent,keyboardShouldPersistTaps:"handled",children:(0,D.jsxs)(t.default,{style:$.modalCard,children:[(0,D.jsx)(n.default,{style:$.modalTitle,children:"Batalkan Pencairan"}),(0,D.jsx)(n.default,{style:$.modalSub,children:"Jurnal pencairan akan di-reversal dan pinjaman kembali ke status Disetujui, siap dicairkan ulang. Hanya bisa dilakukan karena belum ada angsuran yang dibayarkan."}),(0,D.jsx)(S.default,{style:[$.modalInput,$.modalInputMultiline],value:fa,onChangeText:pa,multiline:!0,placeholder:"Alasan pembatalan (wajib diisi)"}),(0,D.jsxs)(t.default,{style:$.modalActions,children:[(0,D.jsx)(s.default,{style:$.modalCancel,onPress:()=>ha(!1),children:(0,D.jsx)(n.default,{style:$.modalCancelText,children:"Tutup"})}),(0,D.jsx)(s.default,{style:[$.modalSubmitDanger,(!fa.trim()||Z)&&$.disabled],onPress:async()=>{if(y&&fa.trim()){aa(!0);try{await(0,p.hapusPencairanPinjaman)({pinjamanId:w,alasan:fa.trim(),actingUserId:y.id}),ha(!1),pa(''),await Za(),(0,m.notify)('Berhasil','Pencairan dibatalkan \u2014 pinjaman kembali berstatus Disetujui.')}catch(a){(0,m.notify)('Gagal',a instanceof Error?a.message:'Terjadi kesalahan.')}finally{aa(!1)}}},disabled:!fa.trim()||Z,children:Z?(0,D.jsx)(r.default,{color:A.colors.white}):(0,D.jsx)(n.default,{style:$.modalSubmitText,children:"Batalkan"})})]})]})})})}),(0,D.jsx)(d.default,{visible:xa,transparent:!0,animationType:"fade",onRequestClose:()=>ka(!1),children:(0,D.jsx)(c.default,{varian:"dialog",style:$.modalOverlay,children:(0,D.jsx)(l.default,{contentContainerStyle:$.modalScrollContent,keyboardShouldPersistTaps:"handled",children:(0,D.jsxs)(t.default,{style:$.modalCard,children:[(0,D.jsx)(n.default,{style:$.modalTitle,children:"Batalkan Pinjaman"}),(0,D.jsx)(n.default,{style:$.modalSub,children:"Pengajuan pinjaman ini akan dibatalkan. Belum ada jurnal, piutang, atau pendapatan jasa yang tercipta karena pinjaman belum pernah dicairkan \u2014 tidak ada dampak akuntansi."}),(0,D.jsx)(S.default,{style:[$.modalInput,$.modalInputMultiline],value:ba,onChangeText:ja,multiline:!0,placeholder:"Alasan pembatalan (wajib diisi)"}),(0,D.jsxs)(t.default,{style:$.modalActions,children:[(0,D.jsx)(s.default,{style:$.modalCancel,onPress:()=>ka(!1),children:(0,D.jsx)(n.default,{style:$.modalCancelText,children:"Tutup"})}),(0,D.jsx)(s.default,{style:[$.modalSubmitDanger,(!ba.trim()||Z)&&$.disabled],onPress:async()=>{if(y&&ba.trim()){aa(!0);try{await(0,p.batalkanPinjaman)({pinjamanId:w,alasan:ba.trim(),actingUserId:y.id}),ka(!1),ja(''),await Za(),(0,m.notify)('Berhasil','Pinjaman dibatalkan.')}catch(a){(0,m.notify)('Gagal',a instanceof Error?a.message:'Terjadi kesalahan.')}finally{aa(!1)}}},disabled:!ba.trim()||Z,children:Z?(0,D.jsx)(r.default,{color:A.colors.white}):(0,D.jsx)(n.default,{style:$.modalSubmitText,children:"Batalkan"})})]})]})})})}),(0,D.jsxs)(E,{visible:ya,onClose:()=>Ta(!1),judul:"Akad Ulang Pinjaman",subjudul:"Menyusun kembali syarat pinjaman untuk sisa pokok. Jadwal lama tetap tersimpan sebagai histori.",footer:(0,D.jsxs)(D.Fragment,{children:[Ma&&(0,D.jsx)(n.default,{style:$.sheetError,children:Ma}),(0,D.jsxs)(t.default,{style:$.sheetActions,children:[(0,D.jsx)(s.default,{style:$.sheetSecondary,onPress:()=>Ta(!1),accessibilityRole:"button",children:(0,D.jsx)(n.default,{style:$.sheetSecondaryText,children:"Batal"})}),(0,D.jsx)(s.default,{style:[$.sheetPrimary,(!le.ok||Z)&&$.disabled],onPress:()=>{!1!==le.ok?(za(null),Ha(le.draft),Aa(!0)):za(le.error)},disabled:Z,accessibilityRole:"button",children:(0,D.jsx)(n.default,{style:$.sheetPrimaryText,children:"Simpan Akad Ulang"})})]})]}),children:[(0,D.jsx)(n.default,{style:$.akadSeksiJudul,children:"Posisi Saat Ini"}),(0,D.jsxs)(t.default,{style:$.akadInfoBox,children:[(0,D.jsx)(N,{label:"Status Pinjaman",value:B?.status??'-'}),(0,D.jsx)(N,{label:"Sisa Pokok Akad Ulang",value:(0,b.formatRupiah)(Qa.sisaPokok),strong:!0}),(0,D.jsx)(N,{label:"Jumlah Jadwal Current",value:`${Qa.jumlahJadwalCurrent} periode`}),(0,D.jsx)(t.default,{style:$.akadInfoDivider}),(0,D.jsx)(N,{label:"Piutang Jasa Telah Diakui",value:null===Ea?'\u2026':(0,b.formatRupiah)(Ea)}),(0,D.jsx)(n.default,{style:$.akadHelper,children:"Informasi historis/audit \u2014 bukan tambahan pokok akad baru."})]}),(0,D.jsx)(n.default,{style:$.akadSeksiJudul,children:"Akad Baru"}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Tanggal Akad Ulang *"}),(0,D.jsx)(x.default,{value:wa,onChange:Ba,maximumDate:(0,L.getWaktuSekarang)()}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Tenor Baru *"}),(0,D.jsxs)(t.default,{style:$.tenorRow,children:[(0,D.jsx)(S.default,{style:[$.modalInput,$.tenorInput],keyboardType:"number-pad",value:Pa,onChangeText:Ca,placeholder:"Mis. 12"}),(0,D.jsx)(n.default,{style:$.tenorSuffix,children:(0,J.labelSatuanTenor)(Ia)})]}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Satuan Tenor"}),(0,D.jsx)(t.default,{style:$.segment,children:['HARI','MINGGU','BULAN'].map(a=>{const e=Ia===a;return(0,D.jsx)(s.default,{style:[$.segmentItem,e&&$.segmentItemActive],onPress:()=>Ua(a),accessibilityRole:"radio",accessibilityState:{selected:e},children:(0,D.jsx)(n.default,{style:[$.segmentText,e&&$.segmentTextActive],children:(0,J.labelSatuanTenor)(a)})},a)})}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Metode Jasa Baru"}),(0,D.jsx)(t.default,{style:$.segment,children:['FLAT','MENURUN','EFEKTIF'].map(a=>{const e=Ra===a;return(0,D.jsx)(s.default,{style:[$.segmentItem,e&&$.segmentItemActive],onPress:()=>va(a),accessibilityRole:"radio",accessibilityState:{selected:e},children:(0,D.jsx)(n.default,{style:[$.segmentText,e&&$.segmentTextActive],children:(0,J.labelMetodeJasa)(a)})},a)})}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Persentase Jasa Baru *"}),(0,D.jsxs)(t.default,{style:$.tenorRow,children:[(0,D.jsx)(S.default,{style:[$.modalInput,$.tenorInput],keyboardType:"decimal-pad",value:Ja,onChangeText:La,placeholder:"Mis. 1,5"}),(0,D.jsx)(n.default,{style:$.tenorSuffix,children:"% / periode"})]}),(0,D.jsx)(n.default,{style:$.sheetLabel,children:"Keterangan"}),(0,D.jsx)(S.default,{style:[$.modalInput,$.modalInputMultiline],value:Da,onChangeText:Ka,multiline:!0,placeholder:"Opsional \u2014 alasan/berita acara akad ulang"}),(0,D.jsx)(n.default,{style:[$.akadSeksiJudul,$.akadSeksiJudulJarak],children:"Preview Perubahan"}),le.ok?(0,D.jsx)(F,{detail:B,draft:le.draft,sisaPokok:Qa.sisaPokok}):(0,D.jsxs)(t.default,{style:$.akadPreviewKosongBox,children:[(0,D.jsx)(f.Ionicons,{name:"information-circle-outline",size:16,color:A.colors.textMuted}),(0,D.jsx)(n.default,{style:$.akadPreviewKosong,children:le.error})]})]}),(0,D.jsxs)(E,{visible:Sa,onClose:()=>!Z&&Aa(!1),judul:"Konfirmasi Akad Ulang",subjudul:"Akad ulang akan mengganti syarat akad berdasarkan sisa pokok saat ini.",footer:(0,D.jsxs)(t.default,{style:$.sheetActions,children:[(0,D.jsx)(s.default,{style:$.sheetSecondary,onPress:()=>Aa(!1),disabled:Z,accessibilityRole:"button",children:(0,D.jsx)(n.default,{style:$.sheetSecondaryText,children:"Kembali"})}),(0,D.jsx)(s.default,{style:[$.sheetPrimary,(!Wa||Z)&&$.disabled],onPress:async()=>{if(y&&Wa){aa(!0);try{await(0,p.akadUlangPinjaman)({pinjamanId:w,tanggal:Wa.tanggal,tenorBaru:Wa.tenor,satuanTenorBaru:Wa.satuanTenor,metodeJasaBaru:Wa.metodeJasa,persentaseJasaBaru:Wa.persentaseJasa,keterangan:Wa.keterangan,actingUserId:y.id}),Ha(null),Aa(!1),Ta(!1),await Za(),await se(),(0,m.notify)('Berhasil','Akad ulang pinjaman berhasil disimpan \u2014 jadwal angsuran tersisa sudah disusun ulang.')}catch(a){Aa(!1),(0,m.notify)('Gagal',a instanceof Error?a.message:'Terjadi kesalahan.')}finally{aa(!1)}}},disabled:!Wa||Z,accessibilityRole:"button",children:Z?(0,D.jsx)(r.default,{color:A.colors.white}):(0,D.jsx)(n.default,{style:$.sheetPrimaryText,children:"Ya, Simpan Akad Ulang"})})]}),children:[Wa&&(0,D.jsx)(F,{detail:B,draft:Wa,sisaPokok:Qa.sisaPokok}),(0,D.jsxs)(t.default,{style:$.akadCatatanBox,children:[(0,D.jsx)(f.Ionicons,{name:"archive-outline",size:16,color:A.colors.textMuted}),(0,D.jsx)(n.default,{style:$.akadCatatan,children:"Jadwal lama tetap tersimpan sebagai histori dan tidak menjadi kewajiban berjalan."})]})]})]})}function H({label:a,value:e,bold:l}){return(0,D.jsxs)(t.default,{style:$.row,children:[(0,D.jsx)(n.default,{style:$.rowLabel,children:a}),(0,D.jsx)(n.default,{style:[$.rowValue,l&&$.bold],children:e})]})}function E({visible:a,onClose:e,judul:r,subjudul:m,footer:h,children:p}){return(0,D.jsx)(d.default,{visible:a,transparent:!0,animationType:"slide",onRequestClose:e,statusBarTranslucent:!0,children:(0,D.jsxs)(t.default,{style:$.sheetBackdrop,children:[(0,D.jsx)(u.default,{style:o.default.absoluteFill,onPress:e,accessibilityLabel:"Tutup"}),(0,D.jsx)(c.default,{varian:"dialog",style:$.sheetWrap,children:(0,D.jsxs)(t.default,{style:$.sheet,children:[(0,D.jsx)(t.default,{style:$.sheetHandle}),(0,D.jsxs)(t.default,{style:$.sheetHeader,children:[(0,D.jsxs)(t.default,{style:$.sheetHeaderText,children:[(0,D.jsx)(n.default,{style:$.sheetTitle,children:r}),m?(0,D.jsx)(n.default,{style:$.sheetSub,children:m}):null]}),(0,D.jsx)(s.default,{style:$.sheetClose,onPress:e,accessibilityRole:"button",accessibilityLabel:"Tutup",children:(0,D.jsx)(f.Ionicons,{name:"close",size:22,color:A.colors.textMuted})})]}),(0,D.jsx)(l.default,{style:$.sheetBody,contentContainerStyle:$.sheetBodyContent,keyboardShouldPersistTaps:"handled",showsVerticalScrollIndicator:!0,children:p}),(0,D.jsx)(t.default,{style:$.sheetFooter,children:h})]})})]})})}function N({label:a,value:e,strong:l}){return(0,D.jsxs)(t.default,{style:$.akadInfoRow,children:[(0,D.jsx)(n.default,{style:$.akadInfoLabel,children:a}),(0,D.jsx)(n.default,{style:[$.akadInfoValue,l&&$.akadInfoValueStrong],children:e})]})}function O({label:a,lama:e,baru:l}){return(0,D.jsxs)(t.default,{style:$.perbandinganRow,children:[(0,D.jsx)(n.default,{style:$.perbandinganLabel,children:a}),(0,D.jsxs)(n.default,{style:$.perbandinganNilai,children:[e," ",(0,D.jsx)(n.default,{style:$.perbandinganPanah,children:"\u2192"})," ",(0,D.jsx)(n.default,{style:$.perbandinganBaru,children:l})]})]})}function F({detail:a,draft:e,sisaPokok:l}){const s=[{label:'Tenor',lama:a?(0,J.formatTenor)(a.tenor,a.satuanTenor):'-',baru:(0,J.formatTenor)(e.tenor,e.satuanTenor)},{label:'Metode Jasa',lama:a?(0,J.labelMetodeJasa)(a.metodeJasa):'-',baru:(0,J.labelMetodeJasa)(e.metodeJasa)},{label:'Persentase Jasa',lama:a?(0,J.formatPersenJasa)(a.persentaseJasa):'-',baru:(0,J.formatPersenJasa)(e.persentaseJasa)},{label:'Sisa Pokok',lama:(0,b.formatRupiah)(l),baru:(0,b.formatRupiah)(l)},{label:'Jatuh Tempo',lama:(0,J.formatTanggalPanjang)(a?.tanggalJatuhTempo??null),baru:(0,J.formatTanggalPanjang)(K(e))}];return(0,D.jsxs)(t.default,{style:$.previewBox,children:[(0,D.jsxs)(t.default,{style:[$.previewRow,$.previewHeader],children:[(0,D.jsx)(n.default,{style:[$.previewLabel,$.previewHeaderText],children:" "}),(0,D.jsx)(n.default,{style:[$.previewCell,$.previewHeaderText],children:"AKAD LAMA"}),(0,D.jsx)(n.default,{style:[$.previewCell,$.previewHeaderText],children:"AKAD BARU"})]}),s.map(a=>(0,D.jsxs)(t.default,{style:$.previewRow,children:[(0,D.jsx)(n.default,{style:$.previewLabel,children:a.label}),(0,D.jsx)(n.default,{style:$.previewCell,children:a.lama}),(0,D.jsx)(n.default,{style:[$.previewCell,a.lama!==a.baru&&$.previewCellBerubah],children:a.baru})]},a.label)),(0,D.jsxs)(n.default,{style:$.previewTanggal,children:["Tanggal akad ulang: ",(0,J.formatTanggalPanjang)(e.tanggal)]})]})}function V({judul:a,keterangan:e,items:l,bagian:r,detail:o,koperasi:d,bolehBayar:u,onBayar:c,emptyText:m,redup:h,periodeRelatif:f}){const p=l.reduce((a,e)=>a+Math.max(0,e.total-e.pokokTerbayar-e.jasaTerbayar),0);return(0,D.jsxs)(t.default,{style:$.seksiJadwal,children:[(0,D.jsxs)(t.default,{style:$.seksiHeader,children:[(0,D.jsx)(n.default,{style:$.sectionLabel,children:a}),(0,D.jsxs)(n.default,{style:$.seksiJumlah,children:[l.length," periode"]})]}),!!e&&(0,D.jsx)(n.default,{style:$.seksiKeterangan,children:e}),l.length>0&&(0,D.jsx)(T.default,{label:`Export ${a}`,data:d&&o?(0,y.buildAngsuranExport)({namaKoperasi:d.nama,standarAkuntansi:d.standarAkuntansi},o.nomorPinjaman,o.namaAnggota,l,r):null}),0===l.length?(0,D.jsx)(n.default,{style:$.seksiEmpty,children:m}):l.map(a=>{const e=a.total-a.pokokTerbayar-a.jasaTerbayar,l=M(a,f.get(a.id));return(0,D.jsxs)(t.default,{style:[$.jadwalRow,h&&$.jadwalRowRedup],children:[(0,D.jsxs)(t.default,{style:{flex:1},children:[(0,D.jsx)(n.default,{style:$.jadwalNomor,children:l.utama}),l.internal?(0,D.jsx)(n.default,{style:$.jadwalInternal,children:l.internal}):null,(0,D.jsxs)(n.default,{style:$.jadwalSub,children:["Jatuh tempo ",a.tanggalJatuhTempo]}),(0,D.jsxs)(n.default,{style:$.jadwalSub,children:["Pokok ",(0,b.formatRupiah)(a.pokok)," \xb7 Jasa ",(0,b.formatRupiah)(a.jasa),a.denda>0?` \xb7 Denda ${(0,b.formatRupiah)(a.denda)}`:'']}),(0,D.jsx)(n.default,{style:[$.jadwalStatus,{color:z[a.status]??A.colors.textMuted}],children:a.status.replace(/_/g,' ')})]}),u&&'LUNAS'!==a.status&&(0,D.jsx)(s.default,{style:$.payButton,onPress:()=>c(a),children:(0,D.jsx)(n.default,{style:$.payButtonText,children:"Bayar"})}),'LUNAS'===a.status&&(0,D.jsx)(n.default,{style:$.lunasText,children:"Lunas"}),'LUNAS'!==a.status&&(0,D.jsxs)(n.default,{style:$.sisaText,children:["Sisa ",(0,b.formatRupiah)(e)]})]},a.id)}),l.length>0&&u&&(0,D.jsxs)(t.default,{style:$.seksiTotalRow,children:[(0,D.jsxs)(n.default,{style:$.seksiTotalLabel,children:["Total Sisa ",a]}),(0,D.jsx)(n.default,{style:$.seksiTotalValue,children:(0,b.formatRupiah)(p)})]})]})}function G({label:a,nilai:e,tebal:l,pemisah:s}){return(0,D.jsxs)(t.default,{style:[$.akadKonfirmasiBaris,s&&$.akadKonfirmasiBarisPemisah],children:[(0,D.jsx)(n.default,{style:$.akadKonfirmasiLabel,children:a}),(0,D.jsx)(n.default,{style:[$.akadKonfirmasiNilai,l&&{fontWeight:'800'}],children:e})]})}const $=o.default.create({container:{flex:1,backgroundColor:A.colors.background},center:{flex:1,alignItems:'center',justifyContent:'center',padding:A.spacing.xl},notFoundText:{fontSize:13,color:A.colors.textMuted,textAlign:'center',marginTop:A.spacing.sm,marginBottom:A.spacing.lg,lineHeight:18},notFoundButton:{paddingHorizontal:A.spacing.lg,paddingVertical:10,borderRadius:A.radius.sm,borderWidth:1,borderColor:A.colors.border},notFoundButtonText:{color:A.colors.text,fontWeight:'600'},title:{fontSize:20,fontWeight:'700',color:A.colors.text},sub:{fontSize:13,color:A.colors.textMuted,marginTop:2,marginBottom:A.spacing.lg},card:{backgroundColor:A.colors.surface,borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.md,padding:A.spacing.md,marginBottom:A.spacing.md},row:{flexDirection:'row',justifyContent:'space-between',paddingVertical:4},rowLabel:{color:A.colors.textMuted},rowValue:{color:A.colors.text},bold:{fontWeight:'700'},actionButton:{backgroundColor:A.colors.primary,borderRadius:A.radius.sm,paddingVertical:12,alignItems:'center',marginBottom:A.spacing.lg},actionButtonText:{color:A.colors.white,fontWeight:'700'},actionButtonSecondary:{backgroundColor:A.colors.surface,borderWidth:1,borderColor:A.colors.primary},actionButtonSecondaryText:{color:A.colors.primary,fontWeight:'700'},pencairanActionRow:{flexDirection:'row',gap:8,marginBottom:A.spacing.lg},actionButtonDanger:{backgroundColor:A.colors.surface,borderWidth:1,borderColor:A.colors.danger},actionButtonDangerText:{color:A.colors.danger,fontWeight:'700'},disabled:{opacity:.5},sectionLabel:{fontSize:14,fontWeight:'700',color:A.colors.primary,marginBottom:A.spacing.sm},jadwalRow:{flexDirection:'row',alignItems:'center',paddingVertical:10,borderBottomWidth:1,borderBottomColor:A.colors.border},jadwalNomor:{fontSize:13,fontWeight:'700',color:A.colors.text},jadwalSub:{fontSize:11,color:A.colors.textMuted,marginTop:2},jadwalStatus:{fontSize:11,fontWeight:'700',marginTop:4},payButton:{backgroundColor:A.colors.primary,paddingHorizontal:12,paddingVertical:8,borderRadius:A.radius.sm,marginLeft:8},payButtonText:{color:A.colors.white,fontSize:12,fontWeight:'700'},lunasText:{color:A.colors.primary,fontSize:12,fontWeight:'700',marginLeft:8},sisaText:{color:A.colors.danger,fontSize:11,marginLeft:8},modalOverlay:Object.assign({},w.modalUi.backdrop),modalScrollContent:Object.assign({},w.modalUi.scrollContent),modalCard:Object.assign({},w.modalUi.card),modalTitle:Object.assign({},w.modalUi.title,{marginBottom:A.spacing.md}),modalSub:Object.assign({},w.modalUi.description),akadInfoBox:{backgroundColor:A.colors.background,borderRadius:A.radius.sm,borderWidth:1,borderColor:A.colors.border,padding:A.spacing.md,marginBottom:A.spacing.md,gap:4},akadInfoRow:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',paddingVertical:2,gap:A.spacing.sm},akadInfoLabel:{fontSize:12,color:A.colors.textMuted,flexShrink:1},akadInfoValue:{fontSize:12,fontWeight:'700',color:A.colors.text,textAlign:'right',flexShrink:1},akadInfoValueStrong:{fontSize:14,color:A.colors.primary},akadInfoDivider:{height:1,backgroundColor:A.colors.border,marginVertical:4},akadHelper:{fontSize:11,color:A.colors.textMuted,fontStyle:'italic',lineHeight:15},akadSeksiJudul:{fontSize:11,fontWeight:'800',color:A.colors.primary,letterSpacing:.6,textTransform:'uppercase',marginTop:A.spacing.sm,marginBottom:A.spacing.xs},akadPreviewKosong:{flex:1,fontSize:12,color:A.colors.textMuted,lineHeight:17},akadPreviewKosongBox:{flexDirection:'row',alignItems:'flex-start',gap:A.spacing.sm,padding:A.spacing.md,borderRadius:A.radius.sm,borderWidth:1,borderStyle:'dashed',borderColor:A.colors.border,backgroundColor:A.colors.background},akadCatatan:{flex:1,fontSize:12,color:A.colors.textMuted,lineHeight:17},akadCatatanBox:{flexDirection:'row',alignItems:'flex-start',gap:A.spacing.sm,padding:A.spacing.md,borderRadius:A.radius.sm,backgroundColor:A.colors.background,borderWidth:1,borderColor:A.colors.border},akadSeksiJudulJarak:{marginTop:A.spacing.lg},sheetBackdrop:Object.assign({},w.modalUi.backdrop,{justifyContent:'flex-end'}),sheetWrap:{width:'100%',maxHeight:'92%'},sheet:Object.assign({},w.modalUi.sheet,{maxHeight:'100%',padding:0,overflow:'hidden'}),sheetHandle:{alignSelf:'center',width:40,height:4,borderRadius:2,backgroundColor:A.colors.border,marginTop:A.spacing.sm},sheetHeader:Object.assign({},w.modalUi.headerRow,{paddingHorizontal:A.spacing.lg,paddingTop:A.spacing.md,paddingBottom:A.spacing.md,borderBottomWidth:1,borderBottomColor:A.colors.border}),sheetHeaderText:{flex:1,minWidth:0},sheetTitle:Object.assign({},w.modalUi.title,{fontSize:17}),sheetSub:Object.assign({},w.modalUi.description,{marginBottom:0}),sheetClose:Object.assign({},w.modalUi.closeIcon,{marginRight:-A.spacing.sm}),sheetBody:{flexGrow:0,flexShrink:1},sheetBodyContent:{paddingHorizontal:A.spacing.lg,paddingTop:A.spacing.md,paddingBottom:A.spacing.lg},sheetFooter:{paddingHorizontal:A.spacing.lg,paddingTop:A.spacing.md,paddingBottom:A.spacing.lg,borderTopWidth:1,borderTopColor:A.colors.border,backgroundColor:A.colors.surface},sheetActions:{flexDirection:'row',gap:A.spacing.sm},sheetPrimary:Object.assign({},w.modalUi.primaryButton,{flex:1,minWidth:0}),sheetPrimaryText:Object.assign({},w.modalUi.primaryText),sheetSecondary:Object.assign({},w.modalUi.secondaryButton,{flex:1,minWidth:0}),sheetSecondaryText:Object.assign({},w.modalUi.secondaryText),sheetError:{color:A.colors.danger,fontSize:12,lineHeight:17,marginBottom:A.spacing.sm},sheetLabel:{fontSize:13,color:A.colors.text,fontWeight:'600',marginBottom:A.spacing.xs,marginTop:A.spacing.md},tenorRow:{flexDirection:'row',alignItems:'center',gap:A.spacing.sm},tenorInput:{flex:1},tenorSuffix:{minWidth:64,fontSize:13,color:A.colors.textMuted,fontWeight:'600'},segment:{flexDirection:'row',borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.sm,overflow:'hidden'},segmentItem:{flex:1,minHeight:42,alignItems:'center',justifyContent:'center',backgroundColor:A.colors.surface,borderLeftWidth:1,borderLeftColor:A.colors.border},segmentItemActive:{backgroundColor:A.colors.primary,borderLeftColor:A.colors.primary},segmentText:{fontSize:13,fontWeight:'600',color:A.colors.text},segmentTextActive:{color:A.colors.white,fontWeight:'700'},akadSection:{backgroundColor:A.colors.surface,borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.md,padding:A.spacing.md,marginBottom:A.spacing.lg},akadSectionHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:A.spacing.sm},akadSectionTitleWrap:{flexDirection:'row',alignItems:'center',gap:A.spacing.xs,flexShrink:1},akadSectionTitle:{fontSize:15,fontWeight:'800',color:A.colors.text},akadSectionDesc:{fontSize:12,color:A.colors.textMuted,lineHeight:17,marginTop:A.spacing.xs,marginBottom:A.spacing.md},akadPrimaryButton:Object.assign({},w.modalUi.primaryButton,{alignSelf:'stretch'}),akadPrimaryButtonText:Object.assign({},w.modalUi.primaryText),akadExportWrap:{marginTop:A.spacing.sm},akadBlok:{marginTop:A.spacing.md},pengurusPeringatan:{flexDirection:'row',alignItems:'flex-start',gap:A.spacing.xs,marginTop:A.spacing.sm,padding:A.spacing.sm,borderRadius:A.radius.sm,borderWidth:1,borderColor:A.colors.warning,backgroundColor:A.colors.warningBg},pengurusPeringatanText:{flex:1,fontSize:11,color:A.colors.text,lineHeight:16},akadBlokPemisah:{marginTop:A.spacing.lg,paddingTop:A.spacing.md,borderTopWidth:1,borderTopColor:A.colors.border},akadBlokJudul:{fontSize:13,fontWeight:'800',color:A.colors.text,letterSpacing:.3},akadBlokMeta:{fontSize:12,color:A.colors.textMuted,marginTop:2,marginBottom:A.spacing.sm,lineHeight:17},akadExportHint:{fontSize:11,color:A.colors.textMuted,marginTop:A.spacing.xs,textAlign:'center'},riwayatAkadToggle:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',minHeight:44,marginTop:A.spacing.md,paddingTop:A.spacing.sm,borderTopWidth:1,borderTopColor:A.colors.border},previewBox:{borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.sm,marginBottom:A.spacing.md,overflow:'hidden'},previewRow:{flexDirection:'row',paddingVertical:6,paddingHorizontal:A.spacing.sm,borderTopWidth:1,borderTopColor:A.colors.border,gap:6},previewHeader:{backgroundColor:A.colors.primaryLight,borderTopWidth:0},previewHeaderText:{fontSize:10,fontWeight:'800',color:A.colors.primary,letterSpacing:.4},previewLabel:{width:84,fontSize:11,color:A.colors.textMuted},previewCell:{flex:1,fontSize:11,color:A.colors.text},previewCellBerubah:{fontWeight:'700',color:A.colors.primary},previewTanggal:{fontSize:11,color:A.colors.textMuted,paddingHorizontal:A.spacing.sm,paddingVertical:6,borderTopWidth:1,borderTopColor:A.colors.border,backgroundColor:A.colors.background},modalLabel:{fontSize:13,color:A.colors.text,fontWeight:'600',marginBottom:A.spacing.sm,marginTop:A.spacing.sm},modalInput:Object.assign({},B.formUi.inputStandalone),modalInputMultiline:Object.assign({},B.formUi.inputStandaloneMultiline),modalActions:Object.assign({},w.modalUi.actions),modalCancel:{paddingHorizontal:14,paddingVertical:10},modalCancelText:Object.assign({},w.modalUi.secondaryText),modalSubmit:{backgroundColor:A.colors.primary,paddingHorizontal:A.spacing.lg,paddingVertical:10,borderRadius:A.radius.sm},modalSubmitDanger:{backgroundColor:A.colors.danger,paddingHorizontal:A.spacing.lg,paddingVertical:10,borderRadius:A.radius.sm},modalSubmitText:Object.assign({},w.modalUi.primaryText),seksiJadwal:{marginTop:A.spacing.lg},seksiHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',gap:A.spacing.sm},seksiJumlah:{fontSize:11,color:A.colors.textMuted,fontWeight:'700'},seksiKeterangan:{fontSize:11,color:A.colors.textMuted,lineHeight:16,marginBottom:A.spacing.sm},seksiEmpty:{fontSize:12,color:A.colors.textMuted,fontStyle:'italic',paddingVertical:A.spacing.sm},jadwalRowRedup:{opacity:.6,backgroundColor:A.colors.background},seksiTotalRow:{flexDirection:'row',justifyContent:'space-between',paddingTop:A.spacing.sm,marginTop:A.spacing.xs,borderTopWidth:1,borderTopColor:A.colors.border},seksiTotalLabel:{fontSize:12,fontWeight:'700',color:A.colors.text},seksiTotalValue:{fontSize:12,fontWeight:'700',color:A.colors.primary},riwayatAkadLinkText:{color:A.colors.primary,fontSize:12,fontWeight:'700'},riwayatAkadCard:{backgroundColor:A.colors.surface,borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.sm,padding:A.spacing.md,marginBottom:A.spacing.sm},riwayatAkadCardBerlaku:{borderColor:A.colors.primary,borderWidth:1.5},riwayatAkadHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'center',gap:A.spacing.sm,marginBottom:2},riwayatAkadJudul:{fontSize:13,fontWeight:'800',color:A.colors.text,letterSpacing:.3},riwayatAkadTanggal:{fontSize:12,color:A.colors.textMuted,marginBottom:A.spacing.sm},riwayatAkadDivider:{height:1,backgroundColor:A.colors.border,marginVertical:A.spacing.sm},riwayatAkadKeterangan:{fontSize:11,color:A.colors.textMuted,marginTop:A.spacing.xs,lineHeight:16},riwayatAkadAksi:{marginTop:A.spacing.sm},statusPill:{paddingHorizontal:8,paddingVertical:2,borderRadius:A.radius.pill,borderWidth:1,flexShrink:1},akadKonfirmasiIkon:{alignSelf:'center',width:52,height:52,borderRadius:26,backgroundColor:A.colors.primaryLight,alignItems:'center',justifyContent:'center',marginBottom:A.spacing.sm},akadKonfirmasiLangkah:{fontSize:11,fontWeight:'700',color:A.colors.textMuted,letterSpacing:.5,textTransform:'uppercase',textAlign:'center',marginBottom:2},akadKonfirmasiJudul:{textAlign:'center',marginBottom:A.spacing.xs},akadKonfirmasiDesk:{fontSize:13,color:A.colors.textMuted,lineHeight:19,textAlign:'center',marginBottom:A.spacing.md},akadKonfirmasiRingkas:{borderWidth:1,borderColor:A.colors.border,borderRadius:A.radius.sm,paddingHorizontal:A.spacing.md,paddingVertical:A.spacing.xs,backgroundColor:A.colors.background},akadKonfirmasiBaris:{flexDirection:'row',justifyContent:'space-between',gap:A.spacing.md,paddingVertical:6},akadKonfirmasiBarisPemisah:{borderTopWidth:1,borderTopColor:A.colors.border},akadKonfirmasiLabel:{fontSize:12,color:A.colors.textMuted},akadKonfirmasiNilai:{flexShrink:1,fontSize:12,fontWeight:'600',color:A.colors.text,textAlign:'right'},akadKonfirmasiCek:{marginTop:A.spacing.md,gap:6},akadKonfirmasiCekBaris:{flexDirection:'row',gap:A.spacing.sm,alignItems:'flex-start'},akadKonfirmasiCekTeks:{flex:1,fontSize:13,color:A.colors.text,lineHeight:18},akadPernyataan:{flexDirection:'row',alignItems:'center',gap:A.spacing.sm,marginTop:A.spacing.md,padding:A.spacing.md,borderRadius:A.radius.sm,borderWidth:1,borderColor:A.colors.border},akadPernyataanAktif:{borderColor:A.colors.primary,backgroundColor:A.colors.primaryLight},akadPernyataanTeks:{flex:1,fontSize:13,fontWeight:'600',color:A.colors.text,lineHeight:18},akadKonfirmasiExport:{marginTop:A.spacing.md},akadTerkonfirmasi:{flexDirection:'row',alignItems:'center',gap:A.spacing.xs,marginBottom:A.spacing.md,paddingHorizontal:A.spacing.sm,paddingVertical:6,borderRadius:A.radius.sm,backgroundColor:A.colors.primaryLight},akadTerkonfirmasiTeks:{flex:1,fontSize:12,fontWeight:'600',color:A.colors.text},statusPillBerlaku:{backgroundColor:A.colors.primaryLight,borderColor:A.colors.primary},statusPillHistoris:{backgroundColor:A.colors.background,borderColor:A.colors.border},statusPillText:{fontSize:10,fontWeight:'800',letterSpacing:.3},statusPillTextBerlaku:{color:A.colors.primary},statusPillTextHistoris:{color:A.colors.textMuted},perbandinganRow:{flexDirection:'row',paddingVertical:2,gap:A.spacing.sm},perbandinganLabel:{width:56,fontSize:11,color:A.colors.textMuted},perbandinganNilai:{flex:1,fontSize:11,color:A.colors.textMuted},perbandinganPanah:{color:A.colors.textFaint},perbandinganBaru:{color:A.colors.text,fontWeight:'700'},jadwalInternal:{fontSize:10,color:A.colors.textFaint,marginTop:1}})},1439,[11,81,232,287,477,475,19,483,369,858,765,119,678,1345,913,1294,910,794,921,931,1300,772,1295,879,918,912,1440,951,952,1348,1349,882,6]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "react/jsx-runtime":return _$r(6);case "react":return _$r(11);case "@/components/AreaAmanKeyboard":return _$r(858);case "@expo/vector-icons":return _$r(678);case "react-native":return {View:_$r(81).default,Text:_$r(232).default,TouchableOpacity:_$r(477).default,ScrollView:_$r(287).default,StyleSheet:_$r(19).default,ActivityIndicator:_$r(475).default,Modal:_$r(483).default,__esModule:true};case "@react-navigation/native":return _$r(119);case "@/components/AnggotaPicker":return _$r(1337);case "@/components/CurrencyInput":return _$r(1297);case "@/components/DatePicker":return _$r(913);case "@/repositories/AnggotaRepository":return _$r(920);case "@/services/PinjamanService":return _$r(1345);case "@/services/SimpananService":return _$r(974);case "@/store/useAppStore":return _$r(794);case "@/theme/colors":return _$r(772);case "@/theme/form":return _$r(879);case "@/components/AppTextInput":return _$r(881);case "@/components/FocusTextInput":return _$r(1300);case "@/components/FieldError":return _$r(1301);case "@/store/useNotifyStore":return _$r(765);case "@/utils/money":return _$r(910);case "@/utils/tanggal":return _$r(918);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.default=PinjamanFormScreen;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = __importStar(require("react"));
+const AreaAmanKeyboard_1 = __importDefault(require("@/components/AreaAmanKeyboard"));
+const vector_icons_1 = require("@expo/vector-icons");
+const react_native_1 = require("react-native");
+const native_1 = require("@react-navigation/native");
+const AnggotaPicker_1 = __importDefault(require("@/components/AnggotaPicker"));
+const CurrencyInput_1 = __importDefault(require("@/components/CurrencyInput"));
+const DatePicker_1 = __importDefault(require("@/components/DatePicker"));
+const AnggotaRepository_1 = require("@/repositories/AnggotaRepository");
+const PinjamanService_1 = require("@/services/PinjamanService");
+const SimpananService_1 = require("@/services/SimpananService");
+const useAppStore_1 = require("@/store/useAppStore");
+const colors_1 = require("@/theme/colors");
+const form_1 = require("@/theme/form");
+const AppTextInput_1 = __importDefault(require("@/components/AppTextInput"));
+const FocusTextInput_1 = __importDefault(require("@/components/FocusTextInput"));
+const FieldError_1 = __importDefault(require("@/components/FieldError"));
+const useNotifyStore_1 = require("@/store/useNotifyStore");
+const PinjamanService_2 = require("@/services/PinjamanService");
+const money_1 = require("@/utils/money");
+const tanggal_1 = require("@/utils/tanggal");
+// RC-S54 §11 — URUTAN TAMPILAN saja: Efektif, Flat, Menurun.
+// Nilai enum, perhitungan, default, dan seluruh engine jasa TIDAK
+// disentuh — `MetodeJasa` dan kalkulatornya tetap sama persis. 'CUSTOM'
+// tetap di akhir seperti sebelumnya karena bukan salah satu dari tiga
+// metode yang diminta diurutkan ulang.
+const METODE_OPTIONS = [
+    { value: 'EFEKTIF', label: 'Efektif' },
+    { value: 'FLAT', label: 'Flat' },
+    { value: 'MENURUN', label: 'Menurun' },
+    { value: 'CUSTOM', label: 'Custom' },
+];
+const TENOR_SATUAN_OPTIONS = [
+    { value: 'HARI', label: 'Hari' },
+    { value: 'MINGGU', label: 'Minggu' },
+    { value: 'BULAN', label: 'Bulan' },
+];
+const BIAYA_ADMIN_OPTIONS = [
+    { value: 'TIDAK_ADA', label: 'Tidak ada' },
+    { value: 'NOMINAL', label: 'Nominal tetap' },
+    { value: 'PERSENTASE', label: 'Persentase' },
+];
+/**
+ * Form pengajuan pinjaman baru (PRD §11-12) — admin memilih metode jasa
+ * sendiri.
+ *
+ * Bug fix (Edit Pinjaman): screen ini SEKARANG juga dipakai untuk edit
+ * pinjaman yang BELUM dicairkan — dibuka dengan `route.params.pinjamanId`
+ * dari Detail Pinjaman. Field & validasi form TETAP SAMA; bedanya hanya
+ * prefill data existing (lewat getPinjamanDetail) dan submit memanggil
+ * `editPinjaman()` (bukan `ajukanPinjaman()`). Anggota TIDAK BISA diubah
+ * dalam mode edit (lihat AnggotaPicker `disabled` — editPinjaman() sengaja
+ * tidak mengubah anggota_id, konsisten dengan aturan "loan ID/nomor
+ * pinjaman/historical journal tidak berubah").
+ */
+function PinjamanFormScreen() {
+    const navigation = (0, native_1.useNavigation)();
+    const route = (0, native_1.useRoute)();
+    const currentUser = (0, useAppStore_1.useAppStore)((s) => s.currentUser);
+    const editPinjamanId = route.params?.pinjamanId;
+    const isEditMode = !!editPinjamanId;
+    const [loadingEdit, setLoadingEdit] = (0, react_1.useState)(isEditMode);
+    const [anggota, setAnggota] = (0, react_1.useState)(null);
+    const [tanggal, setTanggal] = (0, react_1.useState)((0, tanggal_1.getTanggalLokalHariIni)());
+    // RC-S54 item 24 & 25 — tujuan pinjaman & agunan.
+    const [tujuanPinjaman, setTujuanPinjaman] = (0, react_1.useState)(null);
+    const [tujuanDetail, setTujuanDetail] = (0, react_1.useState)('');
+    const [adaAgunan, setAdaAgunan] = (0, react_1.useState)(false);
+    const [jenisAgunan, setJenisAgunan] = (0, react_1.useState)(null);
+    const [pemilikAgunan, setPemilikAgunan] = (0, react_1.useState)('');
+    const [nomorDokumenAgunan, setNomorDokumenAgunan] = (0, react_1.useState)('');
+    const [nilaiAgunan, setNilaiAgunan] = (0, react_1.useState)('');
+    const [jumlahPinjaman, setJumlahPinjaman] = (0, react_1.useState)('');
+    const [tenor, setTenor] = (0, react_1.useState)('');
+    const [satuanTenor, setSatuanTenor] = (0, react_1.useState)('BULAN');
+    const [metodeJasa, setMetodeJasa] = (0, react_1.useState)('FLAT');
+    // PHASE 4 §L (permintaan pengguna): modal peringatan FLAT — HANYA
+    // dipicu saat user AKTIF memilih FLAT (lewat pilihMetodeJasa di
+    // bawah), BUKAN saat mount/render biasa walau default metodeJasa
+    // memang 'FLAT' (state awal TIDAK memicu modal, hanya interaksi
+    // eksplisit yang memicu — lihat useState di atas vs onPress di bawah).
+    const [flatModalOpen, setFlatModalOpen] = (0, react_1.useState)(false);
+    const pilihMetodeJasa = (value) => {
+        setMetodeJasa(value);
+        if (value === 'FLAT')
+            setFlatModalOpen(true);
+    };
+    const [persentaseJasa, setPersentaseJasa] = (0, react_1.useState)('');
+    const [biayaAdminTipe, setBiayaAdminTipe] = (0, react_1.useState)('TIDAK_ADA');
+    const [biayaAdminNilai, setBiayaAdminNilai] = (0, react_1.useState)('');
+    /**
+     * REQUIREMENT 7 (permintaan pengguna) — klasifikasi akuntansi biaya
+     * administrasi: "Jasa Terpisah" (SEPARATE_SERVICE) vs "Jasa Integral"
+     * (INTEGRAL_FINANCIAL_INSTRUMENT).
+     *
+     * INI BUKAN PILIHAN KOSMETIK. Kolom `pinjaman.biaya_admin_klasifikasi`
+     * sudah dipakai `cairkanPinjaman()` untuk memilih akun kredit yang
+     * BERBEDA saat pencairan:
+     *   Jasa Terpisah -> Kr Pendapatan Administrasi (4-1100), diakui penuh
+     *      sebagai pendapatan pada tanggal pencairan.
+     *   Jasa Integral -> Kr Pendapatan Diterima Dimuka (2-1300) + inisiasi
+     *      pengukuran EIR, lalu diamortisasi sepanjang tenor
+     *      (EirAccountingService).
+     * Sebelum requirement ini, form tidak pernah mengirim field tersebut
+     * sehingga SELALU jatuh ke default 'SEPARATE_SERVICE'.
+     */
+    const [biayaAdminKlasifikasi, setBiayaAdminKlasifikasi] = (0, react_1.useState)('SEPARATE_SERVICE');
+    // Modal pemilihan metode jasa biaya admin — dibuka HANYA saat petugas
+    // AKTIF memilih "Nominal tetap" atau "Persentase" (lihat
+    // pilihBiayaAdminTipe), bukan saat render/mount.
+    const [jasaModalOpen, setJasaModalOpen] = (0, react_1.useState)(false);
+    /**
+     * REQUIREMENT 7 — memilih tipe biaya administrasi otomatis membuka
+     * modal pemilihan Jasa Terpisah / Jasa Integral. Memilih "Tidak ada"
+     * mengembalikan klasifikasi ke SEPARATE_SERVICE (klasifikasi integral
+     * tanpa fee tidak punya arti akuntansi — backend juga menormalisasi
+     * hal yang sama lewat normalisasiBiayaAdminKlasifikasi).
+     */
+    const pilihBiayaAdminTipe = (value) => {
+        setBiayaAdminTipe(value);
+        if (value === 'TIDAK_ADA') {
+            setBiayaAdminKlasifikasi('SEPARATE_SERVICE');
+            setJasaModalOpen(false);
+            return;
+        }
+        setJasaModalOpen(true);
+    };
+    const [dendaAktif, setDendaAktif] = (0, react_1.useState)(false);
+    const [dendaNilai, setDendaNilai] = (0, react_1.useState)('');
+    const [keterangan, setKeterangan] = (0, react_1.useState)('');
+    const [errors, setErrors] = (0, react_1.useState)({});
+    const [submitting, setSubmitting] = (0, react_1.useState)(false);
+    (0, react_1.useEffect)(() => {
+        navigation.setOptions({ title: isEditMode ? 'Edit Pinjaman' : 'Ajukan Pinjaman' });
+    }, [isEditMode, navigation]);
+    // Bug fix (Edit Pinjaman): prefill seluruh field dari data existing.
+    // Hanya berjalan sekali saat screen dibuka dengan pinjamanId — TIDAK
+    // menimpa isian user setelah itu.
+    (0, react_1.useEffect)(() => {
+        if (!editPinjamanId)
+            return;
+        let cancelled = false;
+        (async () => {
+            try {
+                const detail = await (0, PinjamanService_1.getPinjamanDetail)(editPinjamanId);
+                if (!detail) {
+                    (0, useNotifyStore_1.notify)('Gagal', 'Pinjaman tidak ditemukan.');
+                    navigation.goBack();
+                    return;
+                }
+                if (detail.status !== 'DIAJUKAN' && detail.status !== 'DISETUJUI') {
+                    (0, useNotifyStore_1.notify)('Gagal', 'Pinjaman yang sudah dicairkan tidak bisa diedit lewat sini.');
+                    navigation.goBack();
+                    return;
+                }
+                const anggotaData = await (0, AnggotaRepository_1.getAnggotaById)(detail.anggotaId);
+                if (cancelled)
+                    return;
+                setAnggota(anggotaData);
+                setTanggal(detail.tanggal);
+                setJumlahPinjaman(detail.jumlahPinjaman);
+                setTenor(String(detail.tenor));
+                setSatuanTenor(detail.satuanTenor);
+                setMetodeJasa(detail.metodeJasa);
+                setPersentaseJasa(String(detail.persentaseJasa));
+                setBiayaAdminTipe(detail.biayaAdminTipe);
+                setBiayaAdminNilai(detail.biayaAdminNilai ? String(detail.biayaAdminNilai) : '');
+                // REQUIREMENT 7 — prefill klasifikasi existing supaya pilihan
+                // petugas tidak diam-diam kembali ke default saat pinjaman diedit.
+                setBiayaAdminKlasifikasi(detail.biayaAdminKlasifikasi);
+                setDendaAktif(detail.dendaAktif);
+                setDendaNilai(detail.dendaNilai || '');
+                setKeterangan(detail.keterangan ?? '');
+                // RC-S72 — prefill tujuan & agunan. Tanpa ini, menyimpan edit akan
+                // mengganti tujuan/agunan tersimpan dengan isian kosong form.
+                setTujuanPinjaman(detail.tujuanPinjaman);
+                setTujuanDetail(detail.tujuanDetail ?? '');
+                const agunanAda = detail.agunan[0];
+                setAdaAgunan(!!agunanAda);
+                if (agunanAda) {
+                    setJenisAgunan(agunanAda.jenisAgunan);
+                    setPemilikAgunan(agunanAda.pemilik);
+                    setNomorDokumenAgunan(agunanAda.nomorDokumen);
+                    setNilaiAgunan(agunanAda.nilaiAgunan);
+                }
+            }
+            catch (e) {
+                (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Gagal memuat data pinjaman.');
+                navigation.goBack();
+            }
+            finally {
+                if (!cancelled)
+                    setLoadingEdit(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [editPinjamanId, navigation]);
+    // Bagian D (permintaan pengguna): validasi UX — cek Simpanan Pokok
+    // & Wajib begitu anggota dipilih, supaya petugas tahu SEBELUM
+    // mengisi seluruh form, bukan baru tahu setelah submit gagal.
+    // Validasi SEBENARNYA (yang tidak bisa dilewati) tetap di service
+    // lewat checkEligibilitasPinjaman/checkKepemilikanSimpananPokokWajib
+    // — banner ini murni bantuan UX, bukan satu-satunya penjaga.
+    const [peringatanSimpanan, setPeringatanSimpanan] = (0, react_1.useState)(null);
+    (0, react_1.useEffect)(() => {
+        if (!anggota) {
+            setPeringatanSimpanan(null);
+            return;
+        }
+        let cancelled = false;
+        (async () => {
+            // RC-S133.6.4 — syarat dinilai pada TANGGAL PENGAJUAN: untuk tanggal
+            // lampau, saldo dihitung per tanggal itu (sama dengan penilaian di service).
+            const sampai = tanggal && tanggal < (0, tanggal_1.getTanggalLokalHariIni)() ? tanggal : undefined;
+            const [pokok, wajib] = await Promise.all([
+                (0, SimpananService_1.getSaldoSimpananAnggota)(anggota.id, 'POKOK', sampai),
+                (0, SimpananService_1.getSaldoSimpananAnggota)(anggota.id, 'WAJIB', sampai),
+            ]);
+            if (cancelled)
+                return;
+            const kurang = [];
+            if (pokok <= 0)
+                kurang.push('Simpanan Pokok');
+            if (wajib <= 0)
+                kurang.push('Simpanan Wajib');
+            setPeringatanSimpanan(kurang.length > 0
+                ? `Anggota ini belum memiliki ${kurang.join(' dan ')}${sampai ? ` pada tanggal pengajuan ${tanggal}` : ''} — pengajuan akan ditolak.`
+                : null);
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [anggota, tanggal]);
+    const validate = () => {
+        const e = {};
+        if (!anggota)
+            e.anggota = 'Anggota wajib dipilih';
+        // RC-S54 item 24 — tujuan WAJIB di form ini; detail hanya wajib
+        // untuk 'LAINNYA'.
+        if (!tujuanPinjaman)
+            e.tujuanPinjaman = 'Tujuan pinjaman wajib dipilih';
+        if (tujuanPinjaman === 'LAINNYA' && !tujuanDetail.trim()) {
+            e.tujuanDetail = 'Detail tujuan wajib diisi bila memilih Lainnya';
+        }
+        // RC-S54 item 25 — detail agunan hanya divalidasi bila "Ada".
+        if (adaAgunan) {
+            if (!jenisAgunan)
+                e.jenisAgunan = 'Jenis agunan wajib dipilih';
+            if (!pemilikAgunan.trim())
+                e.pemilikAgunan = 'Pemilik agunan wajib diisi';
+            if (!nomorDokumenAgunan.trim())
+                e.nomorDokumenAgunan = 'Nomor dokumen wajib diisi';
+            if (nilaiAgunan === '' || nilaiAgunan < 0)
+                e.nilaiAgunan = 'Nilai agunan wajib diisi (tidak boleh negatif)';
+        }
+        if (jumlahPinjaman === '' || jumlahPinjaman <= 0)
+            e.jumlahPinjaman = 'Jumlah pinjaman harus lebih dari 0';
+        const t = parseInt(tenor, 10);
+        if (!tenor || isNaN(t) || t <= 0)
+            e.tenor = 'Tenor harus lebih dari 0';
+        const persen = parseFloat(persentaseJasa || '0');
+        if (isNaN(persen) || persen < 0)
+            e.persentaseJasa = 'Persentase jasa tidak valid';
+        setErrors(e);
+        return Object.keys(e).length === 0;
+    };
+    const submit = async () => {
+        if (!validate() || !anggota || !currentUser || jumlahPinjaman === '')
+            return;
+        setSubmitting(true);
+        try {
+            let id;
+            if (isEditMode && editPinjamanId) {
+                await (0, PinjamanService_1.editPinjaman)({
+                    pinjamanId: editPinjamanId,
+                    tanggal,
+                    jumlahPinjaman,
+                    tenor: parseInt(tenor, 10),
+                    satuanTenor,
+                    metodeJasa,
+                    persentaseJasa: parseFloat(persentaseJasa || '0'),
+                    biayaAdminTipe,
+                    biayaAdminNilai: parseInt(biayaAdminNilai || '0', 10),
+                    biayaAdminKlasifikasi,
+                    tujuanPinjaman: tujuanPinjaman ?? undefined,
+                    tujuanDetail: tujuanPinjaman === 'LAINNYA' ? tujuanDetail.trim() : undefined,
+                    // RC-S72 — pada EDIT, "Tidak Ada" dikirim sebagai null (hapus
+                    // agunan), karena undefined berarti "tidak diubah" di editPinjaman.
+                    agunan: adaAgunan && jenisAgunan && nilaiAgunan !== ''
+                        ? {
+                            jenisAgunan,
+                            pemilik: pemilikAgunan.trim(),
+                            nomorDokumen: nomorDokumenAgunan.trim(),
+                            nilaiAgunan,
+                        }
+                        : null,
+                    dendaAktif,
+                    dendaTipe: dendaAktif ? 'PER_HARI' : undefined,
+                    dendaNilai: dendaNilai === '' ? 0 : dendaNilai,
+                    keterangan: keterangan || undefined,
+                    actingUserId: currentUser.id,
+                });
+                id = editPinjamanId;
+            }
+            else {
+                const hasil = await (0, PinjamanService_1.ajukanPinjaman)({
+                    anggotaId: anggota.id,
+                    tanggal,
+                    jumlahPinjaman,
+                    tenor: parseInt(tenor, 10),
+                    satuanTenor,
+                    metodeJasa,
+                    persentaseJasa: parseFloat(persentaseJasa || '0'),
+                    biayaAdminTipe,
+                    biayaAdminNilai: parseInt(biayaAdminNilai || '0', 10),
+                    biayaAdminKlasifikasi,
+                    // Tujuan & agunan yang diisi di form WAJIB ikut terkirim saat
+                    // pengajuan baru — sebelumnya hanya jalur edit yang mengirimnya,
+                    // sehingga isian ini hilang untuk pinjaman baru. Validasinya
+                    // tetap di service (validasiTujuanPinjaman/validasiAgunan).
+                    tujuanPinjaman: tujuanPinjaman ?? undefined,
+                    tujuanDetail: tujuanPinjaman === 'LAINNYA' ? tujuanDetail.trim() : undefined,
+                    agunan: adaAgunan && jenisAgunan && nilaiAgunan !== ''
+                        ? {
+                            jenisAgunan,
+                            pemilik: pemilikAgunan.trim(),
+                            nomorDokumen: nomorDokumenAgunan.trim(),
+                            nilaiAgunan,
+                        }
+                        : undefined,
+                    dendaAktif,
+                    dendaTipe: dendaAktif ? 'PER_HARI' : undefined,
+                    dendaNilai: dendaNilai === '' ? 0 : dendaNilai,
+                    keterangan: keterangan || undefined,
+                    createdBy: currentUser.id,
+                });
+                id = hasil.id;
+            }
+            if (isEditMode) {
+                (0, useNotifyStore_1.notify)('Berhasil', 'Perubahan pinjaman berhasil disimpan.', [
+                    { text: 'OK', onPress: () => navigation.replace('PinjamanDetail', { pinjamanId: id }) },
+                ]);
+            }
+            else {
+                // Fix: SELALU arahkan ke Detail Pinjaman yang baru dibuat (pakai
+                // replace, bukan navigate, supaya tombol kembali tidak balik ke
+                // form yang sudah terisi) — pinjaman langsung terlihat & tombol
+                // "Cairkan Pinjaman" langsung tersedia, sama seperti alur semula,
+                // dari jalur manapun form ini dibuka.
+                (0, useNotifyStore_1.notify)('Berhasil', 'Pengajuan pinjaman & jadwal angsuran berhasil dibuat.', [
+                    { text: 'OK', onPress: () => navigation.replace('PinjamanDetail', { pinjamanId: id }) },
+                ]);
+            }
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setSubmitting(false);
+        }
+    };
+    if (loadingEdit) {
+        return ((0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.loadingWrap, children: (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.primary }) }));
+    }
+    const ringkasanBiaya = previewBiayaAdmin(biayaAdminTipe, biayaAdminNilai, jumlahPinjaman);
+    const labelMetode = METODE_OPTIONS.find((o) => o.value === metodeJasa)?.label ?? metodeJasa;
+    const labelSatuan = TENOR_SATUAN_OPTIONS.find((o) => o.value === satuanTenor)?.label.toLowerCase() ?? '';
+    const tenorAngka = parseInt(tenor, 10);
+    /**
+     * UI/UX — form disusun per bagian bernomor (kartu) supaya alur isian
+     * terbaca urut: Anggota → Tujuan → Rincian → Biaya & Denda → Agunan →
+     * Catatan, ditutup ringkasan sebelum tombol kirim. SELURUH state,
+     * handler, validasi, modal, dan pemanggilan service TIDAK berubah —
+     * yang berubah hanya susunan & tampilan.
+     */
+    return ((0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "layar", style: { flex: 1 }, children: (0, jsx_runtime_1.jsxs)(react_native_1.ScrollView, { keyboardShouldPersistTaps: "handled", style: styles.container, contentContainerStyle: styles.content, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.intro, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "information-circle-outline", size: 18, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.introText, children: isEditMode
+                                ? 'Perbarui data pengajuan yang belum dicairkan. Anggota tidak dapat diubah.'
+                                : 'Lengkapi data pengajuan pinjaman. Kolom bertanda * wajib diisi.' })] }), (0, jsx_runtime_1.jsxs)(Section, { nomor: 1, icon: "person-outline", title: "Anggota & Tanggal", children: [(0, jsx_runtime_1.jsx)(AnggotaPicker_1.default, { value: anggota, onChange: setAnggota, error: errors.anggota, disabled: isEditMode }), peringatanSimpanan && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.warningBox, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "alert-circle-outline", size: 16, color: colors_1.colors.danger }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.warningText, children: peringatanSimpanan })] })), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Tanggal Pengajuan *" }), (0, jsx_runtime_1.jsx)(DatePicker_1.default, { value: tanggal, onChange: setTanggal })] }), (0, jsx_runtime_1.jsxs)(Section, { nomor: 2, icon: "flag-outline", title: "Tujuan Pinjaman", required: true, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.chipRow, children: Object.keys(PinjamanService_2.LABEL_TUJUAN_PINJAMAN).map((t) => ((0, jsx_runtime_1.jsx)(Chip, { label: PinjamanService_2.LABEL_TUJUAN_PINJAMAN[t], active: tujuanPinjaman === t, onPress: () => setTujuanPinjaman(t) }, t))) }), errors.tujuanPinjaman && (0, jsx_runtime_1.jsx)(FieldError_1.default, { message: errors.tujuanPinjaman }), tujuanPinjaman === 'LAINNYA' && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.subField, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Detail Tujuan *" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: styles.input, value: tujuanDetail, onChangeText: setTujuanDetail, placeholder: "Jelaskan tujuan pinjaman", placeholderTextColor: colors_1.colors.placeholder, invalid: !!errors.tujuanDetail }), errors.tujuanDetail && (0, jsx_runtime_1.jsx)(FieldError_1.default, { message: errors.tujuanDetail })] }))] }), (0, jsx_runtime_1.jsxs)(Section, { nomor: 3, icon: "cash-outline", title: "Rincian Pinjaman", children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Jumlah Pinjaman (Rp) *" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.fieldGap, children: (0, jsx_runtime_1.jsx)(CurrencyInput_1.default, { value: jumlahPinjaman, onChangeValue: setJumlahPinjaman, error: errors.jumlahPinjaman }) }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.twoCol, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.tenorCol, children: (0, jsx_runtime_1.jsx)(Field, { label: "Tenor *", value: tenor, onChangeText: setTenor, keyboardType: "number-pad", error: errors.tenor }) }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.satuanCol, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Satuan" }), (0, jsx_runtime_1.jsx)(Segmented, { options: TENOR_SATUAN_OPTIONS, value: satuanTenor, onChange: (v) => setSatuanTenor(v) })] })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Metode Jasa" }), (0, jsx_runtime_1.jsx)(Segmented, { options: METODE_OPTIONS, value: metodeJasa, onChange: (v) => pilihMetodeJasa(v) }), metodeJasa === 'CUSTOM' && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.hintBox, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "calendar-outline", size: 14, color: colors_1.colors.textMuted }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.hint, children: "Setelah pinjaman diajukan, susun jadwal angsuran custom (jumlah periode, tanggal jatuh tempo, pokok, dan bunga tiap periode) dari layar Detail Pinjaman sebelum dicairkan." })] })), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.fieldTop, children: (0, jsx_runtime_1.jsx)(Field, { label: "Persentase Jasa per Periode/Bulan (%) *", value: persentaseJasa, onChangeText: setPersentaseJasa, keyboardType: "decimal-pad", error: errors.persentaseJasa }) })] }), (0, jsx_runtime_1.jsxs)(Section, { nomor: 4, icon: "receipt-outline", title: "Biaya & Denda", children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Biaya Administrasi" }), (0, jsx_runtime_1.jsx)(Segmented, { options: BIAYA_ADMIN_OPTIONS, value: biayaAdminTipe, onChange: (v) => pilihBiayaAdminTipe(v) }), biayaAdminTipe === 'NOMINAL' && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.subField, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Nominal Biaya Admin (Rp)" }), (0, jsx_runtime_1.jsx)(CurrencyInput_1.default, { value: biayaAdminNilai === '' ? '' : parseInt(biayaAdminNilai, 10), onChangeValue: (v) => setBiayaAdminNilai(v === '' ? '' : v.toString()) })] })), biayaAdminTipe === 'PERSENTASE' && ((0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.subField, children: (0, jsx_runtime_1.jsx)(Field, { label: "Persentase Biaya Admin (%)", value: biayaAdminNilai, onChangeText: setBiayaAdminNilai, keyboardType: "number-pad" }) })), biayaAdminTipe !== 'TIDAK_ADA' && ((0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: styles.klasifikasiSummary, onPress: () => setJasaModalOpen(true), children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.klasifikasiSummaryLabel, children: "Metode Jasa Biaya Administrasi" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.klasifikasiSummaryValue, children: biayaAdminKlasifikasi === 'INTEGRAL_FINANCIAL_INSTRUMENT' ? 'Jasa Integral' : 'Jasa Terpisah' }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.klasifikasiSummaryHint, children: biayaAdminKlasifikasi === 'INTEGRAL_FINANCIAL_INSTRUMENT'
+                                                ? 'Fee ditangguhkan & diamortisasi sepanjang tenor (EIR).'
+                                                : 'Fee diakui penuh sebagai pendapatan saat pencairan.' })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.klasifikasiSummaryUbah, children: "Ubah" })] })), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.sectionDivider }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Denda Keterlambatan" }), (0, jsx_runtime_1.jsx)(Segmented, { options: [
+                                { value: 'TIDAK', label: 'Tidak Aktif' },
+                                { value: 'AKTIF', label: 'Aktif' },
+                            ], value: dendaAktif ? 'AKTIF' : 'TIDAK', onChange: (v) => setDendaAktif(v === 'AKTIF') }), dendaAktif && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.subField, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Denda per Hari Terlambat (Rp)" }), (0, jsx_runtime_1.jsx)(CurrencyInput_1.default, { value: dendaNilai, onChangeValue: setDendaNilai })] }))] }), (0, jsx_runtime_1.jsxs)(Section, { nomor: 5, icon: "shield-checkmark-outline", title: "Agunan / Jaminan", required: true, children: [(0, jsx_runtime_1.jsx)(Segmented, { options: [
+                                { value: 'TIDAK', label: 'Tidak Ada' },
+                                { value: 'ADA', label: 'Ada' },
+                            ], value: adaAgunan ? 'ADA' : 'TIDAK', onChange: (v) => setAdaAgunan(v === 'ADA') }), adaAgunan && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.subField, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.label, children: "Jenis Agunan *" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.chipRow, children: Object.keys(PinjamanService_2.LABEL_JENIS_AGUNAN).map((j) => ((0, jsx_runtime_1.jsx)(Chip, { label: PinjamanService_2.LABEL_JENIS_AGUNAN[j], active: jenisAgunan === j, onPress: () => setJenisAgunan(j) }, j))) }), errors.jenisAgunan && (0, jsx_runtime_1.jsx)(FieldError_1.default, { message: errors.jenisAgunan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.label, styles.fieldTop], children: "Pemilik *" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: styles.input, value: pemilikAgunan, onChangeText: setPemilikAgunan, placeholder: "Nama pemilik agunan", placeholderTextColor: colors_1.colors.placeholder, invalid: !!errors.pemilikAgunan }), errors.pemilikAgunan && (0, jsx_runtime_1.jsx)(FieldError_1.default, { message: errors.pemilikAgunan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.label, styles.fieldTop], children: "Nomor Dokumen *" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: styles.input, value: nomorDokumenAgunan, onChangeText: setNomorDokumenAgunan, placeholder: "Nomor sertifikat / BPKB / bilyet", placeholderTextColor: colors_1.colors.placeholder, invalid: !!errors.nomorDokumenAgunan }), errors.nomorDokumenAgunan && (0, jsx_runtime_1.jsx)(FieldError_1.default, { message: errors.nomorDokumenAgunan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.label, styles.fieldTop], children: "Nilai Agunan (Rp) *" }), (0, jsx_runtime_1.jsx)(CurrencyInput_1.default, { value: nilaiAgunan, onChangeValue: setNilaiAgunan, error: errors.nilaiAgunan })] }))] }), (0, jsx_runtime_1.jsx)(Section, { nomor: 6, icon: "document-text-outline", title: "Catatan", children: (0, jsx_runtime_1.jsx)(Field, { label: "Keterangan", value: keterangan, onChangeText: setKeterangan, multiline: true }) }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.summaryCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.summaryTitle, children: "Ringkasan Pengajuan" }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Anggota", value: anggota?.namaLengkap ?? '—' }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Jumlah pinjaman", value: jumlahPinjaman === '' ? '—' : (0, money_1.formatRupiah)(jumlahPinjaman) }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Tenor", value: Number.isFinite(tenorAngka) && tenorAngka > 0 ? `${tenorAngka} ${labelSatuan}` : '—' }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Metode jasa", value: persentaseJasa ? `${labelMetode} · ${persentaseJasa}% / periode` : labelMetode }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Biaya administrasi", value: biayaAdminTipe === 'TIDAK_ADA' ? 'Tidak ada' : (0, money_1.formatRupiah)(ringkasanBiaya.biayaAdmin) }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.summaryDivider }), (0, jsx_runtime_1.jsx)(SummaryRow, { label: "Kas diterima anggota", value: (0, money_1.formatRupiah)(ringkasanBiaya.kasDiterima), strong: true })] }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.submitButton, submitting && styles.disabled], onPress: submit, disabled: submitting, accessibilityRole: "button", children: submitting ? ((0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white })) : ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: isEditMode ? 'save-outline' : 'paper-plane-outline', size: 18, color: colors_1.colors.white }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.submitText, children: isEditMode ? 'Simpan Perubahan' : 'Ajukan Pinjaman' })] })) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: jasaModalOpen, transparent: true, animationType: "fade", onRequestClose: () => setJasaModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.flatModalOverlay, children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaModalCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.flatModalTitle, children: "Metode Jasa Biaya Administrasi" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaModalIntro, children: "Pilih bagaimana biaya administrasi pencairan diperlakukan dalam pembukuan. Pilihan ini menentukan akun dan waktu pengakuan pendapatannya." }), (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { keyboardShouldPersistTaps: "handled", style: { maxHeight: 380 }, children: ([
+                                        {
+                                            value: 'SEPARATE_SERVICE',
+                                            judul: 'Jasa Terpisah',
+                                            ringkas: 'Jasa administrasi berdiri sendiri, terpisah dari pokok pinjaman.',
+                                            poin: [
+                                                'Diakui PENUH sebagai Pendapatan Administrasi pada tanggal pencairan.',
+                                                'Jasa ditampilkan terpisah dari pokok; tidak memengaruhi jadwal angsuran.',
+                                                'Tidak memerlukan pengukuran suku bunga efektif (EIR).',
+                                            ],
+                                        },
+                                        {
+                                            value: 'INTEGRAL_FINANCIAL_INSTRUMENT',
+                                            judul: 'Jasa Integral',
+                                            ringkas: 'Jasa menyatu dengan pengukuran instrumen pinjaman.',
+                                            poin: [
+                                                'TIDAK diakui sebagai pendapatan saat pencairan; dibukukan sebagai Pendapatan Diterima Dimuka.',
+                                                'Diamortisasi sepanjang tenor memakai suku bunga efektif (EIR) yang dihitung sistem.',
+                                                'Sisa fee yang belum teramortisasi diselesaikan otomatis saat pelunasan dipercepat.',
+                                            ],
+                                        },
+                                    ]).map((opt) => {
+                                        const aktif = biayaAdminKlasifikasi === opt.value;
+                                        const preview = previewBiayaAdmin(biayaAdminTipe, biayaAdminNilai, jumlahPinjaman);
+                                        return ((0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: [styles.jasaOptionCard, aktif && styles.jasaOptionCardActive], onPress: () => setBiayaAdminKlasifikasi(opt.value), accessibilityRole: "radio", accessibilityState: { selected: aktif }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaOptionHeader, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.radioOuter, aktif && styles.radioOuterActive], children: aktif && (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.radioInner }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.jasaOptionJudul, aktif && styles.jasaOptionJudulActive], children: opt.judul })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaOptionRingkas, children: opt.ringkas }), opt.poin.map((p) => ((0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.jasaOptionPoin, children: ["\u2022  ", p] }, p))), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaPreviewBox, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaPreviewRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewLabel, children: "Biaya administrasi" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewValue, children: (0, money_1.formatRupiah)(preview.biayaAdmin) })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaPreviewRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewLabel, children: "Kas diterima anggota" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewValue, children: (0, money_1.formatRupiah)(preview.kasDiterima) })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.jasaPreviewRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewLabel, children: "Pengakuan saat pencairan" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jasaPreviewValue, children: opt.value === 'SEPARATE_SERVICE'
+                                                                        ? `Pendapatan ${(0, money_1.formatRupiah)(preview.biayaAdmin)}`
+                                                                        : `Ditangguhkan ${(0, money_1.formatRupiah)(preview.biayaAdmin)}` })] })] })] }, opt.value));
+                                    }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.flatModalButton, onPress: () => setJasaModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.flatModalButtonText, children: "Gunakan Metode Ini" }) })] }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: flatModalOpen, transparent: true, animationType: "fade", onRequestClose: () => setFlatModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.flatModalOverlay, children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.flatModalCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.flatModalTitle, children: "Metode FLAT" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.flatModalBody, children: "Metode FLAT digunakan untuk perhitungan jadwal jasa kontraktual. Untuk pelaporan akuntansi, pengakuan pendapatan dan pengukuran pinjaman mengikuti kebijakan akuntansi dan ketentuan SAK EP yang berlaku." }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.flatModalButton, onPress: () => setFlatModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.flatModalButtonText, children: "Saya Mengerti" }) })] }) }) })] }) }));
+}
+/**
+ * REQUIREMENT 7 — preview biaya administrasi & kas yang diterima
+ * anggota. Rumusnya SENGAJA identik dengan `cairkanPinjaman()`
+ * (PinjamanService): NOMINAL dipakai apa adanya; PERSENTASE =
+ * Math.round(jumlahPinjaman * persen / 100). Kalau rumus di service
+ * berubah, ini WAJIB ikut disesuaikan — dicatat di sini supaya
+ * ketergantungannya eksplisit, bukan tersembunyi.
+ */
+function previewBiayaAdmin(tipe, nilai, jumlahPinjaman) {
+    const pokok = jumlahPinjaman === '' ? 0 : jumlahPinjaman;
+    const angka = parseFloat(nilai || '0');
+    const aman = Number.isFinite(angka) && angka > 0 ? angka : 0;
+    let biayaAdmin = 0;
+    if (tipe === 'NOMINAL')
+        biayaAdmin = Math.trunc(aman);
+    else if (tipe === 'PERSENTASE')
+        biayaAdmin = Math.round((pokok * aman) / 100);
+    return { biayaAdmin, kasDiterima: Math.max(0, pokok - biayaAdmin) };
+}
+function Chip({ label, active, onPress }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: [styles.chip, active && styles.chipActive], onPress: onPress, accessibilityRole: "radio", accessibilityState: { selected: active }, children: [active && (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "checkmark", size: 14, color: colors_1.colors.white }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.chipText, active && styles.chipTextActive], children: label })] }));
+}
+/** Kartu bagian form bernomor — murni presentasi. */
+function Section({ nomor, icon, title, required, children, }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.section, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sectionHeader, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.sectionNomor, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sectionNomorText, children: nomor }) }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: icon, size: 18, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.sectionTitle, children: [title, required ? ' *' : ''] })] }), children] }));
+}
+/**
+ * Kontrol segmen (pilihan tunggal, lebar sama) untuk opsi pendek
+ * seperti satuan tenor, metode jasa, dan biaya admin. Hanya memanggil
+ * `onChange` dengan nilai opsi — handler pemanggil tidak berubah.
+ */
+function Segmented({ options, value, onChange, }) {
+    return ((0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.segmented, children: options.map((opt) => {
+            const aktif = opt.value === value;
+            return ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.segment, aktif && styles.segmentActive], onPress: () => onChange(opt.value), accessibilityRole: "radio", accessibilityState: { selected: aktif }, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.segmentText, aktif && styles.segmentTextActive], numberOfLines: 1, children: opt.label }) }, opt.value));
+        }) }));
+}
+function SummaryRow({ label, value, strong }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.summaryRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.summaryLabel, strong && styles.summaryLabelStrong], children: label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.summaryValue, strong && styles.summaryValueStrong], numberOfLines: 1, children: value })] }));
+}
+/**
+ * UI/UX FINAL POLISH (§6, §7) — field layar ini sekarang memakai
+ * `AppTextInput` bersama: label, batas, ikon per tipe, focus state, dan
+ * presentasi error datang dari satu design system, bukan dari style
+ * lokal tiap layar. Prop yang diterima helper ini TIDAK berubah, jadi
+ * seluruh pemanggilnya tetap sama; value, handler, dan kapan error
+ * muncul juga tidak disentuh.
+ */
+function Field({ label, value, onChangeText, error, multiline, keyboardType, }) {
+    return ((0, jsx_runtime_1.jsx)(AppTextInput_1.default, { label: label, error: error, value: value, onChangeText: onChangeText, multiline: multiline, keyboardType: keyboardType, noIcon: !multiline }));
+}
+const styles = react_native_1.StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors_1.colors.background },
+    content: { padding: colors_1.spacing.md, paddingBottom: colors_1.spacing.xxl },
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors_1.colors.background },
+    intro: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: colors_1.spacing.sm,
+        backgroundColor: colors_1.colors.primaryLight,
+        borderRadius: colors_1.radius.md,
+        paddingHorizontal: colors_1.spacing.md,
+        paddingVertical: colors_1.spacing.sm + 2,
+        marginBottom: colors_1.spacing.md,
+    },
+    introText: { flex: 1, fontSize: 12, color: colors_1.colors.primaryDark, lineHeight: 17 },
+    section: {
+        backgroundColor: colors_1.colors.surface,
+        borderRadius: colors_1.radius.md,
+        borderWidth: 1,
+        borderColor: colors_1.colors.border,
+        padding: colors_1.spacing.md,
+        marginBottom: colors_1.spacing.md,
+        ...colors_1.elevation.card,
+    },
+    sectionHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: colors_1.spacing.sm,
+        paddingBottom: colors_1.spacing.sm,
+        marginBottom: colors_1.spacing.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors_1.colors.border,
+    },
+    sectionNomor: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: colors_1.colors.primary,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    sectionNomorText: { color: colors_1.colors.white, fontSize: 11, fontWeight: '700' },
+    sectionTitle: { flex: 1, fontSize: 15, fontWeight: '700', color: colors_1.colors.text },
+    sectionDivider: { height: 1, backgroundColor: colors_1.colors.border, marginVertical: colors_1.spacing.md },
+    subField: { marginTop: colors_1.spacing.md },
+    fieldGap: { marginBottom: colors_1.spacing.md },
+    fieldTop: { marginTop: colors_1.spacing.md },
+    warningBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: colors_1.spacing.sm,
+        backgroundColor: colors_1.colors.dangerBg,
+        borderRadius: colors_1.radius.sm,
+        padding: colors_1.spacing.md,
+        marginTop: colors_1.spacing.sm,
+        marginBottom: colors_1.spacing.md,
+    },
+    warningText: { flex: 1, color: colors_1.colors.danger, fontSize: 12, lineHeight: 17 },
+    twoCol: { flexDirection: 'row', gap: colors_1.spacing.md },
+    tenorCol: { flex: 2 },
+    satuanCol: { flex: 3 },
+    chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    chip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: colors_1.radius.pill,
+        borderWidth: 1,
+        borderColor: colors_1.colors.border,
+        backgroundColor: colors_1.colors.surface,
+    },
+    chipActive: { backgroundColor: colors_1.colors.primary, borderColor: colors_1.colors.primary },
+    chipText: { fontSize: 12, color: colors_1.colors.text },
+    chipTextActive: { color: colors_1.colors.white, fontWeight: '600' },
+    segmented: {
+        flexDirection: 'row',
+        backgroundColor: colors_1.colors.background,
+        borderRadius: colors_1.radius.sm,
+        borderWidth: 1,
+        borderColor: colors_1.colors.border,
+        padding: 3,
+        gap: 3,
+    },
+    segment: {
+        flex: 1,
+        minHeight: 38,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderRadius: colors_1.radius.sm - 2,
+        paddingHorizontal: 4,
+    },
+    segmentActive: { backgroundColor: colors_1.colors.primary },
+    segmentText: { fontSize: 12, fontWeight: '600', color: colors_1.colors.textMuted },
+    segmentTextActive: { color: colors_1.colors.white },
+    label: { fontSize: 13, color: colors_1.colors.text, fontWeight: '600', marginBottom: 6 },
+    input: { ...form_1.formUi.inputStandalone },
+    hintBox: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        gap: 6,
+        backgroundColor: colors_1.colors.background,
+        borderRadius: colors_1.radius.sm,
+        padding: colors_1.spacing.sm,
+        marginTop: colors_1.spacing.sm,
+    },
+    hint: { flex: 1, fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17 },
+    summaryCard: {
+        backgroundColor: colors_1.colors.surface,
+        borderRadius: colors_1.radius.md,
+        borderWidth: 1,
+        borderColor: colors_1.colors.primary,
+        padding: colors_1.spacing.md,
+        marginBottom: colors_1.spacing.md,
+    },
+    summaryTitle: { fontSize: 13, fontWeight: '700', color: colors_1.colors.primary, marginBottom: colors_1.spacing.sm },
+    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: colors_1.spacing.md, paddingVertical: 3 },
+    summaryLabel: { fontSize: 12, color: colors_1.colors.textMuted },
+    summaryLabelStrong: { color: colors_1.colors.text, fontWeight: '700' },
+    summaryValue: { flexShrink: 1, fontSize: 13, color: colors_1.colors.text, fontWeight: '600', textAlign: 'right' },
+    summaryValueStrong: { fontSize: 15, color: colors_1.colors.primary, fontWeight: '700' },
+    summaryDivider: { height: 1, backgroundColor: colors_1.colors.border, marginVertical: colors_1.spacing.xs },
+    submitButton: {
+        flexDirection: 'row',
+        gap: colors_1.spacing.sm,
+        backgroundColor: colors_1.colors.primary,
+        borderRadius: colors_1.radius.md,
+        paddingVertical: 15,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: colors_1.spacing.xl,
+        ...colors_1.elevation.card,
+    },
+    disabled: { opacity: 0.6 },
+    submitText: { color: colors_1.colors.white, fontWeight: '700', fontSize: 15 },
+    flatModalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', padding: colors_1.spacing.lg },
+    flatModalCard: { width: '100%', maxWidth: 380, backgroundColor: colors_1.colors.surface, borderRadius: colors_1.radius.md, padding: colors_1.spacing.lg },
+    flatModalTitle: { fontSize: 16, fontWeight: '700', color: colors_1.colors.text, marginBottom: colors_1.spacing.sm },
+    flatModalBody: { fontSize: 13, color: colors_1.colors.textMuted, lineHeight: 19, marginBottom: colors_1.spacing.lg },
+    flatModalButton: { backgroundColor: colors_1.colors.primary, borderRadius: colors_1.radius.sm, paddingVertical: 12, alignItems: 'center' },
+    flatModalButtonText: { color: colors_1.colors.white, fontWeight: '700', fontSize: 14 },
+    // REQUIREMENT 7 — modal & ringkasan metode jasa biaya administrasi.
+    klasifikasiSummary: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: colors_1.spacing.sm,
+        borderWidth: 1,
+        borderColor: colors_1.colors.primary,
+        backgroundColor: colors_1.colors.primaryLight,
+        borderRadius: colors_1.radius.md,
+        padding: colors_1.spacing.md,
+        marginBottom: colors_1.spacing.md,
+    },
+    klasifikasiSummaryLabel: { fontSize: 11, color: colors_1.colors.textMuted, fontWeight: '700', letterSpacing: 0.3 },
+    klasifikasiSummaryValue: { fontSize: 14, color: colors_1.colors.primary, fontWeight: '700', marginTop: 2 },
+    klasifikasiSummaryHint: { fontSize: 11, color: colors_1.colors.textMuted, marginTop: 2, lineHeight: 15 },
+    klasifikasiSummaryUbah: { fontSize: 12, color: colors_1.colors.primary, fontWeight: '700' },
+    jasaModalCard: {
+        width: '100%',
+        maxWidth: 420,
+        backgroundColor: colors_1.colors.surface,
+        borderRadius: colors_1.radius.md,
+        padding: colors_1.spacing.lg,
+    },
+    jasaModalIntro: { fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17, marginBottom: colors_1.spacing.md },
+    jasaOptionCard: {
+        borderWidth: 1,
+        borderColor: colors_1.colors.border,
+        borderRadius: colors_1.radius.md,
+        padding: colors_1.spacing.md,
+        marginBottom: colors_1.spacing.sm,
+        backgroundColor: colors_1.colors.surface,
+    },
+    jasaOptionCardActive: { borderColor: colors_1.colors.primary, backgroundColor: colors_1.colors.primaryLight },
+    jasaOptionHeader: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.sm },
+    jasaOptionJudul: { fontSize: 14, fontWeight: '600', color: colors_1.colors.text, flex: 1 },
+    jasaOptionJudulActive: { color: colors_1.colors.primary, fontWeight: '700' },
+    jasaOptionRingkas: { fontSize: 12, color: colors_1.colors.text, marginTop: 6, marginLeft: 28, lineHeight: 17 },
+    jasaOptionPoin: { fontSize: 11, color: colors_1.colors.textMuted, marginTop: 4, marginLeft: 28, lineHeight: 16 },
+    jasaPreviewBox: {
+        marginTop: colors_1.spacing.sm,
+        marginLeft: 28,
+        borderTopWidth: 1,
+        borderTopColor: colors_1.colors.border,
+        paddingTop: colors_1.spacing.sm,
+        gap: 3,
+    },
+    jasaPreviewRow: { flexDirection: 'row', justifyContent: 'space-between', gap: colors_1.spacing.sm },
+    jasaPreviewLabel: { fontSize: 11, color: colors_1.colors.textMuted, flex: 1 },
+    jasaPreviewValue: { fontSize: 11, color: colors_1.colors.text, fontWeight: '700' },
+    radioOuter: {
+        width: 20,
+        height: 20,
+        borderRadius: 10,
+        borderWidth: 2,
+        borderColor: colors_1.colors.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    radioOuterActive: { borderColor: colors_1.colors.primary },
+    radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors_1.colors.primary },
+});
+
+},1438,[6,11,858,678,81,232,477,287,19,475,483,119,1337,1297,913,920,1345,974,794,772,879,881,1300,1301,765,910,918]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "react/jsx-runtime":return _$r(6);case "react":return _$r(11);case "react-native":return {View:_$r(81).default,Text:_$r(232).default,ScrollView:_$r(287).default,TouchableOpacity:_$r(477).default,ActivityIndicator:_$r(475).default,StyleSheet:_$r(19).default,Modal:_$r(483).default,Pressable:_$r(369).default,__esModule:true};case "@/components/AreaAmanKeyboard":return _$r(858);case "@/store/useNotifyStore":return _$r(765);case "@react-navigation/native":return _$r(119);case "@expo/vector-icons":return _$r(678);case "@/services/PinjamanService":return _$r(1345);case "@/components/DatePicker":return _$r(913);case "@/components/RekeningPicker":return _$r(1294);case "@/utils/money":return _$r(910);case "@/store/useAppStore":return _$r(794);case "@/export/ReportTableBuilders":return _$r(921);case "@/components/ExportButton":return _$r(931);case "@/components/FocusTextInput":return _$r(1300);case "@/theme/colors":return _$r(772);case "@/theme/modal":return _$r(1295);case "@/theme/form":return _$r(879);case "@/utils/tanggal":return _$r(918);case "@/hooks/useFocusRefresh":return _$r(912);case "@/components/DokumenAkadExportButton":return _$r(1440);case "@/components/pinjaman/PenyelesaianPinjamanCard":return _$r(9020);case "@/services/KoperasiMasterService":return _$r(951);case "@/services/PengurusInti":return _$r(952);case "@/accounting/InstallmentDate":return _$r(1348);case "@/services/AkadUlangPresentasi":return _$r(1349);case "@/services/DevClockService":return _$r(882);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.default=PinjamanDetailScreen;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = __importStar(require("react"));
+const react_native_1 = require("react-native");
+const AreaAmanKeyboard_1 = __importDefault(require("@/components/AreaAmanKeyboard"));
+const useNotifyStore_1 = require("@/store/useNotifyStore");
+const native_1 = require("@react-navigation/native");
+const vector_icons_1 = require("@expo/vector-icons");
+const PinjamanService_1 = require("@/services/PinjamanService");
+const DatePicker_1 = __importDefault(require("@/components/DatePicker"));
+const RekeningPicker_1 = __importDefault(require("@/components/RekeningPicker"));
+const money_1 = require("@/utils/money");
+const useAppStore_1 = require("@/store/useAppStore");
+const ReportTableBuilders_1 = require("@/export/ReportTableBuilders");
+const ExportButton_1 = __importDefault(require("@/components/ExportButton"));
+const FocusTextInput_1 = __importDefault(require("@/components/FocusTextInput"));
+const colors_1 = require("@/theme/colors");
+const modal_1 = require("@/theme/modal");
+const form_1 = require("@/theme/form");
+const tanggal_1 = require("@/utils/tanggal");
+const useFocusRefresh_1 = require("@/hooks/useFocusRefresh");
+const DokumenAkadExportButton_1 = __importDefault(require("@/components/DokumenAkadExportButton"));
+const PenyelesaianPinjamanCard_1 = __importDefault(require("@/components/pinjaman/PenyelesaianPinjamanCard"));
+const KoperasiMasterService_1 = require("@/services/KoperasiMasterService");
+const PengurusInti_1 = require("@/services/PengurusInti");
+const InstallmentDate_1 = require("@/accounting/InstallmentDate");
+const AkadUlangPresentasi_1 = require("@/services/AkadUlangPresentasi");
+const DevClockService_1 = require("@/services/DevClockService");
+/**
+ * RC-S82 — jatuh tempo akhir akad baru untuk PREVIEW, memakai fungsi
+ * yang SAMA PERSIS dengan yang dipakai `akadUlangPinjaman()` untuk
+ * menulis `pinjaman.tanggal_jatuh_tempo` (tidak ada algoritma kedua).
+ */
+function jatuhTempoBaruPreview(draft) {
+    try {
+        return (0, InstallmentDate_1.calculateMaturityDate)(draft.tanggal, draft.tenor, draft.satuanTenor);
+    }
+    catch {
+        return null;
+    }
+}
+/** Label nomor angsuran: relatif untuk jadwal hasil akad ulang, nomor internal tetap ditampilkan untuk jejak audit. */
+function labelNomorAngsuran(item, rel) {
+    if (item.dibuatDariAkadUlangId && rel) {
+        return { utama: `Periode ${rel.periode} dari ${rel.jumlah}`, internal: `No. jadwal internal ${item.nomorAngsuran}` };
+    }
+    return { utama: `Angsuran ke-${item.nomorAngsuran}`, internal: null };
+}
+const STATUS_ANGSURAN_COLOR = {
+    BELUM_BAYAR: colors_1.colors.textMuted,
+    SEBAGIAN: colors_1.colors.warning,
+    LUNAS: colors_1.colors.primary,
+    TERLAMBAT: colors_1.colors.danger,
+};
+/**
+ * Detail pinjaman + jadwal angsuran + aksi cairkan/bayar (PRD §12-13).
+ *
+ * Update pasca-Phase 18 §8 (permintaan pengguna): pencairan sekarang
+ * memilih sumber dana/rekening lewat `RekeningPicker` existing
+ * (sebelumnya hardcode 'KAS' — tidak bisa cair dari Bank sama sekali).
+ * Setelah cair (status AKTIF) & SELAMA belum ada satu pun angsuran
+ * dibayarkan, tombol "Edit Pencairan" (ganti sumber dana yang salah
+ * dipilih, ID transaksi/nomor pinjaman tidak berubah) dan "Batalkan
+ * Pencairan" (reversal, kembali ke status DISETUJUI, siap dicairkan
+ * ulang) tersedia. Begitu ada angsuran, keduanya otomatis hilang
+ * (server juga menolak kalau entah bagaimana dipaksa lewat state).
+ */
+function PinjamanDetailScreen() {
+    const navigation = (0, native_1.useNavigation)();
+    const route = (0, native_1.useRoute)();
+    const currentUser = (0, useAppStore_1.useAppStore)((s) => s.currentUser);
+    const koperasi = (0, useAppStore_1.useAppStore)((s) => s.koperasi);
+    // Bug fix: `route.params` bisa undefined kalau layar dibuka tanpa
+    // parameter — destructuring langsung sebelumnya crash.
+    const { pinjamanId } = route.params ?? {};
+    const [detail, setDetail] = (0, react_1.useState)(null);
+    const [jadwal, setJadwal] = (0, react_1.useState)([]);
+    const [loading, setLoading] = (0, react_1.useState)(true);
+    const [payModal, setPayModal] = (0, react_1.useState)(null);
+    const [payNominal, setPayNominal] = (0, react_1.useState)('');
+    const [processing, setProcessing] = (0, react_1.useState)(false);
+    const [cairkanModalOpen, setCairkanModalOpen] = (0, react_1.useState)(false);
+    // Konfirmasi tanda tangan akad SEBELUM form pencairan dibuka. Hanya
+    // gerbang UI: pencairan tetap memakai cairkanPinjaman() yang sama.
+    const [konfirmasiAkadOpen, setKonfirmasiAkadOpen] = (0, react_1.useState)(false);
+    const [akadDitandatangani, setAkadDitandatangani] = (0, react_1.useState)(false);
+    const [cairkanMode, setCairkanMode] = (0, react_1.useState)('BARU');
+    const [rekening, setRekening] = (0, react_1.useState)(null);
+    const [alasanEdit, setAlasanEdit] = (0, react_1.useState)('');
+    const [batalkanModalOpen, setBatalkanModalOpen] = (0, react_1.useState)(false);
+    const [alasanBatal, setAlasanBatal] = (0, react_1.useState)('');
+    // Bug fix (BUG 1): "Batalkan Pinjaman" untuk loan yang BELUM
+    // dicairkan sama sekali (DIAJUKAN/DISETUJUI) — state TERPISAH dari
+    // batalkanModalOpen/alasanBatal di atas, yang khusus untuk "Batalkan
+    // Pencairan" (reversal jurnal, hanya relevan setelah AKTIF). Dua flow
+    // ini TIDAK BOLEH berbagi modal/state karena memanggil service yang
+    // berbeda (batalkanPinjaman vs hapusPencairanPinjaman) dengan efek
+    // yang berbeda pula.
+    const [batalkanPinjamanModalOpen, setBatalkanPinjamanModalOpen] = (0, react_1.useState)(false);
+    const [alasanBatalPinjaman, setAlasanBatalPinjaman] = (0, react_1.useState)('');
+    // Target §9 (permintaan pengguna): "Fungsi Akad Ulang".
+    const [akadModalOpen, setAkadModalOpen] = (0, react_1.useState)(false);
+    const [akadKonfirmasiOpen, setAkadKonfirmasiOpen] = (0, react_1.useState)(false);
+    const [akadTanggal, setAkadTanggal] = (0, react_1.useState)((0, tanggal_1.getTanggalLokalHariIni)());
+    const [akadTenor, setAkadTenor] = (0, react_1.useState)('');
+    const [akadSatuanTenor, setAkadSatuanTenor] = (0, react_1.useState)('BULAN');
+    const [akadMetodeJasa, setAkadMetodeJasa] = (0, react_1.useState)('FLAT');
+    const [akadPersentaseJasa, setAkadPersentaseJasa] = (0, react_1.useState)('');
+    const [akadKeterangan, setAkadKeterangan] = (0, react_1.useState)('');
+    const [akadError, setAkadError] = (0, react_1.useState)(null);
+    // RC-S82 §C/§D: draft TERVALIDASI yang dibekukan saat menekan
+    // "Simpan Akad Ulang". Konfirmasi menampilkan nilai ini, dan HANYA
+    // nilai ini yang dikirim ke akadUlangPinjaman() — preview, konfirmasi,
+    // dan payload mustahil berbeda.
+    const [akadDraft, setAkadDraft] = (0, react_1.useState)(null);
+    // PHASE 4 §H (permintaan pengguna): info live yang ditampilkan saat
+    // membuka Akad Ulang — outstanding pokok dihitung dari `jadwal` yang
+    // sudah dimuat, Piutang Jasa lewat getOutstandingPiutangJasa
+    // (fungsi Phase 2 yang sama, TIDAK ada rumus kedua).
+    const [akadOutstandingJasa, setAkadOutstandingJasa] = (0, react_1.useState)(null);
+    const [riwayatAkad, setRiwayatAkad] = (0, react_1.useState)([]);
+    const [riwayatAkadOpen, setRiwayatAkadOpen] = (0, react_1.useState)(false);
+    const [notFound, setNotFound] = (0, react_1.useState)(false);
+    /**
+     * REQUIREMENT 6 (permintaan pengguna) — pisahkan jadwal angsuran
+     * menjadi tiga kelompok yang JELAS TERPISAH. Pengelompokan dilakukan
+     * lewat `kelompokkanJadwalAngsuran()` di PinjamanService (data aktual:
+     * status + kolom traceability akad ulang), BUKAN tebakan di layar ini,
+     * dan fungsi yang SAMA dipakai untuk menentukan isi export sehingga
+     * layar & file hasil export mustahil berbeda.
+     */
+    const kelompokJadwal = (0, react_1.useMemo)(() => {
+        const aktif = [];
+        const akadUlang = [];
+        const restrukturisasi = [];
+        const dihapusbuku = [];
+        for (const item of jadwal) {
+            switch ((0, PinjamanService_1.kelompokkanJadwalAngsuran)(item)) {
+                case 'AKTIF':
+                    aktif.push(item);
+                    break;
+                case 'AKAD_ULANG':
+                    akadUlang.push(item);
+                    break;
+                case 'RESTRUKTURISASI':
+                    restrukturisasi.push(item);
+                    break;
+                default:
+                    dihapusbuku.push(item);
+            }
+        }
+        return { aktif, akadUlang, restrukturisasi, dihapusbuku };
+    }, [jadwal]);
+    /**
+     * RC-S82 §A — ringkasan Akad Ulang dari SEMUA jadwal CURRENT
+     * (BELUM_BAYAR/SEBAGIAN/TERLAMBAT) lewat `isCurrentRepaymentSchedule()`.
+     * Sebelumnya daftar status diketik ulang di sini tanpa TERLAMBAT.
+     */
+    const ringkasanAkad = (0, react_1.useMemo)(() => (0, AkadUlangPresentasi_1.ringkasPosisiAkadUlang)(jadwal), [jadwal]);
+    /** RC-S82 §G — nomor periode relatif untuk jadwal hasil akad ulang (nomor internal DB tidak diubah). */
+    const periodeRelatif = (0, react_1.useMemo)(() => (0, AkadUlangPresentasi_1.hitungPeriodeRelatifAkadUlang)(jadwal), [jadwal]);
+    const load = (0, react_1.useCallback)(async () => {
+        if (!pinjamanId) {
+            setNotFound(true);
+            setLoading(false);
+            return;
+        }
+        setLoading(true);
+        try {
+            const [d, j] = await Promise.all([(0, PinjamanService_1.getPinjamanDetail)(pinjamanId), (0, PinjamanService_1.getJadwalAngsuran)(pinjamanId)]);
+            setDetail(d);
+            setJadwal(j);
+            if (!d)
+                setNotFound(true);
+        }
+        catch (e) {
+            // Bug fix: sebelumnya error apa pun di sini tidak ditangani —
+            // layar diam di spinner selamanya. Sekarang pesan jelas.
+            setNotFound(true);
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Gagal memuat detail pinjaman.');
+        }
+        finally {
+            setLoading(false);
+        }
+    }, [pinjamanId]);
+    // §6/§13/§14 — native-stack TIDAK meng-unmount layar yang
+    // ditinggalkan, jadi efek berbasis dependensi tidak berjalan ulang
+    // saat pengguna kembali setelah mencatat transaksi. Diganti (bukan
+    // ditambahi) dengan refresh berbasis FOKUS supaya layar selalu
+    // membaca state SQLite terkini. Tidak ada timer, tidak ada remount paksa.
+    (0, useFocusRefresh_1.useFocusRefresh)(() => {
+        load();
+    }, [load]);
+    // §8: pencairan hanya aman diedit/dihapus SELAMA belum ada angsuran
+    // yang dibayarkan sama sekali — proxy client-side dari jadwal (server
+    // mengecek ulang lewat tabel angsuran_pembayaran, ini murni untuk
+    // menampilkan/menyembunyikan tombol).
+    // PHASE 4 §G (permintaan pengguna): `belumAdaPembayaran` yang dulu
+    // dipakai untuk menampilkan Edit/Batalkan Pencairan bersyarat sudah
+    // TIDAK dipakai lagi — tombol tersebut sekarang disembunyikan total
+    // begitu status AKTIF, tanpa pengecualian (lihat render di bawah).
+    /** Tombol "Cairkan Pinjaman": konfirmasi tanda tangan akad dulu. */
+    const bukaCairkanBaru = () => {
+        setAkadDitandatangani(false);
+        setKonfirmasiAkadOpen(true);
+    };
+    /** Dipanggil setelah pengguna menyatakan akad sudah ditandatangani. */
+    const lanjutCairkanSetelahAkad = () => {
+        if (!akadDitandatangani)
+            return;
+        setKonfirmasiAkadOpen(false);
+        setCairkanMode('BARU');
+        setRekening(null);
+        setAlasanEdit('');
+        setCairkanModalOpen(true);
+    };
+    const bukaEditPencairan = () => {
+        setCairkanMode('EDIT');
+        setRekening(null);
+        setAlasanEdit('');
+        setCairkanModalOpen(true);
+    };
+    const submitCairkan = async () => {
+        if (!currentUser || !rekening)
+            return;
+        setProcessing(true);
+        try {
+            if (cairkanMode === 'BARU') {
+                await (0, PinjamanService_1.cairkanPinjaman)({
+                    pinjamanId,
+                    sumberDana: rekening.jenis === 'BANK' ? 'BANK' : 'KAS',
+                    bankAccountId: rekening.jenis === 'BANK' ? rekening.id : undefined,
+                    approvedBy: currentUser.id,
+                });
+                (0, useNotifyStore_1.notify)('Berhasil', 'Pinjaman berhasil dicairkan.');
+            }
+            else {
+                if (!alasanEdit.trim()) {
+                    (0, useNotifyStore_1.notify)('Gagal', 'Alasan koreksi wajib diisi.');
+                    setProcessing(false);
+                    return;
+                }
+                await (0, PinjamanService_1.editPencairanPinjaman)({
+                    pinjamanId,
+                    sumberDana: rekening.jenis === 'BANK' ? 'BANK' : 'KAS',
+                    bankAccountId: rekening.jenis === 'BANK' ? rekening.id : undefined,
+                    alasan: alasanEdit.trim(),
+                    actingUserId: currentUser.id,
+                });
+                (0, useNotifyStore_1.notify)('Berhasil', 'Sumber dana pencairan berhasil dikoreksi.');
+            }
+            setCairkanModalOpen(false);
+            await load();
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProcessing(false);
+        }
+    };
+    const submitBatalkan = async () => {
+        if (!currentUser || !alasanBatal.trim())
+            return;
+        setProcessing(true);
+        try {
+            await (0, PinjamanService_1.hapusPencairanPinjaman)({ pinjamanId, alasan: alasanBatal.trim(), actingUserId: currentUser.id });
+            setBatalkanModalOpen(false);
+            setAlasanBatal('');
+            await load();
+            (0, useNotifyStore_1.notify)('Berhasil', 'Pencairan dibatalkan — pinjaman kembali berstatus Disetujui.');
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProcessing(false);
+        }
+    };
+    // Bug fix (BUG 1): "Batalkan Pinjaman" — untuk loan yang belum cair
+    // sama sekali. Memanggil batalkanPinjaman() (set status DITOLAK,
+    // TIDAK pernah menyentuh jurnal/piutang/EIR karena semua itu memang
+    // belum ada sebelum pencairan).
+    const submitBatalkanPinjaman = async () => {
+        if (!currentUser || !alasanBatalPinjaman.trim())
+            return;
+        setProcessing(true);
+        try {
+            await (0, PinjamanService_1.batalkanPinjaman)({ pinjamanId, alasan: alasanBatalPinjaman.trim(), actingUserId: currentUser.id });
+            setBatalkanPinjamanModalOpen(false);
+            setAlasanBatalPinjaman('');
+            await load();
+            (0, useNotifyStore_1.notify)('Berhasil', 'Pinjaman dibatalkan.');
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProcessing(false);
+        }
+    };
+    /**
+     * RC-S82 (lanjutan) — ringkasan AKAD AWAL untuk kartu Akad & Dokumen.
+     * Syarat asli = nilai `*_lama` event akad ulang PERTAMA bila pernah
+     * diakadulangkan (baris pinjaman sudah memuat syarat terbaru); status
+     * dari jadwal akad asli (dibuat_dari_akad_ulang_id kosong).
+     */
+    const akadAwal = (0, react_1.useMemo)(() => {
+        if (!detail)
+            return null;
+        const pertama = [...riwayatAkad].sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0))[0];
+        const jadwalAwal = (0, AkadUlangPresentasi_1.jadwalMilikAkadAwal)(jadwal);
+        const sifat = (0, AkadUlangPresentasi_1.statusDokumenAkadAwal)(detail.status);
+        const status = (0, AkadUlangPresentasi_1.tentukanStatusJadwalKontrak)(jadwalAwal);
+        return {
+            sifat,
+            tenor: (0, AkadUlangPresentasi_1.formatTenor)(pertama ? pertama.tenorLama : detail.tenor, pertama ? pertama.satuanTenorLama : detail.satuanTenor),
+            jasa: `${(0, AkadUlangPresentasi_1.labelMetodeJasa)(pertama ? pertama.metodeJasaLama : detail.metodeJasa)} ${(0, AkadUlangPresentasi_1.formatPersenJasa)(pertama ? pertama.persentaseJasaLama : detail.persentaseJasa)}`,
+            statusLabel: sifat === 'BELUM_DICAIRKAN' ? 'SIAP DITANDATANGANI' : status === 'DIGANTIKAN' ? 'DIGANTIKAN' : status === 'BERLAKU' ? 'BERLAKU' : (0, AkadUlangPresentasi_1.labelStatusEventAkadUlang)(status),
+            berlaku: sifat === 'FINAL' && status === 'BERLAKU',
+        };
+    }, [detail, jadwal, riwayatAkad]);
+    /**
+     * RC-S82 — jabatan pengurus inti yang KOSONG pada tanggal akad. Perjanjian
+     * ditandatangani Ketua (diketahui Sekretaris & Bendahara); nama yang
+     * kosong dicetak sebagai garis titik-titik — pengguna diberi tahu
+     * sebelum mencetak. Hanya BACA; gagal memuat tidak memblokir export.
+     */
+    const [pengurusKosong, setPengurusKosong] = (0, react_1.useState)([]);
+    (0, react_1.useEffect)(() => {
+        if (!detail?.tanggal)
+            return;
+        let batal = false;
+        (0, KoperasiMasterService_1.getSusunanPengurusInti)(detail.tanggal)
+            .then((s) => {
+            // Hanya Ketua yang dicetak di dokumen perjanjian.
+            if (!batal)
+                setPengurusKosong((0, PengurusInti_1.jabatanIntiKosong)(s).filter((j) => j === 'KETUA'));
+        })
+            .catch(() => {
+            if (!batal)
+                setPengurusKosong([]);
+        });
+        return () => {
+            batal = true;
+        };
+    }, [detail?.tanggal]);
+    /** RC-S82 §F/§J — nomor urut kronologis event (stabil; event tidak pernah dihapus). */
+    const nomorUrutAkad = (0, react_1.useMemo)(() => (0, AkadUlangPresentasi_1.nomorUrutEventAkadUlang)(riwayatAkad), [riwayatAkad]);
+    /** RC-S82 §C — preview langsung dari parser yang SAMA dengan validasi submit. */
+    const akadValidasiLive = (0, react_1.useMemo)(() => (0, AkadUlangPresentasi_1.validasiFormAkadUlang)({
+        tanggal: akadTanggal,
+        tenorText: akadTenor,
+        satuanTenor: akadSatuanTenor,
+        metodeJasa: akadMetodeJasa,
+        persentaseText: akadPersentaseJasa,
+        keterangan: akadKeterangan,
+    }), [akadTanggal, akadTenor, akadSatuanTenor, akadMetodeJasa, akadPersentaseJasa, akadKeterangan]);
+    const loadRiwayatAkad = (0, react_1.useCallback)(async () => {
+        const r = await (0, PinjamanService_1.getRiwayatAkadUlang)(pinjamanId);
+        setRiwayatAkad(r);
+    }, [pinjamanId]);
+    (0, useFocusRefresh_1.useFocusRefresh)(() => {
+        loadRiwayatAkad();
+    }, [loadRiwayatAkad]);
+    const bukaAkadUlang = () => {
+        // RC-S82 §B — preflight UX. TERLAMBAT TIDAK memblokir; yang
+        // diblokir hanya kondisi yang juga ditolak service. Service tetap
+        // otoritas terakhir (validasinya tidak diubah).
+        const preflight = (0, AkadUlangPresentasi_1.preflightAkadUlang)(jadwal);
+        if (!preflight.boleh) {
+            (0, useNotifyStore_1.notify)(preflight.judul, preflight.pesan, undefined, 'warning');
+            return;
+        }
+        setAkadDraft(null);
+        setAkadTanggal((0, tanggal_1.getTanggalLokalHariIni)());
+        setAkadTenor(detail ? String(detail.tenor) : '');
+        setAkadSatuanTenor(detail ? detail.satuanTenor : 'BULAN');
+        setAkadMetodeJasa(detail && detail.metodeJasa !== 'CUSTOM' ? detail.metodeJasa : 'FLAT');
+        setAkadPersentaseJasa(detail ? String(detail.persentaseJasa) : '');
+        setAkadKeterangan('');
+        setAkadError(null);
+        setAkadOutstandingJasa(null);
+        (0, PinjamanService_1.getOutstandingPiutangJasa)(pinjamanId).then(setAkadOutstandingJasa);
+        setAkadModalOpen(true);
+    };
+    const validasiAkadLaluKonfirmasi = () => {
+        // RC-S82 §E — parsing KETAT ('12abc' / '1.5abc' ditolak). Validasi
+        // service tetap berjalan sebagai lapisan kedua.
+        if (akadValidasiLive.ok === false) {
+            setAkadError(akadValidasiLive.error);
+            return;
+        }
+        setAkadError(null);
+        setAkadDraft(akadValidasiLive.draft);
+        // §9: "Tampilkan confirmation dialog. Jelaskan bahwa akad ulang
+        // akan membuat/memperbarui akad pinjaman ... Jangan langsung
+        // menjalankan aksi hanya karena tombol ditekan."
+        setAkadKonfirmasiOpen(true);
+    };
+    const submitAkadUlang = async () => {
+        if (!currentUser || !akadDraft)
+            return;
+        setProcessing(true);
+        try {
+            await (0, PinjamanService_1.akadUlangPinjaman)({
+                pinjamanId,
+                tanggal: akadDraft.tanggal,
+                tenorBaru: akadDraft.tenor,
+                satuanTenorBaru: akadDraft.satuanTenor,
+                metodeJasaBaru: akadDraft.metodeJasa,
+                persentaseJasaBaru: akadDraft.persentaseJasa,
+                keterangan: akadDraft.keterangan,
+                actingUserId: currentUser.id,
+            });
+            setAkadDraft(null);
+            setAkadKonfirmasiOpen(false);
+            setAkadModalOpen(false);
+            await load();
+            await loadRiwayatAkad();
+            (0, useNotifyStore_1.notify)('Berhasil', 'Akad ulang pinjaman berhasil disimpan — jadwal angsuran tersisa sudah disusun ulang.');
+        }
+        catch (e) {
+            setAkadKonfirmasiOpen(false);
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProcessing(false);
+        }
+    };
+    const openPay = (item) => {
+        const sisa = item.total - item.pokokTerbayar - item.jasaTerbayar;
+        setPayNominal(sisa.toString());
+        setPayModal(item);
+    };
+    const submitPay = async () => {
+        if (!payModal || !currentUser)
+            return;
+        const nominal = parseInt(payNominal, 10);
+        if (isNaN(nominal) || nominal <= 0) {
+            (0, useNotifyStore_1.notify)('Nominal tidak valid');
+            return;
+        }
+        setProcessing(true);
+        try {
+            await (0, PinjamanService_1.bayarAngsuran)({
+                pinjamanId,
+                jadwalId: payModal.id,
+                tanggal: (0, tanggal_1.getTanggalLokalHariIni)(),
+                nominal,
+                sumberDana: 'KAS',
+                createdBy: currentUser.id,
+            });
+            setPayModal(null);
+            await load();
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProcessing(false);
+        }
+    };
+    if (loading) {
+        return ((0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.center, children: (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, {}) }));
+    }
+    if (notFound || !detail) {
+        return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.center, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "alert-circle-outline", size: 32, color: colors_1.colors.textMuted }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.notFoundText, children: "Pinjaman tidak ditemukan. Data mungkin sudah dihapus atau ID tidak valid." }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.notFoundButton, onPress: () => navigation.goBack(), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.notFoundButtonText, children: "Kembali" }) })] }));
+    }
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.ScrollView, { keyboardShouldPersistTaps: "handled", style: styles.container, contentContainerStyle: { padding: 16 }, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.title, children: detail.nomorPinjaman }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.sub, children: [detail.namaAnggota, " (", detail.nomorAnggota, ")"] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.card, children: [(0, jsx_runtime_1.jsx)(Row, { label: "Jumlah Pinjaman", value: (0, money_1.formatRupiah)(detail.jumlahPinjaman) }), (0, jsx_runtime_1.jsx)(Row, { label: "Tenor", value: `${detail.tenor} ${detail.satuanTenor.toLowerCase()}` }), (0, jsx_runtime_1.jsx)(Row, { label: "Metode Jasa", value: detail.metodeJasa }), (0, jsx_runtime_1.jsx)(Row, { label: "Persentase Jasa", value: `${detail.persentaseJasa}% / periode` }), (0, jsx_runtime_1.jsx)(Row, { label: "Status", value: detail.status, bold: true })] }), (0, jsx_runtime_1.jsx)(PenyelesaianPinjamanCard_1.default, { pinjamanId: pinjamanId, statusPinjaman: detail.status, tanggalPinjaman: detail.tanggal, penyelesaian: detail.penyelesaian, onBerubah: load }), detail.metodeJasa === 'CUSTOM' && (detail.status === 'DIAJUKAN' || detail.status === 'DISETUJUI') && ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.actionButton, styles.actionButtonSecondary], onPress: () => navigation.navigate('PinjamanJadwalCustom', { pinjamanId }), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.actionButtonSecondaryText, children: jadwal.length > 0 ? 'Ubah Jadwal Custom' : 'Susun Jadwal Custom' }) })), (detail.status === 'DIAJUKAN' || detail.status === 'DISETUJUI') && ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.actionButton, styles.actionButtonSecondary], onPress: () => navigation.navigate('PinjamanForm', { pinjamanId }), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.actionButtonSecondaryText, children: "Edit Pinjaman" }) })), (detail.status === 'DIAJUKAN' || detail.status === 'DISETUJUI') && ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.actionButton, styles.actionButtonDanger], onPress: () => setBatalkanPinjamanModalOpen(true), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.actionButtonDangerText, children: "Batalkan Pinjaman" }) })), (detail.status === 'DIAJUKAN' || detail.status === 'DISETUJUI') && ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.actionButton, detail.metodeJasa === 'CUSTOM' && jadwal.length === 0 && styles.disabled], onPress: bukaCairkanBaru, disabled: processing || (detail.metodeJasa === 'CUSTOM' && jadwal.length === 0), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.actionButtonText, children: detail.metodeJasa === 'CUSTOM' && jadwal.length === 0
+                                ? 'Susun Jadwal Custom Dulu'
+                                : 'Cairkan Pinjaman' }) })), akadAwal && akadAwal.sifat !== 'TIDAK_TERSEDIA' && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadSection, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadSectionTitleWrap, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "document-text-outline", size: 18, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadSectionTitle, children: 'Akad & Dokumen' })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadBlok, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadSectionHeader, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadBlokJudul, children: "Akad Awal" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.statusPill, akadAwal.berlaku ? styles.statusPillBerlaku : styles.statusPillHistoris], children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.statusPillText, akadAwal.berlaku ? styles.statusPillTextBerlaku : styles.statusPillTextHistoris], children: akadAwal.statusLabel }) })] }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.akadBlokMeta, children: [(0, AkadUlangPresentasi_1.formatTanggalPanjang)(detail.tanggal), " \u00B7 ", akadAwal.tenor, " \u00B7 ", akadAwal.jasa] }), (0, jsx_runtime_1.jsx)(DokumenAkadExportButton_1.default, { pinjamanId: pinjamanId, dokumen: { jenis: 'AWAL' }, label: "Export Perjanjian Pinjaman" }), pengurusKosong.length > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.pengurusPeringatan, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "alert-circle-outline", size: 16, color: colors_1.colors.warning }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pengurusPeringatanText, children: [pengurusKosong.map((j) => KoperasiMasterService_1.LABEL_JABATAN_PENGURUS[j]).join(', '), " belum ditetapkan pada tanggal akad \u2014 nama penanda tangan koperasi akan dicetak kosong. Lengkapi di menu Data \u203A Pengurus."] })] })), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadExportHint, children: akadAwal.sifat === 'BELUM_DICAIRKAN'
+                                            ? 'Cetak perjanjian ini dan tandatangani bersama anggota (anggota di atas meterai) sebelum pinjaman dicairkan.'
+                                            : riwayatAkad.length > 0
+                                                ? 'Salinan akad awal untuk arsip — sudah digantikan akad ulang.'
+                                                : 'Akad yang berlaku saat ini.' })] }), (detail.status === 'AKTIF' || riwayatAkad.length > 0) && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.akadBlok, styles.akadBlokPemisah], children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadSectionHeader, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadBlokJudul, children: "Akad Ulang" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.statusPill, riwayatAkad.length > 0 ? styles.statusPillBerlaku : styles.statusPillHistoris], children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.statusPillText, riwayatAkad.length > 0 ? styles.statusPillTextBerlaku : styles.statusPillTextHistoris], children: riwayatAkad.length > 0 ? `${riwayatAkad.length}× akad ulang` : 'Belum pernah' }) })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadSectionDesc, children: "Menyusun ulang syarat pinjaman atas sisa pokok. Jadwal lama tetap tersimpan sebagai histori." }), detail.status === 'AKTIF' && ((0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: styles.akadPrimaryButton, onPress: bukaAkadUlang, accessibilityRole: "button", accessibilityLabel: "Akad Ulang", children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "create-outline", size: 18, color: colors_1.colors.white }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadPrimaryButtonText, children: "Akad Ulang" })] })), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadExportWrap, children: [(0, jsx_runtime_1.jsx)(DokumenAkadExportButton_1.default, { pinjamanId: pinjamanId, dokumen: { jenis: 'ULANG', akadUlangId: riwayatAkad[0]?.id ?? null }, label: riwayatAkad.length > 1 ? 'Export Dokumen Akad Ulang Terbaru' : 'Export Dokumen Akad Ulang' }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadExportHint, children: riwayatAkad.length > 0
+                                                    ? `Dokumen akad ulang #${nomorUrutAkad.get(riwayatAkad[0].id) ?? riwayatAkad.length} · ${(0, AkadUlangPresentasi_1.formatTanggalPanjang)(riwayatAkad[0].tanggal)}`
+                                                    : 'Tersedia setelah akad ulang pertama disimpan.' })] }), riwayatAkad.length > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: styles.riwayatAkadToggle, onPress: () => setRiwayatAkadOpen((v) => !v), accessibilityRole: "button", accessibilityState: { expanded: riwayatAkadOpen }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.riwayatAkadLinkText, children: ["Riwayat Akad Ulang (", riwayatAkad.length, ")"] }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: riwayatAkadOpen ? 'chevron-up' : 'chevron-down', size: 18, color: colors_1.colors.primary })] })), riwayatAkadOpen &&
+                                        riwayatAkad.map((r) => {
+                                            const statusEvent = (0, AkadUlangPresentasi_1.tentukanStatusEventAkadUlang)(r.id, jadwal);
+                                            const berlaku = statusEvent === 'BERLAKU';
+                                            const jadwalEvent = (0, AkadUlangPresentasi_1.jadwalMilikAkadUlang)(jadwal, r.id);
+                                            const akhir = (0, AkadUlangPresentasi_1.jatuhTempoAkhir)(jadwalEvent);
+                                            return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.riwayatAkadCard, berlaku && styles.riwayatAkadCardBerlaku], children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.riwayatAkadHeader, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.riwayatAkadJudul, children: ["AKAD ULANG #", nomorUrutAkad.get(r.id) ?? '-'] }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.statusPill, berlaku ? styles.statusPillBerlaku : styles.statusPillHistoris], children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.statusPillText, berlaku ? styles.statusPillTextBerlaku : styles.statusPillTextHistoris], children: (0, AkadUlangPresentasi_1.labelStatusEventAkadUlang)(statusEvent) }) })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.riwayatAkadTanggal, children: (0, AkadUlangPresentasi_1.formatTanggalPanjang)(r.tanggal) }), (0, jsx_runtime_1.jsx)(PerbandinganRow, { label: "Tenor", lama: (0, AkadUlangPresentasi_1.formatTenor)(r.tenorLama, r.satuanTenorLama), baru: (0, AkadUlangPresentasi_1.formatTenor)(r.tenorBaru, r.satuanTenorBaru) }), (0, jsx_runtime_1.jsx)(PerbandinganRow, { label: "Metode", lama: (0, AkadUlangPresentasi_1.labelMetodeJasa)(r.metodeJasaLama), baru: (0, AkadUlangPresentasi_1.labelMetodeJasa)(r.metodeJasaBaru) }), (0, jsx_runtime_1.jsx)(PerbandinganRow, { label: "Jasa", lama: (0, AkadUlangPresentasi_1.formatPersenJasa)(r.persentaseJasaLama), baru: (0, AkadUlangPresentasi_1.formatPersenJasa)(r.persentaseJasaBaru) }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.riwayatAkadDivider }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Sisa pokok saat akad", value: (0, money_1.formatRupiah)(r.sisaPokok), strong: true }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Jumlah periode akad baru", value: jadwalEvent.length > 0 ? `${jadwalEvent.length} periode` : '-' }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Jatuh tempo akhir", value: (0, AkadUlangPresentasi_1.formatTanggalPanjang)(akhir) }), r.keterangan ? (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.riwayatAkadKeterangan, children: ["Keterangan: ", r.keterangan] }) : null, (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.riwayatAkadAksi, children: (0, jsx_runtime_1.jsx)(DokumenAkadExportButton_1.default, { pinjamanId: pinjamanId, dokumen: { jenis: 'ULANG', akadUlangId: r.id }, label: "Export Dokumen Akad Ulang", variant: "compact" }) })] }, r.id));
+                                        })] }))] })), (0, jsx_runtime_1.jsx)(SeksiJadwal, { judul: "Angsuran Aktif", keterangan: "Angsuran berjalan dari akad asli pinjaman ini.", items: kelompokJadwal.aktif, bagian: "AKTIF", detail: detail, koperasi: koperasi, periodeRelatif: periodeRelatif, bolehBayar: detail.status === 'AKTIF', onBayar: openPay, emptyText: kelompokJadwal.akadUlang.length > 0
+                            ? 'Seluruh angsuran akad asli sudah digantikan oleh akad ulang — lihat bagian Angsuran Akad Ulang di bawah.'
+                            : 'Belum ada jadwal angsuran. Susun jadwal terlebih dahulu sebelum pencairan.' }), kelompokJadwal.akadUlang.length > 0 && ((0, jsx_runtime_1.jsx)(SeksiJadwal, { judul: "Angsuran Akad Ulang", keterangan: "Angsuran berjalan yang disusun ulang lewat Akad Ulang. Inilah kewajiban yang berlaku saat ini.", items: kelompokJadwal.akadUlang, bagian: "AKAD_ULANG", detail: detail, koperasi: koperasi, periodeRelatif: periodeRelatif, bolehBayar: detail.status === 'AKTIF', onBayar: openPay, emptyText: "" })), kelompokJadwal.restrukturisasi.length > 0 && ((0, jsx_runtime_1.jsx)(SeksiJadwal, { judul: "Restrukturisasi (Histori)", keterangan: "Jadwal LAMA yang sudah digantikan oleh akad ulang. Disimpan untuk audit \u2014 tidak ditagih dan tidak ikut dalam export Angsuran Aktif.", items: kelompokJadwal.restrukturisasi, bagian: "RESTRUKTURISASI", detail: detail, koperasi: koperasi, periodeRelatif: periodeRelatif, bolehBayar: false, onBayar: openPay, emptyText: "", redup: true })), kelompokJadwal.dihapusbuku.length > 0 && ((0, jsx_runtime_1.jsx)(SeksiJadwal, { judul: "Hapus Buku (Histori)", keterangan: "Angsuran yang piutangnya sudah dihapusbukukan. Disimpan untuk audit.", items: kelompokJadwal.dihapusbuku, bagian: "RESTRUKTURISASI", detail: detail, koperasi: koperasi, periodeRelatif: periodeRelatif, bolehBayar: false, onBayar: openPay, emptyText: "", redup: true }))] }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: !!payModal, transparent: true, animationType: "fade", onRequestClose: () => setPayModal(null), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.modalOverlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: styles.modalScrollContent, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalCard, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.modalTitle, children: ["Bayar ", payModal ? labelNomorAngsuran(payModal, periodeRelatif.get(payModal.id)).utama : ''] }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: styles.modalInput, keyboardType: "number-pad", value: payNominal, onChangeText: setPayNominal }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalCancel, onPress: () => setPayModal(null), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalCancelText, children: "Batal" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalSubmit, onPress: submitPay, disabled: processing, children: processing ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSubmitText, children: "Bayar" }) })] })] }) }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: konfirmasiAkadOpen, transparent: true, animationType: "fade", onRequestClose: () => setKonfirmasiAkadOpen(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.modalOverlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: styles.modalScrollContent, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.akadKonfirmasiIkon, children: (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "document-text-outline", size: 26, color: colors_1.colors.primary }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadKonfirmasiLangkah, children: "Langkah 1 dari 2" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.modalTitle, styles.akadKonfirmasiJudul], children: "Konfirmasi Tanda Tangan Akad" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadKonfirmasiDesk, children: "Dana hanya boleh dicairkan setelah Perjanjian Pinjaman ditandatangani oleh kedua pihak." }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadKonfirmasiRingkas, children: [(0, jsx_runtime_1.jsx)(BarisKonfirmasi, { label: "No. Pinjaman", nilai: detail.nomorPinjaman }), (0, jsx_runtime_1.jsx)(BarisKonfirmasi, { pemisah: true, label: "No. Perjanjian", nilai: (0, AkadUlangPresentasi_1.buatNomorDokumenAkadAwal)(detail.nomorPinjaman, detail.tanggal) }), (0, jsx_runtime_1.jsx)(BarisKonfirmasi, { pemisah: true, label: "Peminjam", nilai: detail.namaAnggota }), (0, jsx_runtime_1.jsx)(BarisKonfirmasi, { pemisah: true, label: "Jumlah Pinjaman", nilai: (0, money_1.formatRupiah)(detail.jumlahPinjaman), tebal: true })] }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.akadKonfirmasiCek, children: [
+                                        'Perjanjian Pinjaman sudah dicetak',
+                                        'Anggota sudah menandatangani di atas meterai Rp10.000',
+                                        'Ketua koperasi sudah menandatangani',
+                                    ].map((t) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadKonfirmasiCekBaris, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "ellipse-outline", size: 8, color: colors_1.colors.textMuted, style: { marginTop: 5 } }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadKonfirmasiCekTeks, children: t })] }, t))) }), (0, jsx_runtime_1.jsxs)(react_native_1.Pressable, { style: [styles.akadPernyataan, akadDitandatangani && styles.akadPernyataanAktif], onPress: () => setAkadDitandatangani((v) => !v), accessibilityRole: "checkbox", accessibilityState: { checked: akadDitandatangani }, accessibilityLabel: "Akad sudah ditandatangani kedua pihak", children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: akadDitandatangani ? 'checkbox' : 'square-outline', size: 22, color: akadDitandatangani ? colors_1.colors.primary : colors_1.colors.textMuted }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadPernyataanTeks, children: "Saya menyatakan akad pinjaman ini sudah ditandatangani oleh anggota dan koperasi." })] }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.akadKonfirmasiExport, children: (0, jsx_runtime_1.jsx)(DokumenAkadExportButton_1.default, { pinjamanId: pinjamanId, dokumen: { jenis: 'AWAL' }, label: "Cetak Perjanjian Pinjaman" }) }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalCancel, onPress: () => setKonfirmasiAkadOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalCancelText, children: "Belum" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.modalSubmit, !akadDitandatangani && styles.disabled], onPress: lanjutCairkanSetelahAkad, disabled: !akadDitandatangani, accessibilityState: { disabled: !akadDitandatangani }, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSubmitText, children: "Sudah, Lanjutkan" }) })] })] }) }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: cairkanModalOpen, transparent: true, animationType: "fade", onRequestClose: () => setCairkanModalOpen(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.modalOverlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: styles.modalScrollContent, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalCard, children: [cairkanMode === 'BARU' && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadKonfirmasiLangkah, children: "Langkah 2 dari 2" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalTitle, children: cairkanMode === 'BARU' ? 'Cairkan Pinjaman' : 'Edit Pencairan — Ganti Sumber Dana' }), cairkanMode === 'BARU' && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadTerkonfirmasi, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "checkmark-circle", size: 16, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.akadTerkonfirmasiTeks, children: ["Akad sudah ditandatangani \u00B7 ", (0, money_1.formatRupiah)(detail.jumlahPinjaman)] })] })), (0, jsx_runtime_1.jsx)(RekeningPicker_1.default, { label: "Sumber Dana / Rekening", value: rekening, onChange: setRekening }), cairkanMode === 'EDIT' && ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalLabel, children: "Alasan Koreksi *" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.modalInputMultiline], value: alasanEdit, onChangeText: setAlasanEdit, multiline: true, placeholder: "Mis. salah pilih rekening bank" })] })), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalCancel, onPress: () => setCairkanModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalCancelText, children: "Batal" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.modalSubmit, (!rekening || processing) && styles.disabled], onPress: submitCairkan, disabled: !rekening || processing, children: processing ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSubmitText, children: cairkanMode === 'BARU' ? 'Cairkan' : 'Simpan' }) })] })] }) }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: batalkanModalOpen, transparent: true, animationType: "fade", onRequestClose: () => setBatalkanModalOpen(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.modalOverlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: styles.modalScrollContent, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalTitle, children: "Batalkan Pencairan" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSub, children: "Jurnal pencairan akan di-reversal dan pinjaman kembali ke status Disetujui, siap dicairkan ulang. Hanya bisa dilakukan karena belum ada angsuran yang dibayarkan." }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.modalInputMultiline], value: alasanBatal, onChangeText: setAlasanBatal, multiline: true, placeholder: "Alasan pembatalan (wajib diisi)" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalCancel, onPress: () => setBatalkanModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalCancelText, children: "Tutup" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.modalSubmitDanger, (!alasanBatal.trim() || processing) && styles.disabled], onPress: submitBatalkan, disabled: !alasanBatal.trim() || processing, children: processing ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSubmitText, children: "Batalkan" }) })] })] }) }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: batalkanPinjamanModalOpen, transparent: true, animationType: "fade", onRequestClose: () => setBatalkanPinjamanModalOpen(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.modalOverlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: styles.modalScrollContent, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalCard, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalTitle, children: "Batalkan Pinjaman" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSub, children: "Pengajuan pinjaman ini akan dibatalkan. Belum ada jurnal, piutang, atau pendapatan jasa yang tercipta karena pinjaman belum pernah dicairkan \u2014 tidak ada dampak akuntansi." }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.modalInputMultiline], value: alasanBatalPinjaman, onChangeText: setAlasanBatalPinjaman, multiline: true, placeholder: "Alasan pembatalan (wajib diisi)" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.modalActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.modalCancel, onPress: () => setBatalkanPinjamanModalOpen(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalCancelText, children: "Tutup" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.modalSubmitDanger, (!alasanBatalPinjaman.trim() || processing) && styles.disabled], onPress: submitBatalkanPinjaman, disabled: !alasanBatalPinjaman.trim() || processing, children: processing ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.modalSubmitText, children: "Batalkan" }) })] })] }) }) }) }), (0, jsx_runtime_1.jsxs)(AkadSheet, { visible: akadModalOpen, onClose: () => setAkadModalOpen(false), judul: "Akad Ulang Pinjaman", subjudul: "Menyusun kembali syarat pinjaman untuk sisa pokok. Jadwal lama tetap tersimpan sebagai histori.", footer: (0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [akadError && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetError, children: akadError }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.sheetSecondary, onPress: () => setAkadModalOpen(false), accessibilityRole: "button", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetSecondaryText, children: "Batal" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.sheetPrimary, (!akadValidasiLive.ok || processing) && styles.disabled], onPress: validasiAkadLaluKonfirmasi, disabled: processing, accessibilityRole: "button", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetPrimaryText, children: "Simpan Akad Ulang" }) })] })] }), children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadSeksiJudul, children: "Posisi Saat Ini" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadInfoBox, children: [(0, jsx_runtime_1.jsx)(InfoRow, { label: "Status Pinjaman", value: detail?.status ?? '-' }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Sisa Pokok Akad Ulang", value: (0, money_1.formatRupiah)(ringkasanAkad.sisaPokok), strong: true }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Jumlah Jadwal Current", value: `${ringkasanAkad.jumlahJadwalCurrent} periode` }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.akadInfoDivider }), (0, jsx_runtime_1.jsx)(InfoRow, { label: "Piutang Jasa Telah Diakui", value: akadOutstandingJasa === null ? '…' : (0, money_1.formatRupiah)(akadOutstandingJasa) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadHelper, children: "Informasi historis/audit \u2014 bukan tambahan pokok akad baru." })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadSeksiJudul, children: "Akad Baru" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Tanggal Akad Ulang *" }), (0, jsx_runtime_1.jsx)(DatePicker_1.default, { value: akadTanggal, onChange: setAkadTanggal, maximumDate: (0, DevClockService_1.getWaktuSekarang)() }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Tenor Baru *" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tenorRow, children: [(0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.tenorInput], keyboardType: "number-pad", value: akadTenor, onChangeText: setAkadTenor, placeholder: "Mis. 12" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.tenorSuffix, children: (0, AkadUlangPresentasi_1.labelSatuanTenor)(akadSatuanTenor) })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Satuan Tenor" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.segment, children: ['HARI', 'MINGGU', 'BULAN'].map((sat) => {
+                            const aktif = akadSatuanTenor === sat;
+                            return ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.segmentItem, aktif && styles.segmentItemActive], onPress: () => setAkadSatuanTenor(sat), accessibilityRole: "radio", accessibilityState: { selected: aktif }, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.segmentText, aktif && styles.segmentTextActive], children: (0, AkadUlangPresentasi_1.labelSatuanTenor)(sat) }) }, sat));
+                        }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Metode Jasa Baru" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.segment, children: ['FLAT', 'MENURUN', 'EFEKTIF'].map((m) => {
+                            const aktif = akadMetodeJasa === m;
+                            return ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.segmentItem, aktif && styles.segmentItemActive], onPress: () => setAkadMetodeJasa(m), accessibilityRole: "radio", accessibilityState: { selected: aktif }, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.segmentText, aktif && styles.segmentTextActive], children: (0, AkadUlangPresentasi_1.labelMetodeJasa)(m) }) }, m));
+                        }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Persentase Jasa Baru *" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tenorRow, children: [(0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.tenorInput], keyboardType: "decimal-pad", value: akadPersentaseJasa, onChangeText: setAkadPersentaseJasa, placeholder: "Mis. 1,5" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.tenorSuffix, children: "% / periode" })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: "Keterangan" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [styles.modalInput, styles.modalInputMultiline], value: akadKeterangan, onChangeText: setAkadKeterangan, multiline: true, placeholder: "Opsional \u2014 alasan/berita acara akad ulang" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.akadSeksiJudul, styles.akadSeksiJudulJarak], children: "Preview Perubahan" }), akadValidasiLive.ok ? ((0, jsx_runtime_1.jsx)(PreviewPerubahanAkad, { detail: detail, draft: akadValidasiLive.draft, sisaPokok: ringkasanAkad.sisaPokok })) : ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadPreviewKosongBox, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "information-circle-outline", size: 16, color: colors_1.colors.textMuted }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadPreviewKosong, children: akadValidasiLive.error })] }))] }), (0, jsx_runtime_1.jsxs)(AkadSheet, { visible: akadKonfirmasiOpen, onClose: () => !processing && setAkadKonfirmasiOpen(false), judul: "Konfirmasi Akad Ulang", subjudul: "Akad ulang akan mengganti syarat akad berdasarkan sisa pokok saat ini.", footer: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetActions, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.sheetSecondary, onPress: () => setAkadKonfirmasiOpen(false), disabled: processing, accessibilityRole: "button", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetSecondaryText, children: "Kembali" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.sheetPrimary, (!akadDraft || processing) && styles.disabled], onPress: submitAkadUlang, disabled: !akadDraft || processing, accessibilityRole: "button", children: processing ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetPrimaryText, children: "Ya, Simpan Akad Ulang" }) })] }), children: [akadDraft && (0, jsx_runtime_1.jsx)(PreviewPerubahanAkad, { detail: detail, draft: akadDraft, sisaPokok: ringkasanAkad.sisaPokok }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadCatatanBox, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "archive-outline", size: 16, color: colors_1.colors.textMuted }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadCatatan, children: "Jadwal lama tetap tersimpan sebagai histori dan tidak menjadi kewajiban berjalan." })] })] })] }));
+}
+function Row({ label, value, bold }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.row, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.rowLabel, children: label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.rowValue, bold && styles.bold], children: value })] }));
+}
+/**
+ * RC-S82 (revisi UX) — kerangka bottom sheet untuk alur Akad Ulang.
+ * Header dan footer TETAP; hanya body yang bergulir, dan tinggi sheet
+ * dibatasi 92% layar di SATU tempat (wrapper), sehingga latar sheet
+ * selalu membungkus seluruh isi — tidak ada konten yang "bocor" ke
+ * backdrop. Tap di backdrop menutup sheet (sama dengan tombol ×).
+ */
+function AkadSheet({ visible, onClose, judul, subjudul, footer, children, }) {
+    return ((0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: visible, transparent: true, animationType: "slide", onRequestClose: onClose, statusBarTranslucent: true, children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetBackdrop, children: [(0, jsx_runtime_1.jsx)(react_native_1.Pressable, { style: react_native_1.StyleSheet.absoluteFill, onPress: onClose, accessibilityLabel: "Tutup" }), (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: styles.sheetWrap, children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheet, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.sheetHandle }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetHeader, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetHeaderText, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetTitle, children: judul }), subjudul ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetSub, children: subjudul }) : null] }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.sheetClose, onPress: onClose, accessibilityRole: "button", accessibilityLabel: "Tutup", children: (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "close", size: 22, color: colors_1.colors.textMuted }) })] }), (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { style: styles.sheetBody, contentContainerStyle: styles.sheetBodyContent, keyboardShouldPersistTaps: "handled", showsVerticalScrollIndicator: true, children: children }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.sheetFooter, children: footer })] }) })] }) }));
+}
+/** RC-S82 — baris label/nilai ringkas untuk kartu posisi & riwayat. */
+function InfoRow({ label, value, strong }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.akadInfoRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadInfoLabel, children: label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.akadInfoValue, strong && styles.akadInfoValueStrong], children: value })] }));
+}
+/** RC-S82 — baris "lama → baru" pada kartu riwayat. */
+function PerbandinganRow({ label, lama, baru }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.perbandinganRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.perbandinganLabel, children: label }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.perbandinganNilai, children: [lama, " ", (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.perbandinganPanah, children: "\u2192" }), " ", (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.perbandinganBaru, children: baru })] })] }));
+}
+/**
+ * RC-S82 §C/§D — tabel AKAD LAMA → AKAD BARU. Nilai "baru" berasal dari
+ * `draft` (hasil parser yang sama dengan payload service); nilai "lama"
+ * dari data pinjaman yang sedang berlaku. Dipakai di preview modal DAN
+ * dialog konfirmasi supaya keduanya identik.
+ */
+function PreviewPerubahanAkad({ detail, draft, sisaPokok, }) {
+    const baris = [
+        {
+            label: 'Tenor',
+            lama: detail ? (0, AkadUlangPresentasi_1.formatTenor)(detail.tenor, detail.satuanTenor) : '-',
+            baru: (0, AkadUlangPresentasi_1.formatTenor)(draft.tenor, draft.satuanTenor),
+        },
+        { label: 'Metode Jasa', lama: detail ? (0, AkadUlangPresentasi_1.labelMetodeJasa)(detail.metodeJasa) : '-', baru: (0, AkadUlangPresentasi_1.labelMetodeJasa)(draft.metodeJasa) },
+        {
+            label: 'Persentase Jasa',
+            lama: detail ? (0, AkadUlangPresentasi_1.formatPersenJasa)(detail.persentaseJasa) : '-',
+            baru: (0, AkadUlangPresentasi_1.formatPersenJasa)(draft.persentaseJasa),
+        },
+        { label: 'Sisa Pokok', lama: (0, money_1.formatRupiah)(sisaPokok), baru: (0, money_1.formatRupiah)(sisaPokok) },
+        {
+            label: 'Jatuh Tempo',
+            lama: (0, AkadUlangPresentasi_1.formatTanggalPanjang)(detail?.tanggalJatuhTempo ?? null),
+            baru: (0, AkadUlangPresentasi_1.formatTanggalPanjang)(jatuhTempoBaruPreview(draft)),
+        },
+    ];
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.previewBox, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.previewRow, styles.previewHeader], children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.previewLabel, styles.previewHeaderText], children: " " }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.previewCell, styles.previewHeaderText], children: "AKAD LAMA" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.previewCell, styles.previewHeaderText], children: "AKAD BARU" })] }), baris.map((b) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.previewRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.previewLabel, children: b.label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.previewCell, children: b.lama }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.previewCell, b.lama !== b.baru && styles.previewCellBerubah], children: b.baru })] }, b.label))), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.previewTanggal, children: ["Tanggal akad ulang: ", (0, AkadUlangPresentasi_1.formatTanggalPanjang)(draft.tanggal)] })] }));
+}
+/**
+ * REQUIREMENT 6 — satu seksi jadwal angsuran (judul, keterangan, tombol
+ * export bagian ini, daftar baris). Dibuat sebagai komponen level-modul
+ * (BUKAN fungsi di dalam PinjamanDetailScreen) supaya identitas tipenya
+ * stabil dan React tidak me-mount ulang seluruh daftar setiap kali
+ * layar induk render.
+ */
+function SeksiJadwal({ judul, keterangan, items, bagian, detail, koperasi, bolehBayar, onBayar, emptyText, redup, periodeRelatif, }) {
+    const totalSisa = items.reduce((a, j) => a + Math.max(0, j.total - j.pokokTerbayar - j.jasaTerbayar), 0);
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.seksiJadwal, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.seksiHeader, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sectionLabel, children: judul }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.seksiJumlah, children: [items.length, " periode"] })] }), !!keterangan && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.seksiKeterangan, children: keterangan }), items.length > 0 && ((0, jsx_runtime_1.jsx)(ExportButton_1.default, { label: `Export ${judul}`, data: koperasi && detail
+                    ? (0, ReportTableBuilders_1.buildAngsuranExport)({ namaKoperasi: koperasi.nama, standarAkuntansi: koperasi.standarAkuntansi }, detail.nomorPinjaman, detail.namaAnggota, items, bagian)
+                    : null })), items.length === 0 ? ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.seksiEmpty, children: emptyText })) : (items.map((item) => {
+                const sisa = item.total - item.pokokTerbayar - item.jasaTerbayar;
+                const nomor = labelNomorAngsuran(item, periodeRelatif.get(item.id));
+                return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.jadwalRow, redup && styles.jadwalRowRedup], children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jadwalNomor, children: nomor.utama }), nomor.internal ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.jadwalInternal, children: nomor.internal }) : null, (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.jadwalSub, children: ["Jatuh tempo ", item.tanggalJatuhTempo] }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.jadwalSub, children: ["Pokok ", (0, money_1.formatRupiah)(item.pokok), " \u00B7 Jasa ", (0, money_1.formatRupiah)(item.jasa), item.denda > 0 ? ` · Denda ${(0, money_1.formatRupiah)(item.denda)}` : ''] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.jadwalStatus, { color: STATUS_ANGSURAN_COLOR[item.status] ?? colors_1.colors.textMuted }], children: item.status.replace(/_/g, ' ') })] }), bolehBayar && item.status !== 'LUNAS' && ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: styles.payButton, onPress: () => onBayar(item), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.payButtonText, children: "Bayar" }) })), item.status === 'LUNAS' && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.lunasText, children: "Lunas" }), item.status !== 'LUNAS' && (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.sisaText, children: ["Sisa ", (0, money_1.formatRupiah)(sisa)] })] }, item.id));
+            })), items.length > 0 && bolehBayar && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.seksiTotalRow, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.seksiTotalLabel, children: ["Total Sisa ", judul] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.seksiTotalValue, children: (0, money_1.formatRupiah)(totalSisa) })] }))] }));
+}
+function BarisKonfirmasi({ label, nilai, tebal, pemisah }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.akadKonfirmasiBaris, pemisah && styles.akadKonfirmasiBarisPemisah], children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.akadKonfirmasiLabel, children: label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.akadKonfirmasiNilai, tebal && { fontWeight: '800' }], children: nilai })] }));
+}
+const styles = react_native_1.StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors_1.colors.background },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: colors_1.spacing.xl },
+    notFoundText: { fontSize: 13, color: colors_1.colors.textMuted, textAlign: 'center', marginTop: colors_1.spacing.sm, marginBottom: colors_1.spacing.lg, lineHeight: 18 },
+    notFoundButton: { paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10, borderRadius: colors_1.radius.sm, borderWidth: 1, borderColor: colors_1.colors.border },
+    notFoundButtonText: { color: colors_1.colors.text, fontWeight: '600' },
+    title: { fontSize: 20, fontWeight: '700', color: colors_1.colors.text },
+    sub: { fontSize: 13, color: colors_1.colors.textMuted, marginTop: 2, marginBottom: colors_1.spacing.lg },
+    card: { backgroundColor: colors_1.colors.surface, borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.md, padding: colors_1.spacing.md, marginBottom: colors_1.spacing.md },
+    row: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 4 },
+    rowLabel: { color: colors_1.colors.textMuted },
+    rowValue: { color: colors_1.colors.text },
+    bold: { fontWeight: '700' },
+    actionButton: { backgroundColor: colors_1.colors.primary, borderRadius: colors_1.radius.sm, paddingVertical: 12, alignItems: 'center', marginBottom: colors_1.spacing.lg },
+    actionButtonText: { color: colors_1.colors.white, fontWeight: '700' },
+    actionButtonSecondary: { backgroundColor: colors_1.colors.surface, borderWidth: 1, borderColor: colors_1.colors.primary },
+    actionButtonSecondaryText: { color: colors_1.colors.primary, fontWeight: '700' },
+    pencairanActionRow: { flexDirection: 'row', gap: 8, marginBottom: colors_1.spacing.lg },
+    actionButtonDanger: { backgroundColor: colors_1.colors.surface, borderWidth: 1, borderColor: colors_1.colors.danger },
+    actionButtonDangerText: { color: colors_1.colors.danger, fontWeight: '700' },
+    disabled: { opacity: 0.5 },
+    sectionLabel: { fontSize: 14, fontWeight: '700', color: colors_1.colors.primary, marginBottom: colors_1.spacing.sm },
+    jadwalRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: colors_1.colors.border,
+    },
+    jadwalNomor: { fontSize: 13, fontWeight: '700', color: colors_1.colors.text },
+    jadwalSub: { fontSize: 11, color: colors_1.colors.textMuted, marginTop: 2 },
+    jadwalStatus: { fontSize: 11, fontWeight: '700', marginTop: 4 },
+    payButton: { backgroundColor: colors_1.colors.primary, paddingHorizontal: 12, paddingVertical: 8, borderRadius: colors_1.radius.sm, marginLeft: 8 },
+    payButtonText: { color: colors_1.colors.white, fontSize: 12, fontWeight: '700' },
+    lunasText: { color: colors_1.colors.primary, fontSize: 12, fontWeight: '700', marginLeft: 8 },
+    sisaText: { color: colors_1.colors.danger, fontSize: 11, marginLeft: 8 },
+    modalOverlay: { ...modal_1.modalUi.backdrop },
+    modalScrollContent: { ...modal_1.modalUi.scrollContent },
+    modalCard: { ...modal_1.modalUi.card },
+    modalTitle: { ...modal_1.modalUi.title, marginBottom: colors_1.spacing.md },
+    modalSub: { ...modal_1.modalUi.description },
+    akadInfoBox: { backgroundColor: colors_1.colors.background, borderRadius: colors_1.radius.sm, borderWidth: 1, borderColor: colors_1.colors.border, padding: colors_1.spacing.md, marginBottom: colors_1.spacing.md, gap: 4 },
+    akadInfoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 2, gap: colors_1.spacing.sm },
+    akadInfoLabel: { fontSize: 12, color: colors_1.colors.textMuted, flexShrink: 1 },
+    akadInfoValue: { fontSize: 12, fontWeight: '700', color: colors_1.colors.text, textAlign: 'right', flexShrink: 1 },
+    akadInfoValueStrong: { fontSize: 14, color: colors_1.colors.primary },
+    akadInfoDivider: { height: 1, backgroundColor: colors_1.colors.border, marginVertical: 4 },
+    akadHelper: { fontSize: 11, color: colors_1.colors.textMuted, fontStyle: 'italic', lineHeight: 15 },
+    akadSeksiJudul: { fontSize: 11, fontWeight: '800', color: colors_1.colors.primary, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: colors_1.spacing.sm, marginBottom: colors_1.spacing.xs },
+    akadPreviewKosong: { flex: 1, fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17 },
+    akadPreviewKosongBox: { flexDirection: 'row', alignItems: 'flex-start', gap: colors_1.spacing.sm, padding: colors_1.spacing.md, borderRadius: colors_1.radius.sm, borderWidth: 1, borderStyle: 'dashed', borderColor: colors_1.colors.border, backgroundColor: colors_1.colors.background },
+    akadCatatan: { flex: 1, fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17 },
+    akadCatatanBox: { flexDirection: 'row', alignItems: 'flex-start', gap: colors_1.spacing.sm, padding: colors_1.spacing.md, borderRadius: colors_1.radius.sm, backgroundColor: colors_1.colors.background, borderWidth: 1, borderColor: colors_1.colors.border },
+    akadSeksiJudulJarak: { marginTop: colors_1.spacing.lg },
+    // --- Bottom sheet Akad Ulang (header tetap / body scroll / footer tetap) ---
+    sheetBackdrop: { ...modal_1.modalUi.backdrop, justifyContent: 'flex-end' },
+    sheetWrap: { width: '100%', maxHeight: '92%' },
+    sheet: { ...modal_1.modalUi.sheet, maxHeight: '100%', padding: 0, overflow: 'hidden' },
+    sheetHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors_1.colors.border, marginTop: colors_1.spacing.sm },
+    sheetHeader: { ...modal_1.modalUi.headerRow, paddingHorizontal: colors_1.spacing.lg, paddingTop: colors_1.spacing.md, paddingBottom: colors_1.spacing.md, borderBottomWidth: 1, borderBottomColor: colors_1.colors.border },
+    sheetHeaderText: { flex: 1, minWidth: 0 },
+    sheetTitle: { ...modal_1.modalUi.title, fontSize: 17 },
+    sheetSub: { ...modal_1.modalUi.description, marginBottom: 0 },
+    sheetClose: { ...modal_1.modalUi.closeIcon, marginRight: -colors_1.spacing.sm },
+    sheetBody: { flexGrow: 0, flexShrink: 1 },
+    sheetBodyContent: { paddingHorizontal: colors_1.spacing.lg, paddingTop: colors_1.spacing.md, paddingBottom: colors_1.spacing.lg },
+    sheetFooter: { paddingHorizontal: colors_1.spacing.lg, paddingTop: colors_1.spacing.md, paddingBottom: colors_1.spacing.lg, borderTopWidth: 1, borderTopColor: colors_1.colors.border, backgroundColor: colors_1.colors.surface },
+    sheetActions: { flexDirection: 'row', gap: colors_1.spacing.sm },
+    sheetPrimary: { ...modal_1.modalUi.primaryButton, flex: 1, minWidth: 0 },
+    sheetPrimaryText: { ...modal_1.modalUi.primaryText },
+    sheetSecondary: { ...modal_1.modalUi.secondaryButton, flex: 1, minWidth: 0 },
+    sheetSecondaryText: { ...modal_1.modalUi.secondaryText },
+    sheetError: { color: colors_1.colors.danger, fontSize: 12, lineHeight: 17, marginBottom: colors_1.spacing.sm },
+    sheetLabel: { fontSize: 13, color: colors_1.colors.text, fontWeight: '600', marginBottom: colors_1.spacing.xs, marginTop: colors_1.spacing.md },
+    tenorRow: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.sm },
+    tenorInput: { flex: 1 },
+    tenorSuffix: { minWidth: 64, fontSize: 13, color: colors_1.colors.textMuted, fontWeight: '600' },
+    segment: { flexDirection: 'row', borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.sm, overflow: 'hidden' },
+    segmentItem: { flex: 1, minHeight: 42, alignItems: 'center', justifyContent: 'center', backgroundColor: colors_1.colors.surface, borderLeftWidth: 1, borderLeftColor: colors_1.colors.border },
+    segmentItemActive: { backgroundColor: colors_1.colors.primary, borderLeftColor: colors_1.colors.primary },
+    segmentText: { fontSize: 13, fontWeight: '600', color: colors_1.colors.text },
+    segmentTextActive: { color: colors_1.colors.white, fontWeight: '700' },
+    // --- Seksi Akad Ulang di layar detail ---
+    akadSection: { backgroundColor: colors_1.colors.surface, borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.md, padding: colors_1.spacing.md, marginBottom: colors_1.spacing.lg },
+    akadSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: colors_1.spacing.sm },
+    akadSectionTitleWrap: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.xs, flexShrink: 1 },
+    akadSectionTitle: { fontSize: 15, fontWeight: '800', color: colors_1.colors.text },
+    akadSectionDesc: { fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17, marginTop: colors_1.spacing.xs, marginBottom: colors_1.spacing.md },
+    akadPrimaryButton: { ...modal_1.modalUi.primaryButton, alignSelf: 'stretch' },
+    akadPrimaryButtonText: { ...modal_1.modalUi.primaryText },
+    akadExportWrap: { marginTop: colors_1.spacing.sm },
+    akadBlok: { marginTop: colors_1.spacing.md },
+    pengurusPeringatan: { flexDirection: 'row', alignItems: 'flex-start', gap: colors_1.spacing.xs, marginTop: colors_1.spacing.sm, padding: colors_1.spacing.sm, borderRadius: colors_1.radius.sm, borderWidth: 1, borderColor: colors_1.colors.warning, backgroundColor: colors_1.colors.warningBg },
+    pengurusPeringatanText: { flex: 1, fontSize: 11, color: colors_1.colors.text, lineHeight: 16 },
+    akadBlokPemisah: { marginTop: colors_1.spacing.lg, paddingTop: colors_1.spacing.md, borderTopWidth: 1, borderTopColor: colors_1.colors.border },
+    akadBlokJudul: { fontSize: 13, fontWeight: '800', color: colors_1.colors.text, letterSpacing: 0.3 },
+    akadBlokMeta: { fontSize: 12, color: colors_1.colors.textMuted, marginTop: 2, marginBottom: colors_1.spacing.sm, lineHeight: 17 },
+    akadExportHint: { fontSize: 11, color: colors_1.colors.textMuted, marginTop: colors_1.spacing.xs, textAlign: 'center' },
+    riwayatAkadToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 44, marginTop: colors_1.spacing.md, paddingTop: colors_1.spacing.sm, borderTopWidth: 1, borderTopColor: colors_1.colors.border },
+    previewBox: { borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.sm, marginBottom: colors_1.spacing.md, overflow: 'hidden' },
+    previewRow: { flexDirection: 'row', paddingVertical: 6, paddingHorizontal: colors_1.spacing.sm, borderTopWidth: 1, borderTopColor: colors_1.colors.border, gap: 6 },
+    previewHeader: { backgroundColor: colors_1.colors.primaryLight, borderTopWidth: 0 },
+    previewHeaderText: { fontSize: 10, fontWeight: '800', color: colors_1.colors.primary, letterSpacing: 0.4 },
+    previewLabel: { width: 84, fontSize: 11, color: colors_1.colors.textMuted },
+    previewCell: { flex: 1, fontSize: 11, color: colors_1.colors.text },
+    previewCellBerubah: { fontWeight: '700', color: colors_1.colors.primary },
+    previewTanggal: { fontSize: 11, color: colors_1.colors.textMuted, paddingHorizontal: colors_1.spacing.sm, paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors_1.colors.border, backgroundColor: colors_1.colors.background },
+    modalLabel: { fontSize: 13, color: colors_1.colors.text, fontWeight: '600', marginBottom: colors_1.spacing.sm, marginTop: colors_1.spacing.sm },
+    modalInput: { ...form_1.formUi.inputStandalone },
+    /**
+     * UI/UX FINAL POLISH — sebelumnya keempat isian alasan memakai
+     * `height: 60` yang ditulis inline. Tinggi TETAP berarti teks yang
+     * lebih panjang dari dua baris terpotong tanpa bisa di-scroll. Token
+     * bersama memakai `minHeight`, jadi kotaknya tumbuh lalu isinya yang
+     * di-scroll setelah batas atas tercapai.
+     */
+    modalInputMultiline: { ...form_1.formUi.inputStandaloneMultiline },
+    modalActions: { ...modal_1.modalUi.actions },
+    modalCancel: { paddingHorizontal: 14, paddingVertical: 10 },
+    modalCancelText: { ...modal_1.modalUi.secondaryText },
+    modalSubmit: { backgroundColor: colors_1.colors.primary, paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10, borderRadius: colors_1.radius.sm },
+    modalSubmitDanger: { backgroundColor: colors_1.colors.danger, paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10, borderRadius: colors_1.radius.sm },
+    modalSubmitText: { ...modal_1.modalUi.primaryText },
+    seksiJadwal: { marginTop: colors_1.spacing.lg },
+    seksiHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: colors_1.spacing.sm },
+    seksiJumlah: { fontSize: 11, color: colors_1.colors.textMuted, fontWeight: '700' },
+    seksiKeterangan: { fontSize: 11, color: colors_1.colors.textMuted, lineHeight: 16, marginBottom: colors_1.spacing.sm },
+    seksiEmpty: { fontSize: 12, color: colors_1.colors.textMuted, fontStyle: 'italic', paddingVertical: colors_1.spacing.sm },
+    jadwalRowRedup: { opacity: 0.6, backgroundColor: colors_1.colors.background },
+    seksiTotalRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        paddingTop: colors_1.spacing.sm,
+        marginTop: colors_1.spacing.xs,
+        borderTopWidth: 1,
+        borderTopColor: colors_1.colors.border,
+    },
+    seksiTotalLabel: { fontSize: 12, fontWeight: '700', color: colors_1.colors.text },
+    seksiTotalValue: { fontSize: 12, fontWeight: '700', color: colors_1.colors.primary },
+    riwayatAkadLinkText: { color: colors_1.colors.primary, fontSize: 12, fontWeight: '700' },
+    riwayatAkadCard: {
+        backgroundColor: colors_1.colors.surface,
+        borderWidth: 1,
+        borderColor: colors_1.colors.border,
+        borderRadius: colors_1.radius.sm,
+        padding: colors_1.spacing.md,
+        marginBottom: colors_1.spacing.sm,
+    },
+    riwayatAkadCardBerlaku: { borderColor: colors_1.colors.primary, borderWidth: 1.5 },
+    riwayatAkadHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: colors_1.spacing.sm, marginBottom: 2 },
+    riwayatAkadJudul: { fontSize: 13, fontWeight: '800', color: colors_1.colors.text, letterSpacing: 0.3 },
+    riwayatAkadTanggal: { fontSize: 12, color: colors_1.colors.textMuted, marginBottom: colors_1.spacing.sm },
+    riwayatAkadDivider: { height: 1, backgroundColor: colors_1.colors.border, marginVertical: colors_1.spacing.sm },
+    riwayatAkadKeterangan: { fontSize: 11, color: colors_1.colors.textMuted, marginTop: colors_1.spacing.xs, lineHeight: 16 },
+    riwayatAkadAksi: { marginTop: colors_1.spacing.sm },
+    statusPill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: colors_1.radius.pill, borderWidth: 1, flexShrink: 1 },
+    akadKonfirmasiIkon: { alignSelf: 'center', width: 52, height: 52, borderRadius: 26, backgroundColor: colors_1.colors.primaryLight, alignItems: 'center', justifyContent: 'center', marginBottom: colors_1.spacing.sm },
+    akadKonfirmasiLangkah: { fontSize: 11, fontWeight: '700', color: colors_1.colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', textAlign: 'center', marginBottom: 2 },
+    akadKonfirmasiJudul: { textAlign: 'center', marginBottom: colors_1.spacing.xs },
+    akadKonfirmasiDesk: { fontSize: 13, color: colors_1.colors.textMuted, lineHeight: 19, textAlign: 'center', marginBottom: colors_1.spacing.md },
+    akadKonfirmasiRingkas: { borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.sm, paddingHorizontal: colors_1.spacing.md, paddingVertical: colors_1.spacing.xs, backgroundColor: colors_1.colors.background },
+    akadKonfirmasiBaris: { flexDirection: 'row', justifyContent: 'space-between', gap: colors_1.spacing.md, paddingVertical: 6 },
+    akadKonfirmasiBarisPemisah: { borderTopWidth: 1, borderTopColor: colors_1.colors.border },
+    akadKonfirmasiLabel: { fontSize: 12, color: colors_1.colors.textMuted },
+    akadKonfirmasiNilai: { flexShrink: 1, fontSize: 12, fontWeight: '600', color: colors_1.colors.text, textAlign: 'right' },
+    akadKonfirmasiCek: { marginTop: colors_1.spacing.md, gap: 6 },
+    akadKonfirmasiCekBaris: { flexDirection: 'row', gap: colors_1.spacing.sm, alignItems: 'flex-start' },
+    akadKonfirmasiCekTeks: { flex: 1, fontSize: 13, color: colors_1.colors.text, lineHeight: 18 },
+    akadPernyataan: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.sm, marginTop: colors_1.spacing.md, padding: colors_1.spacing.md, borderRadius: colors_1.radius.sm, borderWidth: 1, borderColor: colors_1.colors.border },
+    akadPernyataanAktif: { borderColor: colors_1.colors.primary, backgroundColor: colors_1.colors.primaryLight },
+    akadPernyataanTeks: { flex: 1, fontSize: 13, fontWeight: '600', color: colors_1.colors.text, lineHeight: 18 },
+    akadKonfirmasiExport: { marginTop: colors_1.spacing.md },
+    akadTerkonfirmasi: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.xs, marginBottom: colors_1.spacing.md, paddingHorizontal: colors_1.spacing.sm, paddingVertical: 6, borderRadius: colors_1.radius.sm, backgroundColor: colors_1.colors.primaryLight },
+    akadTerkonfirmasiTeks: { flex: 1, fontSize: 12, fontWeight: '600', color: colors_1.colors.text },
+    statusPillBerlaku: { backgroundColor: colors_1.colors.primaryLight, borderColor: colors_1.colors.primary },
+    statusPillHistoris: { backgroundColor: colors_1.colors.background, borderColor: colors_1.colors.border },
+    statusPillText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.3 },
+    statusPillTextBerlaku: { color: colors_1.colors.primary },
+    statusPillTextHistoris: { color: colors_1.colors.textMuted },
+    perbandinganRow: { flexDirection: 'row', paddingVertical: 2, gap: colors_1.spacing.sm },
+    perbandinganLabel: { width: 56, fontSize: 11, color: colors_1.colors.textMuted },
+    perbandinganNilai: { flex: 1, fontSize: 11, color: colors_1.colors.textMuted },
+    perbandinganPanah: { color: colors_1.colors.textFaint },
+    perbandinganBaru: { color: colors_1.colors.text, fontWeight: '700' },
+    jadwalInternal: { fontSize: 10, color: colors_1.colors.textFaint, marginTop: 1 },
+});
+
+},1439,[6,11,81,232,287,477,475,19,483,369,858,765,119,678,1345,913,1294,910,794,921,931,1300,772,1295,879,918,912,1440,9020,951,952,1348,1349,882]);
 __d(function(g,r,i,a,m,_e,d){"use strict";function t(t){return t&&t.__esModule?t:{default:t}}Object.defineProperty(_e,'__esModule',{value:!0}),Object.defineProperty(_e,"default",{enumerable:!0,get:function(){return C}});var e=r(d[0]),n=t(r(d[1])),o=t(r(d[2])),l=t(r(d[3])),s=t(r(d[4])),c=t(r(d[5])),u=r(d[6]),b=r(d[7]),f=r(d[8]),k=r(d[9]),p=r(d[10]),y=r(d[11]),h=r(d[12]),x=r(d[13]),j=r(d[14]),A=r(d[15]),D=r(d[16]),S=r(d[17]);function P(){const t=(0,D.getWaktuSekarang)(),e=t=>t.toString().padStart(2,'0');return`${(0,y.formatTanggalPanjang)((0,h.getTanggalLokalHariIni)())}, ${e(t.getHours())}.${e(t.getMinutes())}`}function C({pinjamanId:t,dokumen:s,label:y,variant:h="block"}){const D=(0,x.useAppStore)(t=>t.currentUser),[C,z]=(0,e.useState)(!1),T='AWAL'===s.jenis||!!s.akadUlangId,H=!D||C||!T,U='block'===h;return(0,S.jsxs)(l.default,{style:[w.button,U?w.buttonBlock:w.buttonCompact,H&&w.buttonDisabled],onPress:async()=>{if(D&&!C&&T){z(!0);try{const e=P();let n,o;if('AWAL'===s.jenis){const l=await(0,b.getAkadAwalDocumentData)(t);n=await(0,f.exportDokumenAkadAwalPdf)(D.id,(0,p.buildDokumenAkadAwal)(l,{tanggalCetak:e})),o='Perjanjian Pinjaman berhasil dibuat.'}else{const l=await(0,b.getAkadUlangDocumentData)(t,s.akadUlangId);n=await(0,f.exportDokumenAkadUlangPdf)(D.id,(0,k.buildDokumenAkadUlang)(l,{tanggalCetak:e})),o='Dokumen Akad Ulang berhasil dibuat.'}z(!1),(0,j.notify)('Export Berhasil',`${o}\n${n.fileName}`,[{text:'Tutup',style:'cancel'},{text:'Bagikan',onPress:()=>(0,f.shareExportedFile)(n).catch(t=>(0,j.notify)('Gagal Membagikan',t instanceof Error?t.message:'Terjadi kesalahan.'))}])}catch(t){z(!1),(0,j.notify)('Export Gagal',t instanceof Error?t.message:'Terjadi kesalahan saat membuat dokumen.')}}},disabled:H,accessibilityRole:"button",accessibilityLabel:y,accessibilityState:{disabled:H,busy:C},children:[C?(0,S.jsx)(c.default,{color:A.colors.primary,size:"small"}):(0,S.jsx)(u.Ionicons,{name:"document-text-outline",size:U?18:16,color:A.colors.primary}),(0,S.jsx)(o.default,{style:[w.text,U&&w.textBlock],numberOfLines:2,children:C?'Membuat PDF\u2026':y}),(0,S.jsx)(n.default,{style:w.badge,children:(0,S.jsx)(o.default,{style:w.badgeText,children:"PDF"})})]})}const w=s.default.create({button:{flexDirection:'row',alignItems:'center',gap:A.spacing.sm,borderRadius:A.radius.sm,borderWidth:1,borderColor:A.colors.primary,backgroundColor:A.colors.surface},buttonBlock:{alignSelf:'stretch',justifyContent:'center',minHeight:A.touchTarget,paddingHorizontal:A.spacing.md,paddingVertical:10},buttonCompact:{alignSelf:'stretch',justifyContent:'center',minHeight:40,paddingHorizontal:A.spacing.md,paddingVertical:8},buttonDisabled:{opacity:.45},text:{flexShrink:1,color:A.colors.primary,fontWeight:'700',fontSize:13},textBlock:{fontSize:14},badge:{borderRadius:A.radius.pill,backgroundColor:A.colors.primaryLight,paddingHorizontal:6,paddingVertical:1},badgeText:{color:A.colors.primary,fontSize:10,fontWeight:'800',letterSpacing:.4}})},1440,[11,81,232,477,19,475,678,1345,933,1441,1442,1349,918,794,765,772,882,6]);
 __d(function(g,r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"JUDUL_DOKUMEN_AKAD_ULANG",{enumerable:!0,get:function(){return t}}),Object.defineProperty(e,"CATATAN_PIUTANG_JASA",{enumerable:!0,get:function(){return o}}),Object.defineProperty(e,"CATATAN_JADWAL_LAMA",{enumerable:!0,get:function(){return l}}),e.buildDokumenAkadUlang=function(u,s){const{event:k,eventSebelumnya:A,akadAwal:j}=u,p=(0,a.buatNomorDokumenAkadUlang)(u.pinjaman.nomorPinjaman,k.tanggal,u.urutanEvent),b=(0,a.hitungPeriodeRelatifAkadUlang)(u.jadwal),P=[...u.jadwal].sort((a,n)=>a.nomorAngsuran-n.nomorAngsuran).map(n=>{const t=b.get(n.id);return{periode:t?`${t.periode}/${t.jumlah}`:'-',nomorInternal:n.nomorAngsuran,jatuhTempo:(0,a.formatTanggalPanjang)(n.tanggalJatuhTempo),pokok:n.pokok,jasa:n.jasa,total:n.total}}),f=P.reduce((a,n)=>({pokok:a.pokok+n.pokok,jasa:a.jasa+n.jasa,total:a.total+n.total}),{pokok:0,jasa:0,total:0}),J=A?A.sisaPokok:j.jumlahPinjaman,h=(0,a.jatuhTempoAkhir)(u.jadwal),T=(0,a.tentukanStatusEventAkadUlang)(k.id,u.jadwal);return{namaFileDasar:`dokumen-akad-ulang-${u.pinjaman.nomorPinjaman}-${String(u.urutanEvent).padStart(3,'0')}`,judul:t,koperasi:u.koperasi,nomorPinjaman:u.pinjaman.nomorPinjaman,nomorDokumen:p,tanggalAkadUlang:(0,a.formatTanggalPanjang)(k.tanggal),urutanLabel:`Akad Ulang ke-${u.urutanEvent} dari ${u.jumlahEvent}`,statusEventLabel:(0,a.labelStatusEventAkadUlang)(T),identitasDokumen:[{label:'Nomor Pinjaman',nilai:u.pinjaman.nomorPinjaman},{label:'Nomor Akad Ulang',nilai:p},{label:'Tanggal Akad Ulang',nilai:(0,a.formatTanggalPanjang)(k.tanggal)},{label:'Urutan',nilai:`Akad Ulang ke-${u.urutanEvent} dari ${u.jumlahEvent}`},{label:'Status Akad',nilai:(0,a.labelStatusEventAkadUlang)(T)}],identitasAnggota:[{label:'Nama',nilai:u.anggota.namaLengkap},{label:'Nomor Anggota',nilai:u.anggota.nomorAnggota},{label:'NIK',nilai:u.anggota.nik||'-'},{label:'Alamat',nilai:u.anggota.alamat||'-'}],referensiAkadAwal:[{label:'Tanggal Akad Awal',nilai:(0,a.formatTanggalPanjang)(j.tanggal)},{label:'Jumlah Pinjaman Awal',nilai:(0,n.formatRupiah)(j.jumlahPinjaman)},{label:'Tenor Awal',nilai:(0,a.formatTenor)(j.tenor,j.satuanTenor)},{label:'Metode Jasa Awal',nilai:(0,a.labelMetodeJasa)(j.metodeJasa)},{label:'Persentase Jasa Awal',nilai:(0,a.formatPersenJasa)(j.persentaseJasa)}],perubahan:[{komponen:'Tenor',sebelum:(0,a.formatTenor)(k.tenorLama,k.satuanTenorLama),sesudah:(0,a.formatTenor)(k.tenorBaru,k.satuanTenorBaru)},{komponen:'Metode Jasa',sebelum:(0,a.labelMetodeJasa)(k.metodeJasaLama),sesudah:(0,a.labelMetodeJasa)(k.metodeJasaBaru)},{komponen:'Persentase Jasa',sebelum:(0,a.formatPersenJasa)(k.persentaseJasaLama),sesudah:(0,a.formatPersenJasa)(k.persentaseJasaBaru)},{komponen:'Dasar Pokok',sebelum:(0,n.formatRupiah)(J),sesudah:(0,n.formatRupiah)(k.sisaPokok)},{komponen:'Jatuh Tempo',sebelum:(0,a.formatTanggalPanjang)(u.jatuhTempoSebelum),sesudah:(0,a.formatTanggalPanjang)(h)}],sisaPokok:k.sisaPokok,piutangJasaDiakui:k.outstandingPiutangJasa,catatanPiutangJasa:o,jadwal:P,totalJadwal:f,keterangan:k.keterangan&&k.keterangan.trim()?k.keterangan.trim():null,namaAnggota:u.anggota.namaLengkap,namaKoperasi:u.koperasi.nama,pengurus:u.pengurus,nomorAkadAwal:(0,a.buatNomorDokumenAkadAwal)(u.pinjaman.nomorPinjaman,u.akadAwal.tanggal),footer:{nomorPinjaman:u.pinjaman.nomorPinjaman,nomorDokumen:p,tanggalCetak:s.tanggalCetak,catatan:l}}};var a=r(d[0]),n=r(d[1]);const t='DOKUMEN AKAD ULANG PINJAMAN',o='Piutang jasa yang telah diakui merupakan informasi historis/audit dan tidak menambah pokok akad ulang.',l='Jadwal angsuran sebelum akad ulang ini tetap tersimpan sebagai histori dan tidak menjadi kewajiban berjalan.'},1441,[1349,910]);
 __d(function(g,r,i,_a,m,e,d){"use strict";Object.defineProperty(e,'__esModule',{value:!0}),Object.defineProperty(e,"JUDUL_DOKUMEN_AKAD_AWAL",{enumerable:!0,get:function(){return l}}),e.buildDokumenAkadAwal=function(s,o){const A=s.pinjaman,j=(0,a.statusDokumenAkadAwal)(A.statusSaatIni);if('TIDAK_TERSEDIA'===j)throw new Error('Pinjaman yang ditolak tidak memiliki dokumen akad.');const b=j,P=(0,a.buatNomorDokumenAkadAwal)(A.nomorPinjaman,A.tanggal),p=s.jadwal.length,h=s.jadwal.map((n,t)=>({periode:`${t+1}/${p}`,sub:null,jatuhTempo:(0,a.formatTanggalPanjang)(n.tanggalJatuhTempo),pokok:n.pokok,jasa:n.jasa,total:n.total})),y=s.jadwal.reduce((a,n)=>({pokok:a.pokok+n.pokok,jasa:a.jasa+n.jasa,total:a.total+n.total}),{pokok:0,jasa:0,total:0}),K=(0,a.jatuhTempoAkhir)(s.jadwal),I=(0,a.tentukanStatusJadwalKontrak)(s.jadwal),T='BELUM_DICAIRKAN'===b?'AKAD AWAL':'DIGANTIKAN'===I?'HISTORIS \u2014 DIGANTIKAN AKAD ULANG':(0,a.labelStatusEventAkadUlang)(I),D=s.digantikanOleh?`Perjanjian ini telah diubah melalui Akad Ulang tanggal ${(0,a.formatTanggalPanjang)(s.digantikanOleh.tanggal)}`+(s.jumlahAkadUlang>1?` (total ${s.jumlahAkadUlang} kali akad ulang)`:'')+'. Dokumen ini adalah salinan perjanjian awal untuk arsip; kewajiban berjalan mengikuti dokumen akad ulang terbaru.':null,E=s.koperasi,H=s.pengurus.KETUA,R=A.tujuan?(0,a.labelTujuanPinjaman)(A.tujuan,A.tujuanDetail):null,w=[{nomor:1,judul:'Pokok Pinjaman',ayat:[`PIHAK PERTAMA memberikan pinjaman kepada PIHAK KEDUA sebesar ${k(A.jumlahPinjaman)}`+(R?` untuk keperluan ${R}.`:'.')]},{nomor:2,judul:'Jangka Waktu',ayat:[`Pinjaman diberikan untuk jangka waktu ${$=A.tenor,N=A.satuanTenor,`${$} (${(0,t.terbilang)($)}) ${(0,a.labelSatuanTenor)(N)}`}, terhitung sejak tanggal ${(0,a.formatTanggalPanjang)(A.tanggal)} sampai dengan tanggal ${(0,a.formatTanggalPanjang)(K)}.`]},{nomor:3,judul:'Jasa Pinjaman dan Biaya',ayat:[`Atas pinjaman ini PIHAK KEDUA dikenakan jasa pinjaman sebesar ${(0,a.formatPersenJasa)(A.persentaseJasa)} dengan metode ${(0,a.labelMetodeJasa)(A.metodeJasa)}, dengan jumlah jasa sesuai jadwal angsuran sebesar ${k(y.jasa)}.`,`Biaya administrasi pinjaman: ${(0,a.labelBiayaAdmin)(A.biayaAdminTipe,A.biayaAdminNilai,n.formatRupiah)}.`]},{nomor:4,judul:'Cara Pembayaran',ayat:[`PIHAK KEDUA wajib membayar kembali pinjaman beserta jasanya secara angsuran sebanyak ${p} (${(0,t.terbilang)(p)}) kali sesuai Jadwal Angsuran pada Lampiran yang merupakan bagian tidak terpisahkan dari Perjanjian ini, dengan jumlah kewajiban seluruhnya sebesar ${k(y.total)}.`,"Pembayaran dilakukan kepada PIHAK PERTAMA melalui kas koperasi atau rekening yang ditunjuk oleh PIHAK PERTAMA, dan setiap pembayaran dibuktikan dengan tanda terima yang sah."]},{nomor:5,judul:'Keterlambatan dan Kelalaian',ayat:[A.dendaAktif?'Keterlambatan pembayaran angsuran dikenakan denda sesuai ketentuan yang berlaku pada PIHAK PERTAMA.':'Atas keterlambatan pembayaran angsuran tidak dikenakan denda; namun PIHAK KEDUA tetap berkewajiban melunasi angsuran yang tertunggak.',"Apabila PIHAK KEDUA lalai memenuhi kewajibannya berdasarkan Perjanjian ini, PIHAK PERTAMA berhak melakukan penagihan dan penyelesaian sesuai Anggaran Dasar, Anggaran Rumah Tangga Koperasi, dan peraturan perundang-undangan yang berlaku."]},{nomor:6,judul:'Pelunasan Sebelum Jatuh Tempo',ayat:['PIHAK KEDUA dapat melunasi seluruh sisa pinjaman sebelum tanggal jatuh tempo sesuai ketentuan yang berlaku pada PIHAK PERTAMA.']},{nomor:7,judul:'Perubahan Perjanjian',ayat:["Setiap perubahan atas ketentuan Perjanjian ini, termasuk akad ulang, dituangkan dalam dokumen tertulis yang ditandatangani PARA PIHAK dan merupakan bagian yang tidak terpisahkan dari Perjanjian ini."]},{nomor:8,judul:'Pelindungan Data Pribadi',ayat:["PIHAK KEDUA menyetujui pemrosesan data pribadinya oleh PIHAK PERTAMA sebatas untuk keperluan pelaksanaan Perjanjian ini, dan PIHAK PERTAMA wajib menjaga kerahasiaan data tersebut sesuai Undang-Undang Nomor 27 Tahun 2022 tentang Pelindungan Data Pribadi."]},{nomor:9,judul:'Penyelesaian Perselisihan',ayat:['Perselisihan yang timbul dari Perjanjian ini diselesaikan secara musyawarah untuk mufakat.',"Apabila musyawarah tidak mencapai mufakat, PARA PIHAK sepakat menyelesaikannya melalui Pengadilan Negeri yang wilayah hukumnya meliputi tempat kedudukan PIHAK PERTAMA."]},{nomor:10,judul:'Penutup',ayat:["Perjanjian ini dibuat dalam rangkap 2 (dua), masing-masing bermeterai cukup dan mempunyai kekuatan hukum yang sama, serta mulai berlaku sejak ditandatangani oleh PARA PIHAK."]}];var $,N;return{namaFileDasar:`perjanjian-pinjaman-${A.nomorPinjaman}`,judul:l,koperasi:E,nomorPinjaman:A.nomorPinjaman,nomorDokumen:P,sifat:b,statusAkadLabel:T,pemberitahuanPenggantian:D,kalimatPembukaan:`Pada hari ini, ${(0,t.namaHari)(A.tanggal)}, tanggal ${(0,a.formatTanggalPanjang)(A.tanggal)}, yang bertanda tangan di bawah ini:`,pihakPertama:{rincian:[{label:'Nama',nilai:H?.nama??'.............................................'},{label:'Jabatan',nilai:`Ketua ${E.nama}`}],peran:`Dalam hal ini bertindak dalam jabatannya tersebut untuk dan atas nama ${E.nama}`+(E.nomorBadanHukum?`, badan hukum koperasi Nomor ${E.nomorBadanHukum}`:'')+(E.alamat?`, berkedudukan di ${E.alamat}`:'')+`, berdasarkan ${u.DASAR_KEWENANGAN_PENGURUS}, selanjutnya disebut PIHAK PERTAMA.`},pihakKedua:{rincian:[{label:'Nama',nilai:s.anggota.namaLengkap},{label:'Nomor Anggota',nilai:s.anggota.nomorAnggota},{label:'NIK',nilai:s.anggota.nik||'-'},{label:'Alamat',nilai:s.anggota.alamat||'-'}],peran:`Dalam hal ini bertindak untuk dan atas nama diri sendiri selaku anggota ${E.nama}, selanjutnya disebut PIHAK KEDUA.`},kalimatKesepakatan:"PIHAK PERTAMA dan PIHAK KEDUA secara bersama-sama disebut PARA PIHAK. PARA PIHAK terlebih dahulu menerangkan bahwa PIHAK KEDUA telah mengajukan pinjaman kepada PIHAK PERTAMA dan PIHAK PERTAMA menyetujuinya, sehingga PARA PIHAK sepakat mengikatkan diri dalam Perjanjian Pinjaman ini dengan berdasarkan pada:",dasarHukum:u.DASAR_HUKUM_PERJANJIAN_PINJAMAN,pasal:w,ketentuan:[{label:'Jumlah Pinjaman',nilai:(0,n.formatRupiah)(A.jumlahPinjaman)},{label:'Tenor',nilai:(0,a.formatTenor)(A.tenor,A.satuanTenor)},{label:'Metode Jasa',nilai:(0,a.labelMetodeJasa)(A.metodeJasa)},{label:'Persentase Jasa',nilai:(0,a.formatPersenJasa)(A.persentaseJasa)},{label:'Biaya Administrasi',nilai:(0,a.labelBiayaAdmin)(A.biayaAdminTipe,A.biayaAdminNilai,n.formatRupiah)},{label:'Denda Keterlambatan',nilai:A.dendaAktif?'Diberlakukan sesuai ketentuan koperasi':'Tidak diberlakukan'},{label:'Tujuan Pinjaman',nilai:(0,a.labelTujuanPinjaman)(A.tujuan,A.tujuanDetail)},{label:'Jatuh Tempo Akhir',nilai:(0,a.formatTanggalPanjang)(K)}],jumlahPinjaman:A.jumlahPinjaman,totalJadwal:y,jadwal:h,namaAnggota:s.anggota.namaLengkap,pengurus:s.pengurus,footer:{nomorPinjaman:A.nomorPinjaman,nomorDokumen:P,tanggalCetak:o.tanggalCetak,catatan:s.digantikanOleh?'Perjanjian ini telah diubah melalui akad ulang; jadwal pada lampiran tersimpan sebagai histori dan tidak menjadi kewajiban berjalan.':'Dokumen ini disusun dari data pinjaman yang tercatat pada sistem koperasi.'}}};var a=r(d[0]),n=r(d[1]),t=r(d[2]),u=r(d[3]);const l='PERJANJIAN PINJAMAN';function k(a){return`${(0,n.formatRupiah)(a)} (${(0,t.terbilangRupiah)(a)})`}},1442,[1349,910,1436,949]);
@@ -20059,7 +22843,7 @@ function KolektibilitasPiutangScreen() {
                                                 ? 'Cadangan buku sama dengan batas fiskal — tidak ada koreksi fiskal dari pos ini.'
                                                 : selisihBukuFiskal > 0
                                                     ? `Cadangan buku melebihi batas fiskal ${(0, money_1.formatRupiah)(selisihBukuFiskal)} — calon koreksi fiskal POSITIF di SPT Badan.`
-                                                    : `Cadangan buku di bawah batas fiskal ${(0, money_1.formatRupiah)(Math.abs(selisihBukuFiskal))} — calon koreksi fiskal NEGATIF di SPT Badan.` })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tabelHeadRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colKategori], children: "Kategori" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colAngka], children: "Dasar" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colPersen], children: "%" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colAngka], children: "Cadangan" })] }), ringkasanFiskal.map((r) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tabelRow, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.colKategori, styles.tabelKategoriCell], children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.kategoriDotKecil, { backgroundColor: kolektibilitas_1.kolektibilitasColor[r.kategori] }] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.tabelSel, numberOfLines: 1, children: KolektibilitasFiskalService_1.LABEL_KOLEKTIBILITAS_FISKAL[r.kategori] })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colAngka, styles.angka], children: (0, money_1.formatRupiah)(r.dasar) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colPersen, styles.angka], children: KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL[r.kategori] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colAngka, styles.angka], children: (0, money_1.formatRupiah)(r.cadangan) })] }, r.kategori))), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardNote, children: "Dasar fiskal = saldo pokok dikurangi nilai agunan, kecuali kategori Lancar yang dihitung tanpa pengurang agunan. Laporan pembanding untuk menyusun koreksi fiskal SPT Badan \u2014 tidak memposting jurnal apa pun." })] }), (0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: [styles.card, styles.cardSpaced, styles.dasarCard], onPress: () => setDasarTerbuka((v) => !v), activeOpacity: 0.8, accessibilityRole: "button", accessibilityState: { expanded: dasarTerbuka }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.dasarHeadRow, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "book-outline", size: colors_1.iconSize.md, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarTitle, children: "Dasar Penggolongan & Pencadangan" }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: dasarTerbuka ? 'chevron-up' : 'chevron-down', size: colors_1.iconSize.sm, color: colors_1.colors.textMuted })] }), dasarTerbuka && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.dasarBody, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "Juklat SOM No. 3/2025 angka 12.1 \u2014 kriteria pinjaman bermasalah" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarTeks, children: "Naskah mendefinisikan tiga kategori bermasalah (Kurang Lancar, Diragukan, Macet); Lancar adalah pinjaman yang tidak memenuhi ketiganya. Ambang Kurang Lancar dinyatakan dalam BULAN tunggakan dan berbeda menurut masa angsuran: tunggakan pokok melampaui 1 bulan belum 2 bulan (masa angsuran kurang dari 1 bulan), melampaui 3 belum 6 bulan (masa angsuran 2 sampai 3 bulan), atau melampaui 6 belum 12 bulan (masa angsuran 6 bulan atau lebih). Tunggakan bunga: melampaui 1 belum 3 bulan (masa angsuran kurang dari 1 bulan) atau melampaui 3 belum 6 bulan (lebih dari 1 bulan). Pinjaman tanpa angsuran dinilai dari tunggakan bunga (melampaui 3 belum 6 bulan) bila belum jatuh tempo, atau dari lewatnya jatuh tempo (belum melampaui 3 bulan) bila sudah jatuh tempo." }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Melewati ambang Kurang Lancar, pinjaman digolongkan Diragukan bila angsurannya sudah bernilai sekurang-kurangnya ", KolektibilitasSomService_1.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN, "% dari utang peminjam termasuk bunganya (huruf a), ATAU agunannya masih bernilai sekurang-kurangnya ", KolektibilitasSomService_1.RASIO_AGUNAN_MINIMUM_DIRAGUKAN, "% dari utang peminjam (huruf b). Bila tidak memenuhi keduanya, pinjaman digolongkan Macet. Diragukan yang berlanjut ", KolektibilitasSomService_1.BULAN_DIRAGUKAN_MENJADI_MACET, " bulan tanpa pelunasan, dan pinjaman yang penyelesaiannya diserahkan ke Pengadilan Negeri atau diajukan ganti rugi ke asuransi kredit, juga digolongkan Macet."] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "Juklat SOM No. 3/2025 angka 15 \u2014 taksiran piutang tak tertagih" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Cadangan risiko: Lancar ", LoanImpairmentService_1.PERSENTASE_CADANGAN.LANCAR, "%, Kurang Lancar", ' ', LoanImpairmentService_1.PERSENTASE_CADANGAN.KURANG_LANCAR, "%, Diragukan ", LoanImpairmentService_1.PERSENTASE_CADANGAN.DIRAGUKAN, "%, Macet", ' ', LoanImpairmentService_1.PERSENTASE_CADANGAN.MACET, "% \u2014 dikenakan atas saldo pokok penuh, tanpa pengurang agunan."] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "PMK 74/2024 Pasal 7 & Lampiran" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Batasan cadangan piutang tak tertagih yang boleh dikurangkan dari penghasilan bruto Koperasi Simpan Pinjam: Lancar ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.LANCAR, "%, Kurang Lancar", ' ', KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.KURANG_LANCAR, "%, Diragukan ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.DIRAGUKAN, "%, Macet ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.MACET, "%, dihitung atas piutang dikurangi agunan kecuali kategori Lancar. Batas fiskal ini jauh lebih rendah daripada cadangan SOM di atas \u2014 selisihnya adalah koreksi fiskal di SPT Badan, bukan kesalahan hitung."] })] }))] }), (0, jsx_runtime_1.jsx)(ExportButton_1.default, { data: koperasi && periode
+                                                    : `Cadangan buku di bawah batas fiskal ${(0, money_1.formatRupiah)(Math.abs(selisihBukuFiskal))} — calon koreksi fiskal NEGATIF di SPT Badan.` })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tabelHeadRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colKategori], children: "Kategori" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colAngka], children: "Dasar" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colPersen], children: "%" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelHead, styles.colAngka], children: "Cadangan" })] }), ringkasanFiskal.map((r) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.tabelRow, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.colKategori, styles.tabelKategoriCell], children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.kategoriDotKecil, { backgroundColor: kolektibilitas_1.kolektibilitasColor[r.kategori] }] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.tabelSel, numberOfLines: 1, children: KolektibilitasFiskalService_1.LABEL_KOLEKTIBILITAS_FISKAL[r.kategori] })] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colAngka, styles.angka], children: (0, money_1.formatRupiah)(r.dasar) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colPersen, styles.angka], children: KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL[r.kategori] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.tabelSel, styles.colAngka, styles.angka], children: (0, money_1.formatRupiah)(r.cadangan) })] }, r.kategori))), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardNote, children: "Dasar fiskal = saldo pokok dikurangi nilai agunan, kecuali kategori Lancar yang dihitung tanpa pengurang agunan. Laporan pembanding untuk menyusun koreksi fiskal SPT Badan \u2014 tidak memposting jurnal apa pun." })] }), (0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: [styles.card, styles.cardSpaced, styles.dasarCard], onPress: () => setDasarTerbuka((v) => !v), activeOpacity: 0.8, accessibilityRole: "button", accessibilityState: { expanded: dasarTerbuka }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.dasarHeadRow, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "book-outline", size: colors_1.iconSize.md, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarTitle, children: "Dasar Penggolongan & Pencadangan" }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: dasarTerbuka ? 'chevron-up' : 'chevron-down', size: colors_1.iconSize.sm, color: colors_1.colors.textMuted })] }), dasarTerbuka && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.dasarBody, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "Juklat SOM No. 3/2025 angka 12.1 \u2014 kriteria pinjaman bermasalah" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarTeks, children: "Naskah mendefinisikan tiga kategori bermasalah (Kurang Lancar, Diragukan, Macet); Lancar adalah pinjaman yang tidak memenuhi ketiganya. Ambang Kurang Lancar dinyatakan dalam BULAN tunggakan dan berbeda menurut masa angsuran: tunggakan pokok melampaui 1 bulan belum 2 bulan (masa angsuran kurang dari 1 bulan), melampaui 3 belum 6 bulan (masa angsuran 2 sampai 3 bulan), atau melampaui 6 belum 12 bulan (masa angsuran 6 bulan atau lebih). Tunggakan bunga: melampaui 1 belum 3 bulan (masa angsuran kurang dari 1 bulan) atau melampaui 3 belum 6 bulan (lebih dari 1 bulan). Pinjaman tanpa angsuran dinilai dari tunggakan bunga (melampaui 3 belum 6 bulan) bila belum jatuh tempo, atau dari lewatnya jatuh tempo (belum melampaui 3 bulan) bila sudah jatuh tempo." }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Melewati ambang Kurang Lancar, pinjaman digolongkan Diragukan bila angsurannya sudah bernilai sekurang-kurangnya ", KolektibilitasSomService_1.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN, "% dari utang peminjam termasuk bunganya (huruf a), ATAU agunannya masih bernilai sekurang-kurangnya ", KolektibilitasSomService_1.RASIO_AGUNAN_MINIMUM_DIRAGUKAN, "% dari utang peminjam (huruf b). Bila tidak memenuhi keduanya, pinjaman digolongkan Macet. Diragukan yang berlanjut ", KolektibilitasSomService_1.BULAN_DIRAGUKAN_MENJADI_MACET, " bulan tanpa pelunasan, dan pinjaman yang penyelesaiannya diserahkan ke Pengadilan Negeri atau diajukan ganti rugi ke asuransi kredit, juga digolongkan Macet. Kriteria terakhir ini dicatat manual oleh Admin/Pengurus di Detail Pinjaman (nomor perkara/klaim dan dokumen) dan berlaku sejak tanggal pencatatan."] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "Juklat SOM No. 3/2025 angka 15 \u2014 taksiran piutang tak tertagih" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Cadangan risiko: Lancar ", LoanImpairmentService_1.PERSENTASE_CADANGAN.LANCAR, "%, Kurang Lancar", ' ', LoanImpairmentService_1.PERSENTASE_CADANGAN.KURANG_LANCAR, "%, Diragukan ", LoanImpairmentService_1.PERSENTASE_CADANGAN.DIRAGUKAN, "%, Macet", ' ', LoanImpairmentService_1.PERSENTASE_CADANGAN.MACET, "% \u2014 dikenakan atas saldo pokok penuh, tanpa pengurang agunan."] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.dasarSubjudul, children: "PMK 74/2024 Pasal 7 & Lampiran" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.dasarTeks, children: ["Batasan cadangan piutang tak tertagih yang boleh dikurangkan dari penghasilan bruto Koperasi Simpan Pinjam: Lancar ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.LANCAR, "%, Kurang Lancar", ' ', KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.KURANG_LANCAR, "%, Diragukan ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.DIRAGUKAN, "%, Macet ", KolektibilitasFiskalService_1.PERSENTASE_CADANGAN_FISKAL.MACET, "%, dihitung atas piutang dikurangi agunan kecuali kategori Lancar. Batas fiskal ini jauh lebih rendah daripada cadangan SOM di atas \u2014 selisihnya adalah koreksi fiskal di SPT Badan, bukan kesalahan hitung."] })] }))] }), (0, jsx_runtime_1.jsx)(ExportButton_1.default, { data: koperasi && periode
                                 ? (0, ReportTableBuilders_1.buildKolektibilitasExport)({ namaKoperasi: koperasi.nama, standarAkuntansi: koperasi.standarAkuntansi }, periode.label, data, 
                                 // RC-S133.6.3 — angka yang tampil di layar ikut ke berkas:
                                 // lingkup anggota, penyisihan tercatat, dan data fiskal (di `data`).
@@ -22433,6 +25217,8 @@ function ImportDataAwalScreen() {
     const [nikTerdaftar, setNikTerdaftar] = (0, react_1.useState)(null);
     /** RC-S133.6.2 — sidik baris berkas ini yang sudah pernah diimpor (null = belum dibaca). */
     const [sidikTercatat, setSidikTercatat] = (0, react_1.useState)(null);
+    /** RC-S133.6.4 — kebijakan syarat pinjaman, untuk pemeriksaan syarat pada tanggal tiap pinjaman. */
+    const [kebijakanSyarat, setKebijakanSyarat] = (0, react_1.useState)(null);
     const [anggotaTerdaftar, setAnggotaTerdaftar] = (0, react_1.useState)(null);
     const [hasil, setHasil] = (0, react_1.useState)(null);
     const [sibuk, setSibuk] = (0, react_1.useState)(null);
@@ -22468,8 +25254,9 @@ function ImportDataAwalScreen() {
             nikTerdaftar: nikTerdaftar ?? undefined,
             sidikTercatat: sidikTercatat ?? undefined,
             anggotaTerdaftar: anggotaTerdaftar ?? undefined,
+            kebijakanSyaratPinjaman: kebijakanSyarat ?? undefined,
         })
-        : [], [ringkasan, sifatData, cutOffEfektif, rekeningAktif, nikTerdaftar, sidikTercatat, anggotaTerdaftar]);
+        : [], [ringkasan, sifatData, cutOffEfektif, rekeningAktif, nikTerdaftar, sidikTercatat, anggotaTerdaftar, kebijakanSyarat]);
     /** RC-S133.6.2 — jumlah baris yang akan dilewati karena sudah pernah diimpor. */
     const jumlahDilewati = (0, react_1.useMemo)(() => (ringkasan && sidikTercatat ? (0, SidikImport_1.bandingkanSidik)((0, SidikImport_1.hitungSidikBerkas)(ringkasan.hasil), sidikTercatat).sudah.length : 0), [ringkasan, sidikTercatat]);
     const terblokir = (0, PanduanImportData_1.adaBlokir)(peringatan);
@@ -22505,6 +25292,7 @@ function ImportDataAwalScreen() {
             // bila sidik tidak dapat dibaca, pratinjau dibatalkan dengan pesan).
             setSidikTercatat(await (0, ImportDataAwalService_1.ambilSidikTercatat)(r));
             setAnggotaTerdaftar(await (0, ImportDataAwalService_1.ambilAnggotaTerdaftar)());
+            setKebijakanSyarat(await (0, ImportDataAwalService_1.ambilKebijakanSyaratPinjaman)());
             setNamaBerkas(berkas.nama);
             setRingkasan(r);
         }
@@ -22622,7 +25410,9 @@ function ImportDataAwalScreen() {
                                     { color: hasil.saldoAwalAkun.saldoKliring === 0 ? colors_1.colors.success : colors_1.colors.danger },
                                 ], children: [(0, money_1.formatRupiah)(Math.abs(hasil.saldoAwalAkun.saldoKliring)), hasil.saldoAwalAkun.saldoKliring === 0 ? '' : hasil.saldoAwalAkun.saldoKliring > 0 ? ' (debit)' : ' (kredit)'] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.seimbangSub, children: hasil.saldoAwalAkun.saldoKliring === 0
                                     ? 'Saldo awal seimbang.'
-                                    : 'Saldo awal belum seimbang. Periksa Kas & akun lain di sheet 7, lalu koreksi di menu Saldo Awal Akun sampai Rp0.' })] })), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced], children: [hasil.perSheet.map((s) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.hasilRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.hasilLabel, children: s.label }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.hasilNilai, children: [s.berhasil, " berhasil", s.gagal > 0 ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.danger }, children: ` · ${s.gagal} gagal` }) : '', (s.dilewati ?? 0) > 0 ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.warning }, children: ` · ${s.dilewati} dilewati` }) : ''] })] }, s.jenis))), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.divider }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.hasilRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.hasilTotalLabel, children: "Total" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.hasilTotalNilai, children: [hasil.totalBerhasil, " berhasil \u00B7 ", hasil.totalGagal, " gagal"] })] })] }), (hasil.dilewati?.length ?? 0) > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced], testID: "hasil-dilewati", children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.cardTitle, children: ["Baris yang Dilewati (", hasil.dilewati.length, ")"] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardSub, children: "Isi baris ini sama dengan baris yang sudah pernah diimpor, jadi tidak dicatat lagi." }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatBox, children: [hasil.dilewati.slice(0, 50).map((g, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatItem, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.pilBaris, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pilBarisTeks, children: [ImportDataAwalService_1.JUDUL_SHEET[g.jenis], " \u00B7 Baris ", g.baris] }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatKeterangan, children: g.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatPesan, children: g.pesan })] }, i))), hasil.dilewati.length > 50 ? ((0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.galatPesan, children: ["\u2026dan ", hasil.dilewati.length - 50, " baris lain (lihat Riwayat Import)."] })) : null] })] })), hasil.gagal.length > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced, styles.cardGalat], children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.cardTitle, children: ["Baris yang Gagal (", hasil.gagal.length, ")"] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardSub, children: "Perbaiki baris ini di Excel, lalu import ULANG berkas yang sama. Baris yang sudah berhasil dikenali dari isinya dan otomatis dilewati, sehingga tidak tercatat dua kali." }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.galatBox, children: hasil.gagal.map((g, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatItem, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.pilBaris, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pilBarisTeks, children: [ImportDataAwalService_1.JUDUL_SHEET[g.jenis], " \u00B7 Baris ", g.baris] }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatKeterangan, children: g.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatPesan, children: g.pesan })] }, i))) })] })), (hasil.migrasi !== null ||
+                                    : 'Saldo awal belum seimbang. Periksa Kas & akun lain di sheet 7, lalu koreksi di menu Saldo Awal Akun sampai Rp0.' })] })), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced], children: [hasil.perSheet.map((s) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.hasilRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.hasilLabel, children: s.label }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.hasilNilai, children: [s.berhasil, " berhasil", s.gagal > 0 ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.danger }, children: ` · ${s.gagal} gagal` }) : '', (s.dilewati ?? 0) > 0 ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.warning }, children: ` · ${s.dilewati} dilewati` }) : ''] })] }, s.jenis))), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.divider }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.hasilRow, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.hasilTotalLabel, children: "Total" }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.hasilTotalNilai, children: [hasil.totalBerhasil, " berhasil \u00B7 ", hasil.totalGagal, " gagal"] })] })] }), (hasil.dilewati?.length ?? 0) > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced], testID: "hasil-dilewati", children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.cardTitle, children: ["Baris yang Dilewati (", hasil.dilewati.length, ")"] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardSub, children: "Isi baris ini sama dengan baris yang sudah pernah diimpor, jadi tidak dicatat lagi." }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatBox, children: [hasil.dilewati.slice(0, 50).map((g, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatItem, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.pilBaris, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pilBarisTeks, children: [ImportDataAwalService_1.JUDUL_SHEET[g.jenis], " \u00B7 Baris ", g.baris] }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatKeterangan, children: g.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatPesan, children: g.pesan })] }, i))), hasil.dilewati.length > 50 ? ((0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.galatPesan, children: ["\u2026dan ", hasil.dilewati.length - 50, " baris lain (lihat Riwayat Import)."] })) : null] })] })), hasil.berhasil.some((b) => (b.peringatan?.length ?? 0) > 0) && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced], testID: "hasil-peringatan-syarat", children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.cardTitle, children: ["Pinjaman dengan Peringatan Syarat (", hasil.berhasil.filter((b) => (b.peringatan?.length ?? 0) > 0).length, ")"] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardSub, children: "Pinjaman ini SUDAH tercatat. Syarat pengajuannya dinilai pada tanggal pinjaman (bukan hari ini) dan tidak terpenuhi; karena pinjaman historis sudah terjadi, import tidak menolaknya. Hasil ini juga tersimpan di Riwayat Import." }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.galatBox, children: hasil.berhasil
+                                    .filter((b) => (b.peringatan?.length ?? 0) > 0)
+                                    .map((b, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatItem, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.pilBaris, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pilBarisTeks, children: [ImportDataAwalService_1.JUDUL_SHEET[b.jenis], " \u00B7 Baris ", b.baris] }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatKeterangan, children: b.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.galatPesan, { color: colors_1.colors.warning }], children: (b.peringatan ?? []).join(' ') })] }, i))) })] })), hasil.gagal.length > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.card, styles.cardSpaced, styles.cardGalat], children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.cardTitle, children: ["Baris yang Gagal (", hasil.gagal.length, ")"] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.cardSub, children: "Perbaiki baris ini di Excel, lalu import ULANG berkas yang sama. Baris yang sudah berhasil dikenali dari isinya dan otomatis dilewati, sehingga tidak tercatat dua kali." }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.galatBox, children: hasil.gagal.map((g, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.galatItem, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.pilBaris, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.pilBarisTeks, children: [ImportDataAwalService_1.JUDUL_SHEET[g.jenis], " \u00B7 Baris ", g.baris] }) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatKeterangan, children: g.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.galatPesan, children: g.pesan })] }, i))) })] })), (hasil.migrasi !== null ||
                         hasil.saldoAwal !== null ||
                         (hasil.saldoAwalAkun ?? null) !== null ||
                         hasil.aset !== null ||
@@ -22958,7 +25748,7 @@ const styles = react_native_1.StyleSheet.create({
 });
 
 },1518,[6,11,119,81,232,287,477,19,475,678,913,9005,1519,9015,1520,9003,794,765,772,1289,918,910,1532,1530]);
-__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "expo-file-system/legacy":return _$r(781);case "expo-document-picker":return _$r(820);case "expo-sharing":return _$r(819);case "xlsx-js-style":return _$r(935);case "@/import/ExcelDataAwalParser":return _$r(1520);case "@/import/TemplateWorkbook":return _$r(1521);case "@/database/db":return _$r(778);case "@/import/RiwayatImportRepository":return _$r(1523);case "@/import/SidikImport":return _$r(9015);case "@/import/EksekusiImportDataAwal":return _$r(1525);case "@/import/RiwayatImportPlan":return _$r(1524);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "expo-file-system/legacy":return _$r(781);case "expo-document-picker":return _$r(820);case "expo-sharing":return _$r(819);case "xlsx-js-style":return _$r(935);case "@/import/ExcelDataAwalParser":return _$r(1520);case "@/import/TemplateWorkbook":return _$r(1521);case "@/database/db":return _$r(778);case "@/services/AccountingPolicyService":return _$r(963);case "@/import/RiwayatImportRepository":return _$r(1523);case "@/import/SidikImport":return _$r(9015);case "@/import/EksekusiImportDataAwal":return _$r(1525);case "@/import/RiwayatImportPlan":return _$r(1524);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
     if (k2 === undefined) k2 = k;
@@ -22994,7 +25784,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports,"__esModule", { value: true });
-exports.turunkanStatusRiwayat=exports.saringLogRiwayat=exports.LABEL_FILTER_LOG=exports.KETERANGAN_STATUS_RIWAYAT=exports.LABEL_STATUS_RIWAYAT=exports.LABEL_SHEET=exports.JUDUL_SHEET=exports.jalankanImportDataAwal=exports.cocokkanJenisSheet=exports.bangunWorkbookTemplate=void 0;
+exports.turunkanStatusRiwayat=exports.adalahPeringatanSyarat=exports.saringLogRiwayat=exports.LABEL_FILTER_LOG=exports.KETERANGAN_STATUS_RIWAYAT=exports.LABEL_STATUS_RIWAYAT=exports.LABEL_SHEET=exports.JUDUL_SHEET=exports.jalankanImportDataAwal=exports.cocokkanJenisSheet=exports.bangunWorkbookTemplate=void 0;
 exports.unduhTemplateDataAwal=unduhTemplateDataAwal;
 exports.workbookKeSheetMentah=workbookKeSheetMentah;
 exports.pilihBerkasExcel=pilihBerkasExcel;
@@ -23005,6 +25795,7 @@ exports.ambilRekeningBankAktif=ambilRekeningBankAktif;
 exports.ambilNikTerdaftar=ambilNikTerdaftar;
 exports.ambilSidikTercatat=ambilSidikTercatat;
 exports.ambilAnggotaTerdaftar=ambilAnggotaTerdaftar;
+exports.ambilKebijakanSyaratPinjaman=ambilKebijakanSyaratPinjaman;
 exports.ambilJumlahRiwayatImport=ambilJumlahRiwayatImport;
 const FileSystem = __importStar(require("expo-file-system/legacy")); // SDK 54: API lama (documentDirectory, getInfoAsync, dst.) sekarang di path /legacy
 const DocumentPicker = __importStar(require("expo-document-picker"));
@@ -23015,6 +25806,7 @@ Object.defineProperty(exports,"cocokkanJenisSheet", { enumerable: true, get: fun
 const TemplateWorkbook_1 = require("@/import/TemplateWorkbook");
 Object.defineProperty(exports,"bangunWorkbookTemplate", { enumerable: true, get: function () { return TemplateWorkbook_1.bangunWorkbookTemplate; } });
 const db_1 = require("@/database/db");
+const AccountingPolicyService_1 = require("@/services/AccountingPolicyService");
 const RiwayatImportRepository_1 = require("@/import/RiwayatImportRepository");
 const SidikImport_1 = require("@/import/SidikImport");
 const RiwayatImportRepository_2 = require("@/import/RiwayatImportRepository");
@@ -23124,6 +25916,7 @@ Object.defineProperty(exports,"LABEL_STATUS_RIWAYAT", { enumerable: true, get: f
 Object.defineProperty(exports,"KETERANGAN_STATUS_RIWAYAT", { enumerable: true, get: function () { return RiwayatImportPlan_1.KETERANGAN_STATUS_RIWAYAT; } });
 Object.defineProperty(exports,"LABEL_FILTER_LOG", { enumerable: true, get: function () { return RiwayatImportPlan_1.LABEL_FILTER_LOG; } });
 Object.defineProperty(exports,"saringLogRiwayat", { enumerable: true, get: function () { return RiwayatImportPlan_1.saringLogRiwayat; } });
+Object.defineProperty(exports,"adalahPeringatanSyarat", { enumerable: true, get: function () { return RiwayatImportPlan_1.adalahPeringatanSyarat; } });
 Object.defineProperty(exports,"turunkanStatusRiwayat", { enumerable: true, get: function () { return RiwayatImportPlan_1.turunkanStatusRiwayat; } });
 /** Daftar riwayat import (terbaru lebih dulu) — memakai koneksi database aplikasi. */
 async function ambilDaftarRiwayatImport(batas) {
@@ -23162,12 +25955,23 @@ async function ambilAnggotaTerdaftar() {
     const rows = await db.getAllAsync(`SELECT nomor_anggota, nama_lengkap, tanggal_bergabung FROM anggota`);
     return rows.map((r) => ({ nomorAnggota: r.nomor_anggota, nama: r.nama_lengkap, tanggalBergabung: r.tanggal_bergabung }));
 }
+/**
+ * RC-S133.6.4 — kebijakan syarat pinjaman yang berlaku, untuk pemeriksaan
+ * syarat pinjaman di pratinjau (`periksaSyaratPinjamanImport`).
+ */
+async function ambilKebijakanSyaratPinjaman() {
+    const [saldoMinimum, plafonPinjaman] = await Promise.all([
+        (0, AccountingPolicyService_1.getPolicyValue)('MINIMUM_SALDO_SIMPANAN_PINJAMAN'),
+        (0, AccountingPolicyService_1.getPolicyValue)('MAX_PINJAMAN_PER_ANGGOTA'),
+    ]);
+    return { saldoMinimum, plafonPinjaman };
+}
 /** Jumlah riwayat tersimpan — dipakai lencana pada ikon riwayat. */
 async function ambilJumlahRiwayatImport() {
     return (0, RiwayatImportRepository_2.jumlahRiwayatImport)(await (0, db_1.getDb)());
 }
 
-},1519,[781,820,819,935,1520,1521,778,1523,9015,1525,1524]);
+},1519,[781,820,819,935,1520,1521,778,963,1523,9015,1525,1524]);
 __d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
@@ -25199,7 +28003,9 @@ async function catatRiwayatImport(db, hasil, konteks) {
                 continue;
             await db.runAsync(`INSERT INTO import_data_awal_log
            (id, riwayat_id, jenis_sheet, baris, keterangan, status, pesan, created_at)
-         VALUES (?,?,?,?,?, 'BERHASIL', NULL, ?)`, (0, id_1.newId)(), riwayatId, b.jenis, b.baris, b.keterangan, nowIso);
+         VALUES (?,?,?,?,?, 'BERHASIL', ?, ?)`, (0, id_1.newId)(), riwayatId, b.jenis, b.baris, b.keterangan, 
+            // RC-S133.6.4 — peringatan syarat pinjaman (baris tetap berhasil).
+            b.peringatan && b.peringatan.length > 0 ? (0, RiwayatImportPlan_1.pesanPeringatanSyarat)(b.peringatan) : null, nowIso);
         }
         for (const g of hasil.gagal) {
             if (!bolehLog(g.jenis))
@@ -25317,9 +28123,11 @@ async function tautkanSidikKeRiwayat(db, sidik, riwayatId) {
 __d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
-exports.LABEL_FILTER_LOG=exports.KETERANGAN_STATUS_RIWAYAT=exports.LABEL_STATUS_RIWAYAT=void 0;
+exports.LABEL_FILTER_LOG=exports.AWALAN_PERINGATAN_SYARAT=exports.KETERANGAN_STATUS_RIWAYAT=exports.LABEL_STATUS_RIWAYAT=void 0;
 exports.turunkanStatusRiwayat=turunkanStatusRiwayat;
 exports.statusDariHasil=statusDariHasil;
+exports.pesanPeringatanSyarat=pesanPeringatanSyarat;
+exports.adalahPeringatanSyarat=adalahPeringatanSyarat;
 exports.saringLogRiwayat=saringLogRiwayat;
 /**
  * Status satu kali import diturunkan HANYA dari dua angka: berapa baris
@@ -25358,6 +28166,23 @@ exports.KETERANGAN_STATUS_RIWAYAT={
     SEBAGIAN: 'Sebagian baris MASUK, sebagian gagal. Perbaiki baris yang gagal lalu impor ulang berkas yang sama: baris yang sudah masuk dikenali dan dilewati, sehingga tidak menggandakan data.',
     GAGAL: 'Tidak ada satu pun baris yang masuk.',
 };
+/**
+ * RC-S133.6.4 — peringatan syarat pinjaman pada baris yang BERHASIL.
+ *
+ * Pinjaman historis dari import data awal tidak ditolak bila syarat
+ * pengajuan (simpanan pokok/wajib, saldo minimum, batas pinjaman, batas
+ * tunggakan) tidak terpenuhi PADA TANGGAL PINJAMAN; baris tetap berhasil,
+ * dan alasannya dicatat di kolom `pesan` log baris tersebut (kolom itu
+ * sebelumnya hanya terisi untuk baris GAGAL) — tanpa perubahan skema.
+ */
+exports.AWALAN_PERINGATAN_SYARAT='Peringatan syarat pinjaman pada tanggal pinjaman: ';
+function pesanPeringatanSyarat(alasan) {
+    return exports.AWALAN_PERINGATAN_SYARAT + alasan.join(' ');
+}
+/** Baris log yang BERHASIL tetapi membawa peringatan syarat pinjaman. */
+function adalahPeringatanSyarat(b) {
+    return b.status === 'BERHASIL' && !!b.pesan && b.pesan.startsWith(exports.AWALAN_PERINGATAN_SYARAT);
+}
 exports.LABEL_FILTER_LOG={
     SEMUA: 'Semua',
     BERHASIL: 'Berhasil',
@@ -25540,9 +28365,9 @@ async function jalankanImportDataAwal(ringkasan, opsi) {
      * di `perSheet` dan panjang daftar `berhasil` mustahil divergen (dulu
      * penghitung dinaikkan langsung di enam tempat berbeda).
      */
-    const catatBerhasil = (jenis, baris, keterangan) => {
+    const catatBerhasil = (jenis, baris, keterangan, peringatan) => {
         hitung[jenis].berhasil += 1;
-        berhasil.push({ jenis, baris, keterangan });
+        berhasil.push(peringatan && peringatan.length > 0 ? { jenis, baris, keterangan, peringatan } : { jenis, baris, keterangan });
     };
     /**
      * Kode Anggota (huruf besar) -> anggota yang BERHASIL dibuat. Baris
@@ -25917,11 +28742,12 @@ async function jalankanImportDataAwal(ringkasan, opsi) {
         if (!a)
             continue;
         let pinjamanId = null;
+        let peringatanSyarat = [];
         try {
             // AUDIT F-1b — tentukan rekening SEBELUM ajukanPinjaman agar kegagalan
             // tidak meninggalkan pinjaman DIAJUKAN yatim.
             const bankP = await bankUntukImport(opsi.dbMigrasi ?? (await (0, db_1.getDb)()), r.sumberDana, r.rekeningBank);
-            ({ id: pinjamanId } = await (0, PinjamanService_1.ajukanPinjaman)({
+            ({ id: pinjamanId, peringatanSyarat } = await (0, PinjamanService_1.ajukanPinjaman)({
                 anggotaId: a.id,
                 tanggal: r.tanggal,
                 jumlahPinjaman: r.jumlahPinjaman,
@@ -25933,6 +28759,10 @@ async function jalankanImportDataAwal(ringkasan, opsi) {
                 biayaAdminNilai: 0,
                 dendaAktif: false,
                 createdBy: opsi.createdBy,
+                // RC-S133.6.4 — syarat pinjaman dinilai pada tanggal pinjaman (bukan
+                // hari ini) dan, untuk import data awal, hanya MEMPERINGATKAN: pinjaman
+                // historis sudah terjadi, jadi menolaknya hanya menghalangi pemindahan data.
+                modeEligibilitas: 'PERINGATAN',
             }));
             await (0, PinjamanService_1.cairkanPinjaman)({
                 pinjamanId,
@@ -25966,7 +28796,7 @@ async function jalankanImportDataAwal(ringkasan, opsi) {
                     });
                 }
             }
-            catatBerhasil('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`);
+            catatBerhasil('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, peringatanSyarat);
             await simpanSidik('PINJAMAN', r.baris, `${a.nomorAnggota} — ${a.nama}`, 'BERHASIL', 'pinjaman', pinjamanId);
         }
         catch (e) {
@@ -27212,7 +30042,12 @@ function KartuRiwayat({ riwayat, terbuka, onToggle, }) {
     const warna = WARNA_STATUS[riwayat.status];
     const logTampil = log ? (0, ImportDataAwalService_1.saringLogRiwayat)(log, filter) : [];
     const jumlahGagal = log ? log.filter((b) => b.status === 'GAGAL').length : riwayat.totalGagal;
-    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.kartu, { borderLeftColor: warna }], children: [(0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: styles.kartuHeader, onPress: buka, accessibilityRole: "button", children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: IKON_STATUS[riwayat.status], size: 20, color: warna }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuJudul, children: ImportDataAwalService_1.LABEL_STATUS_RIWAYAT[riwayat.status] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuWaktu, children: formatWaktu(riwayat.dijalankanPada) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuBerkas, numberOfLines: 1, children: riwayat.namaBerkas ?? 'Nama berkas tidak tercatat' })] }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: terbuka ? 'chevron-up' : 'chevron-down', size: colors_1.iconSize.md, color: colors_1.colors.textFaint })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.angkaBaris, children: [(0, jsx_runtime_1.jsx)(Angka, { label: "Baris", nilai: riwayat.totalBaris }), (0, jsx_runtime_1.jsx)(Angka, { label: "Berhasil", nilai: riwayat.totalBerhasil, warna: colors_1.colors.success }), (0, jsx_runtime_1.jsx)(Angka, { label: "Gagal", nilai: riwayat.totalGagal, warna: riwayat.totalGagal > 0 ? colors_1.colors.danger : undefined }), (riwayat.totalDilewati ?? 0) > 0 ? ((0, jsx_runtime_1.jsx)(Angka, { label: "Dilewati", nilai: riwayat.totalDilewati ?? 0, warna: colors_1.colors.warning })) : null] }), riwayat.status !== 'BERHASIL' && ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.catatanStatus, { color: warna }], children: ImportDataAwalService_1.KETERANGAN_STATUS_RIWAYAT[riwayat.status] })), terbuka && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.isi, children: [riwayat.perSheet.length > 0 && ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.subJudul, children: "Per Jenis Data" }), riwayat.perSheet.map((s) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: s.label || ExcelDataAwalParser_1.LABEL_SHEET[s.jenis] || s.jenis }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.sheetAngka, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: { color: colors_1.colors.success }, children: [s.berhasil, " berhasil"] }), '  ·  ', (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: { color: s.gagal > 0 ? colors_1.colors.danger : colors_1.colors.textFaint }, children: [s.gagal, " gagal"] }), (s.dilewati ?? 0) > 0 ? ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.warning }, children: `  ·  ${s.dilewati} dilewati` })) : null] })] }, s.jenis)))] })), riwayat.perSheet.some((s) => (s.rincianDilewati?.length ?? 0) > 0) && ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.subJudul, { marginTop: colors_1.spacing.md }], children: "Dilewati (sudah pernah diimpor)" }), riwayat.perSheet.flatMap((s) => (s.rincianDilewati ?? []).map((d) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.logBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.logTanda, { backgroundColor: colors_1.colors.warning }] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.logKepala, children: [ExcelDataAwalParser_1.LABEL_SHEET[s.jenis] ?? s.jenis, " \u00B7 baris ", d.baris] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.logKeterangan, children: d.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.logPesan, { color: colors_1.colors.textMuted }], children: d.pesan })] })] }, `${s.jenis}-${d.baris}`))))] })), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.subJudul, { marginTop: colors_1.spacing.md }], children: "Log Per Baris" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.filterBaris, children: ['SEMUA', 'GAGAL', 'BERHASIL'].map((f) => ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.chip, filter === f && styles.chipAktif], onPress: () => setFilter(f), children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: [styles.chipText, filter === f && styles.chipTextAktif], children: [ImportDataAwalService_1.LABEL_FILTER_LOG[f], f === 'GAGAL' && jumlahGagal > 0 ? ` (${jumlahGagal})` : ''] }) }, f))) }), memuatLog && (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.primary, style: { marginVertical: colors_1.spacing.md } }), errorLog && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.error, children: errorLog }), !memuatLog && !errorLog && logTampil.length === 0 && ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kosong, children: filter === 'GAGAL' ? 'Tidak ada baris yang gagal.' : 'Tidak ada baris untuk penyaring ini.' })), logTampil.map((b) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.logBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.logTanda, { backgroundColor: b.status === 'GAGAL' ? colors_1.colors.danger : colors_1.colors.success }] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.logKepala, children: [ExcelDataAwalParser_1.LABEL_SHEET[b.jenisSheet] ?? b.jenisSheet, " \u00B7 baris ", b.baris] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.logKeterangan, children: b.keterangan }), b.pesan ? (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.logPesan, children: b.pesan }) : null] })] }, b.id)))] }))] }));
+    // RC-S133.6.4 — pinjaman yang masuk walau syarat pengajuan tidak terpenuhi pada tanggal pinjamannya.
+    const jumlahPeringatanSyarat = log ? log.filter(ImportDataAwalService_1.adalahPeringatanSyarat).length : 0;
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: [styles.kartu, { borderLeftColor: warna }], children: [(0, jsx_runtime_1.jsxs)(react_native_1.TouchableOpacity, { style: styles.kartuHeader, onPress: buka, accessibilityRole: "button", children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: IKON_STATUS[riwayat.status], size: 20, color: warna }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuJudul, children: ImportDataAwalService_1.LABEL_STATUS_RIWAYAT[riwayat.status] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuWaktu, children: formatWaktu(riwayat.dijalankanPada) }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kartuBerkas, numberOfLines: 1, children: riwayat.namaBerkas ?? 'Nama berkas tidak tercatat' })] }), (0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: terbuka ? 'chevron-up' : 'chevron-down', size: colors_1.iconSize.md, color: colors_1.colors.textFaint })] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.angkaBaris, children: [(0, jsx_runtime_1.jsx)(Angka, { label: "Baris", nilai: riwayat.totalBaris }), (0, jsx_runtime_1.jsx)(Angka, { label: "Berhasil", nilai: riwayat.totalBerhasil, warna: colors_1.colors.success }), (0, jsx_runtime_1.jsx)(Angka, { label: "Gagal", nilai: riwayat.totalGagal, warna: riwayat.totalGagal > 0 ? colors_1.colors.danger : undefined }), (riwayat.totalDilewati ?? 0) > 0 ? ((0, jsx_runtime_1.jsx)(Angka, { label: "Dilewati", nilai: riwayat.totalDilewati ?? 0, warna: colors_1.colors.warning })) : null] }), riwayat.status !== 'BERHASIL' && ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.catatanStatus, { color: warna }], children: ImportDataAwalService_1.KETERANGAN_STATUS_RIWAYAT[riwayat.status] })), terbuka && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.isi, children: [riwayat.perSheet.length > 0 && ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.subJudul, children: "Per Jenis Data" }), riwayat.perSheet.map((s) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.sheetBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.sheetLabel, children: s.label || ExcelDataAwalParser_1.LABEL_SHEET[s.jenis] || s.jenis }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.sheetAngka, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: { color: colors_1.colors.success }, children: [s.berhasil, " berhasil"] }), '  ·  ', (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: { color: s.gagal > 0 ? colors_1.colors.danger : colors_1.colors.textFaint }, children: [s.gagal, " gagal"] }), (s.dilewati ?? 0) > 0 ? ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: { color: colors_1.colors.warning }, children: `  ·  ${s.dilewati} dilewati` })) : null] })] }, s.jenis)))] })), riwayat.perSheet.some((s) => (s.rincianDilewati?.length ?? 0) > 0) && ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.subJudul, { marginTop: colors_1.spacing.md }], children: "Dilewati (sudah pernah diimpor)" }), riwayat.perSheet.flatMap((s) => (s.rincianDilewati ?? []).map((d) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.logBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.logTanda, { backgroundColor: colors_1.colors.warning }] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.logKepala, children: [ExcelDataAwalParser_1.LABEL_SHEET[s.jenis] ?? s.jenis, " \u00B7 baris ", d.baris] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.logKeterangan, children: d.keterangan }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.logPesan, { color: colors_1.colors.textMuted }], children: d.pesan })] })] }, `${s.jenis}-${d.baris}`))))] })), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.subJudul, { marginTop: colors_1.spacing.md }], children: "Log Per Baris" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.filterBaris, children: ['SEMUA', 'GAGAL', 'BERHASIL'].map((f) => ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [styles.chip, filter === f && styles.chipAktif], onPress: () => setFilter(f), children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: [styles.chipText, filter === f && styles.chipTextAktif], children: [ImportDataAwalService_1.LABEL_FILTER_LOG[f], f === 'GAGAL' && jumlahGagal > 0 ? ` (${jumlahGagal})` : ''] }) }, f))) }), memuatLog && (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.primary, style: { marginVertical: colors_1.spacing.md } }), errorLog && (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.error, children: errorLog }), !memuatLog && !errorLog && logTampil.length === 0 && ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.kosong, children: filter === 'GAGAL' ? 'Tidak ada baris yang gagal.' : 'Tidak ada baris untuk penyaring ini.' })), jumlahPeringatanSyarat > 0 && ((0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.logPeringatanRingkas, testID: "riwayat-peringatan-syarat", children: [jumlahPeringatanSyarat, " pinjaman masuk walau syarat pengajuannya tidak terpenuhi pada tanggal pinjaman (peringatan, bukan penolakan). Lihat baris bertanda kuning di bawah."] })), logTampil.map((b) => ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.logBaris, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [
+                                    styles.logTanda,
+                                    { backgroundColor: b.status === 'GAGAL' ? colors_1.colors.danger : (0, ImportDataAwalService_1.adalahPeringatanSyarat)(b) ? colors_1.colors.warning : colors_1.colors.success },
+                                ] }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: { flex: 1 }, children: [(0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: styles.logKepala, children: [ExcelDataAwalParser_1.LABEL_SHEET[b.jenisSheet] ?? b.jenisSheet, " \u00B7 baris ", b.baris] }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.logKeterangan, children: b.keterangan }), b.pesan ? ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.logPesan, (0, ImportDataAwalService_1.adalahPeringatanSyarat)(b) && { color: colors_1.colors.warning }], children: b.pesan })) : null] })] }, b.id)))] }))] }));
 }
 function Angka({ label, nilai, warna }) {
     return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: styles.angka, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [styles.angkaNilai, warna ? { color: warna } : null], children: nilai.toLocaleString('id-ID') }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: styles.angkaLabel, children: label })] }));
@@ -27292,6 +30127,7 @@ const styles = react_native_1.StyleSheet.create({
     logKepala: { fontSize: 11, fontWeight: '700', color: colors_1.colors.textMuted },
     logKeterangan: { fontSize: 12, color: colors_1.colors.text, marginTop: 1 },
     logPesan: { fontSize: 11, color: colors_1.colors.danger, marginTop: 2, lineHeight: 15 },
+    logPeringatanRingkas: { fontSize: 12, color: colors_1.colors.warning, marginBottom: colors_1.spacing.sm, lineHeight: 17 },
 });
 
 },1539,[6,11,81,232,287,477,19,475,678,1519,1520,912,1356,772,1289]);
@@ -28713,7 +31549,7 @@ exports.KETERBATASAN_SALDO_AWAL_BERJANGKA=[
 ];
 
 },9002,[785,828,966,976,1286,1279,1280,975,1284]);
-__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/PinjamanCalculator":return _$r(1346);case "@/import/ExcelDataAwalParser":return _$r(1520);case "@/import/TemplateDataAwal":return _$r(1522);case "@/config/defaultCOA":return _$r(783);case "@/import/SidikImport":return _$r(9015);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/accounting/PinjamanCalculator":return _$r(1346);case "@/import/ExcelDataAwalParser":return _$r(1520);case "@/import/TemplateDataAwal":return _$r(1522);case "@/config/defaultCOA":return _$r(783);case "@/validators/BusinessRuleEngine":return _$r(966);case "@/import/SidikImport":return _$r(9015);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 Object.defineProperty(exports,"__esModule", { value: true });
 exports.DAFTAR_PERIKSA=exports.PANDUAN_IMPORT=exports.CONTOH_KASUS=void 0;
@@ -28727,11 +31563,13 @@ exports.periksaSebelumImport=periksaSebelumImport;
 exports.estimasiPinjamanImport=estimasiPinjamanImport;
 exports.ringkasPinjamanImport=ringkasPinjamanImport;
 exports.periksaJasaPinjaman=periksaJasaPinjaman;
+exports.periksaSyaratPinjamanImport=periksaSyaratPinjamanImport;
 exports.adaBlokir=adaBlokir;
 const PinjamanCalculator_1 = require("@/accounting/PinjamanCalculator");
 const ExcelDataAwalParser_1 = require("@/import/ExcelDataAwalParser");
 const TemplateDataAwal_1 = require("@/import/TemplateDataAwal");
 const defaultCOA_1 = require("@/config/defaultCOA");
+const BusinessRuleEngine_1 = require("@/validators/BusinessRuleEngine");
 const SidikImport_1 = require("@/import/SidikImport");
 /**
  * RC-S133.4.7 — PANDUAN PENGISIAN TEMPLATE IMPORT (MODUL MURNI).
@@ -29503,6 +32341,21 @@ function periksaSebelumImport(ringkasan, opsi) {
     }
     // ---- A3. RC-S133.4.8 — SATUAN JASA PINJAMAN & RINGKASAN PIUTANG ----
     out.push(...periksaJasaPinjaman(h.pinjaman.baris));
+    // ---- A3b. RC-S133.6.4 — SYARAT PINJAMAN PADA TANGGAL PINJAMAN ----
+    if (opsi.kebijakanSyaratPinjaman) {
+        const sudahPinjaman = new Set();
+        if (sidikBerkas && opsi.sidikTercatat) {
+            for (const b of (0, SidikImport_1.bandingkanSidik)(sidikBerkas, opsi.sidikTercatat).sudah) {
+                if (b.jenis === 'PINJAMAN')
+                    sudahPinjaman.add(b.baris);
+            }
+        }
+        out.push(...periksaSyaratPinjamanImport(h, {
+            cutOff: opsi.sifat === 'SALDO_AWAL' ? opsi.cutOff : undefined,
+            kebijakan: opsi.kebijakanSyaratPinjaman,
+            lewatiBaris: sudahPinjaman,
+        }));
+    }
     const adaSheet7 = (h.saldoAwalAkun?.baris.length ?? 0) > 0;
     const kolomMigrasi = h.pinjaman.baris.filter((r) => r.nomorPinjamanLama !== undefined ||
         r.sisaPokok !== undefined ||
@@ -29711,12 +32564,85 @@ function periksaJasaPinjaman(daftar) {
     });
     return out;
 }
+const MAKS_BARIS_SYARAT_DITAMPILKAN = 8;
+/**
+ * Pemeriksaan syarat pinjaman pada pratinjau — hasilnya PERINGATAN, tidak
+ * pernah BLOKIR: pinjaman historis sudah terjadi, jadi syarat yang tidak
+ * terpenuhi pada tanggalnya tidak menahan import (keputusan RC-S133.6.4).
+ *
+ * Yang diperiksa adalah pinjaman yang dicairkan lewat jalur pencairan
+ * biasa (bertanggal pada/setelah cut-off, atau seluruhnya bila "Transaksi
+ * baru") — jalur yang di eksekutor memanggil `ajukanPinjaman()`. Pinjaman
+ * lama sebelum cut-off masuk jalur migrasi saldo awal yang memang tidak
+ * pernah memeriksa syarat pengajuan.
+ *
+ * Saldo simpanan dihitung dari sheet Simpanan berkas ini yang bertanggal
+ * <= tanggal pinjaman (sheet itu diimpor lebih dulu daripada Pinjaman).
+ * Yang TIDAK dapat dinilai di pratinjau — sisa pinjaman berjalan dan
+ * tunggakan anggota — dinilai saat import (per tanggal pinjaman) dan
+ * hasilnya tercatat di Riwayat Import.
+ */
+function periksaSyaratPinjamanImport(h, opsi) {
+    const jalurPencairan = h.pinjaman.baris.filter((r) => (!opsi.cutOff || r.tanggal >= opsi.cutOff) && !(opsi.lewatiBaris?.has(r.baris) ?? false));
+    if (jalurPencairan.length === 0)
+        return [];
+    const temuan = [];
+    for (const r of jalurPencairan) {
+        const kode = r.kode.trim().toUpperCase();
+        let pokok = 0;
+        let wajib = 0;
+        let sukarela = 0;
+        for (const sp of h.simpanan.baris) {
+            if (sp.kode.trim().toUpperCase() !== kode || sp.tanggal > r.tanggal)
+                continue;
+            pokok += sp.pokok;
+            wajib += sp.wajib;
+            sukarela += sp.sukarela;
+        }
+        const alasan = [
+            (0, BusinessRuleEngine_1.checkKepemilikanSimpananPokokWajib)(pokok, wajib),
+            (0, BusinessRuleEngine_1.checkSaldoSimpananMinimum)(pokok + wajib + sukarela, opsi.kebijakan.saldoMinimum),
+            (0, BusinessRuleEngine_1.checkLimitPinjaman)(r.jumlahPinjaman, opsi.kebijakan.plafonPinjaman),
+        ]
+            .filter((x) => !x.valid)
+            .map((x) => (0, BusinessRuleEngine_1.alasanSebagaiPeringatan)(x.reason ?? 'Syarat tidak terpenuhi.'));
+        if (alasan.length > 0)
+            temuan.push({ baris: r.baris, kode: r.kode, tanggal: r.tanggal, alasan });
+    }
+    const catatan = 'Pinjaman ini TETAP diimpor (peringatan, bukan penolakan) dan hasil pemeriksaannya dicatat di Riwayat Import. ' +
+        'Sisa pinjaman berjalan dan tunggakan anggota diperiksa saat import, per tanggal pinjaman.';
+    if (temuan.length === 0) {
+        return [
+            {
+                kunci: 'syarat-pinjaman-lampau',
+                tingkat: 'INFO',
+                judul: `Syarat ${jalurPencairan.length} pinjaman terpenuhi pada tanggal pinjamannya`,
+                pesan: 'Simpanan pokok & wajib, saldo simpanan minimum, dan plafon pinjaman diperiksa per tanggal tiap pinjaman, bukan per hari ini. ' +
+                    'Sisa pinjaman berjalan dan tunggakan anggota diperiksa saat import.',
+            },
+        ];
+    }
+    const rincian = temuan
+        .slice(0, MAKS_BARIS_SYARAT_DITAMPILKAN)
+        .map((t) => `Baris ${t.baris} (${t.kode}, ${t.tanggal}): ${t.alasan.join(' ')}`)
+        .join(' · ');
+    const sisa = temuan.length - MAKS_BARIS_SYARAT_DITAMPILKAN;
+    return [
+        {
+            kunci: 'syarat-pinjaman-lampau',
+            tingkat: 'PERINGATAN',
+            judul: `${temuan.length} pinjaman tidak memenuhi syarat pada tanggal pinjamannya`,
+            // Setiap alasan sudah berakhir dengan titik (lihat alasanSebagaiPeringatan).
+            pesan: `${ExcelDataAwalParser_1.JUDUL_SHEET.PINJAMAN}: ${rincian}${sisa > 0 ? ` · …dan ${sisa} pinjaman lain.` : ''} ${catatan}`,
+        },
+    ];
+}
 /** True bila ada peringatan yang menahan tombol Import. */
 function adaBlokir(daftar) {
     return daftar.some((p) => p.tingkat === 'BLOKIR');
 }
 
-},9003,[1346,1520,1522,783,9015]);
+},9003,[1346,1520,1522,783,966,9015]);
 __d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "react/jsx-runtime":return _$r(6);case "react":return _$r(11);case "react-native":return {Animated:_$r(275).default,ScrollView:_$r(287).default,StyleSheet:_$r(19).default,Text:_$r(232).default,View:_$r(81).default,__esModule:true};case "@expo/vector-icons":return _$r(678);case "@/theme/colors":return _$r(772);case "@/import/PanduanImportData":return _$r(9003);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
 "use strict";
 var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
@@ -31984,6 +34910,400 @@ const styles = react_native_1.StyleSheet.create({
 
 },9017,[6,11,81,232,287,477,475,19,483,493,678,858,1300,1297,913,1386,9016,910,765,882,772,1295,879]);
 
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+/**
+ * RC-S133.6.4 (v82) — ATURAN MURNI PENCATATAN PENYELESAIAN PINJAMAN KE
+ * PENGADILAN NEGERI / KLAIM ASURANSI (kriteria Macet angka 3, SOM 12.1).
+ *
+ * Tanpa import database maupun modul native, supaya validasi dan labelnya
+ * dipakai bersama service, layar, dan export, dan bisa diuji langsung.
+ *
+ * Mengapa dicatat MANUAL: nomor perkara / nomor klaim dan dokumennya hanya
+ * diketahui manusia (Admin/Pengurus); tidak ada yang dapat ditebak otomatis
+ * dari data pinjaman.
+ */
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.BATAS_PANJANG_PENYELESAIAN=exports.LABEL_TANGGAL_PENYELESAIAN=exports.LABEL_NOMOR_PENYELESAIAN=exports.LABEL_JALUR_PENYELESAIAN=exports.DAFTAR_JALUR_PENYELESAIAN=void 0;
+exports.tanggalIsoValid=tanggalIsoValid;
+exports.validasiPenyelesaian=validasiPenyelesaian;
+exports.ringkasPenyelesaian=ringkasPenyelesaian;
+exports.bacaPenyelesaianDariRow=bacaPenyelesaianDariRow;
+exports.DAFTAR_JALUR_PENYELESAIAN=['PENGADILAN', 'ASURANSI'];
+exports.LABEL_JALUR_PENYELESAIAN={
+    PENGADILAN: 'Diserahkan ke Pengadilan Negeri',
+    ASURANSI: 'Klaim ganti rugi ke perusahaan asuransi kredit',
+};
+/** Label kolom nomor menurut jalur. */
+exports.LABEL_NOMOR_PENYELESAIAN={
+    PENGADILAN: 'Nomor perkara',
+    ASURANSI: 'Nomor klaim',
+};
+exports.LABEL_TANGGAL_PENYELESAIAN={
+    PENGADILAN: 'Tanggal diserahkan ke Pengadilan Negeri',
+    ASURANSI: 'Tanggal klaim diajukan',
+};
+exports.BATAS_PANJANG_PENYELESAIAN={ nomor: 100, dokumen: 200, alasan: 500 };
+/** True untuk YYYY-MM-DD yang benar-benar ada di kalender (2026-02-30 ditolak). */
+function tanggalIsoValid(t) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(t))
+        return false;
+    const [y, m, d] = t.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+/**
+ * Validasi isian pencatatan. `hariIni` (YYYY-MM-DD, jam aplikasi) membatasi
+ * tanggal: penyerahan ke pengadilan / pengajuan klaim yang belum terjadi tidak
+ * boleh dicatat. `tanggalPinjaman` (opsional) menolak tanggal sebelum akad.
+ */
+function validasiPenyelesaian(input, hariIni, tanggalPinjaman) {
+    const galat = [];
+    const jalur = exports.DAFTAR_JALUR_PENYELESAIAN.find((j) => j === input.jalur);
+    if (!jalur)
+        galat.push('Jalur penyelesaian wajib dipilih: Pengadilan Negeri atau Klaim Asuransi.');
+    const tanggal = (input.tanggal ?? '').trim();
+    if (!tanggalIsoValid(tanggal)) {
+        galat.push('Tanggal wajib diisi dengan format YYYY-MM-DD yang valid.');
+    }
+    else if (tanggal > hariIni) {
+        galat.push('Tanggal tidak boleh di masa depan: hanya penyelesaian yang sudah diserahkan/diajukan yang boleh dicatat.');
+    }
+    else if (tanggalPinjaman && tanggal < tanggalPinjaman) {
+        galat.push(`Tanggal tidak boleh sebelum tanggal akad pinjaman (${tanggalPinjaman}).`);
+    }
+    const nomor = (input.nomor ?? '').trim();
+    const labelNomor = jalur ? exports.LABEL_NOMOR_PENYELESAIAN[jalur] : 'Nomor perkara / klaim';
+    if (!nomor)
+        galat.push(`${labelNomor} wajib diisi.`);
+    else if (nomor.length > exports.BATAS_PANJANG_PENYELESAIAN.nomor) {
+        galat.push(`${labelNomor} maksimal ${exports.BATAS_PANJANG_PENYELESAIAN.nomor} karakter.`);
+    }
+    const dokumen = (input.dokumen ?? '').trim();
+    if (!dokumen)
+        galat.push('Dokumen bukti wajib diisi (mis. nomor/nama surat gugatan atau surat pengajuan klaim).');
+    else if (dokumen.length > exports.BATAS_PANJANG_PENYELESAIAN.dokumen) {
+        galat.push(`Dokumen bukti maksimal ${exports.BATAS_PANJANG_PENYELESAIAN.dokumen} karakter.`);
+    }
+    const alasan = (input.alasan ?? '').trim();
+    if (alasan.length > exports.BATAS_PANJANG_PENYELESAIAN.alasan) {
+        galat.push(`Keterangan maksimal ${exports.BATAS_PANJANG_PENYELESAIAN.alasan} karakter.`);
+    }
+    if (galat.length > 0 || !jalur)
+        return { valid: false, galat };
+    return { valid: true, nilai: { jalur, tanggal, nomor, dokumen, alasan: alasan || null } };
+}
+/** Kalimat ringkas untuk layar/export: "Pengadilan Negeri no. 123/Pdt.G/2026, tercatat 2026-09-01". */
+function ringkasPenyelesaian(p) {
+    const dasar = p.jalur === 'PENGADILAN' ? 'Pengadilan Negeri' : 'Klaim asuransi kredit';
+    return `${dasar}${p.nomor ? ` no. ${p.nomor}` : ''}${p.tanggal ? `, tercatat ${p.tanggal}` : ''}`;
+}
+/** Ubah kolom `pinjaman.penyelesaian_*` menjadi objek; null bila tidak ada pencatatan. */
+function bacaPenyelesaianDariRow(pinjamanId, row) {
+    if (!row || (row.penyelesaian_jalur !== 'PENGADILAN' && row.penyelesaian_jalur !== 'ASURANSI'))
+        return null;
+    return {
+        pinjamanId,
+        jalur: row.penyelesaian_jalur,
+        tanggal: row.penyelesaian_tanggal ?? '',
+        nomor: row.penyelesaian_nomor ?? '',
+        dokumen: row.penyelesaian_dokumen ?? '',
+        alasan: row.penyelesaian_alasan ?? null,
+        dicatatOleh: row.penyelesaian_oleh ?? null,
+    };
+}
+
+},9018,[]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "@/database/db":return _$r(778);case "@/services/PermissionService":return _$r(828);case "@/utils/tanggal":return _$r(918);case "@/utils/id":return _$r(785);case "@/accounting/PenyelesaianPinjaman":return _$r(9018);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.bacaPenyelesaianDariRow=void 0;
+exports.getPenyelesaianPinjaman=getPenyelesaianPinjaman;
+exports.catatPenyelesaianPinjaman=catatPenyelesaianPinjaman;
+exports.batalkanPenyelesaianPinjaman=batalkanPenyelesaianPinjaman;
+const db_1 = require("@/database/db");
+const PermissionService_1 = require("@/services/PermissionService");
+const tanggal_1 = require("@/utils/tanggal");
+const id_1 = require("@/utils/id");
+const PenyelesaianPinjaman_1 = require("@/accounting/PenyelesaianPinjaman");
+Object.defineProperty(exports,"bacaPenyelesaianDariRow", { enumerable: true, get: function () { return PenyelesaianPinjaman_1.bacaPenyelesaianDariRow; } });
+/**
+ * RC-S133.6.4 (v82) — PENCATATAN MANUAL penyelesaian pinjaman ke Pengadilan
+ * Negeri / klaim asuransi kredit (kriteria Macet angka 3, SOM 12.1).
+ *
+ * Yang dilakukan: mengisi/mengubah/menghapus kolom `pinjaman.penyelesaian_*`.
+ * Nilai itu dibaca `getKlasifikasiPinjamanAktif` dan diteruskan ke
+ * `klasifikasikanSom`, sehingga pinjaman tergolong MACET sejak tanggal
+ * pencatatan (bukan sebelumnya).
+ *
+ * Yang SENGAJA tidak dilakukan:
+ *  - tidak membuat jurnal / mengubah saldo / status pinjaman / jadwal.
+ *    Penyisihan mengikuti klasifikasi seperti kategori lain; penghapusbukuan
+ *    tetap lewat alur terpisah (hapusPiutangPinjaman);
+ *  - tidak menebak apa pun: jalur, tanggal, nomor perkara/klaim, dan dokumen
+ *    diisi manusia;
+ *  - tidak membuka pencatatan bagi role selain yang berizin `pinjaman:approve`
+ *    (bawaan: Admin dan Pengurus).
+ *
+ * Setiap pencatatan, perubahan, dan pembatalan menulis `audit_log`
+ * (entity 'pinjaman') dengan data sebelum & sesudah.
+ */
+async function getPenyelesaianPinjaman(pinjamanId) {
+    const db = await (0, db_1.getDb)();
+    const row = await db.getFirstAsync(`SELECT penyelesaian_jalur, penyelesaian_tanggal, penyelesaian_nomor, penyelesaian_dokumen,
+            penyelesaian_alasan, penyelesaian_oleh
+     FROM pinjaman WHERE id = ?`, pinjamanId);
+    return (0, PenyelesaianPinjaman_1.bacaPenyelesaianDariRow)(pinjamanId, row);
+}
+const SQL_BACA = `SELECT status, tanggal, nomor_pinjaman, penyelesaian_jalur, penyelesaian_tanggal, penyelesaian_nomor,
+                         penyelesaian_dokumen, penyelesaian_alasan, penyelesaian_oleh
+                  FROM pinjaman WHERE id = ?`;
+async function tulisAudit(db, o) {
+    const now = new Date().toISOString();
+    await db.runAsync(`INSERT INTO audit_log (id, user_id, tanggal, waktu, action, entity, entity_id, data_sebelum, data_sesudah, created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`, (0, id_1.newId)(), o.userId, now.slice(0, 10), now.slice(11, 19), o.action, 'pinjaman', o.pinjamanId, JSON.stringify(o.sebelum), JSON.stringify(o.sesudah), now);
+}
+/**
+ * Catat (atau ubah) penyelesaian ke Pengadilan Negeri / klaim asuransi.
+ * Hanya untuk pinjaman berstatus AKTIF (yang masih punya piutang dan ikut
+ * penggolongan kolektibilitas).
+ */
+async function catatPenyelesaianPinjaman(input) {
+    return (0, db_1.withTransaction)(async (db) => {
+        await (0, PermissionService_1.requirePermission)(db, input.actingUserId, 'pinjaman', 'approve');
+        const row = await db.getFirstAsync(SQL_BACA, input.pinjamanId);
+        if (!row)
+            throw new Error('Pinjaman tidak ditemukan.');
+        if (row.status !== 'AKTIF') {
+            throw new Error(`Penyelesaian ke Pengadilan/asuransi hanya dapat dicatat untuk pinjaman berstatus AKTIF (status saat ini: ${row.status}).`);
+        }
+        const v = (0, PenyelesaianPinjaman_1.validasiPenyelesaian)(input, (0, tanggal_1.getTanggalLokalHariIni)(), row.tanggal);
+        if (!v.valid)
+            throw new Error(v.galat.join(' '));
+        const sebelum = (0, PenyelesaianPinjaman_1.bacaPenyelesaianDariRow)(input.pinjamanId, row);
+        const now = new Date().toISOString();
+        await db.runAsync(`UPDATE pinjaman
+         SET penyelesaian_jalur = ?, penyelesaian_tanggal = ?, penyelesaian_nomor = ?, penyelesaian_dokumen = ?,
+             penyelesaian_alasan = ?, penyelesaian_oleh = ?, updated_at = ?
+       WHERE id = ?`, v.nilai.jalur, v.nilai.tanggal, v.nilai.nomor, v.nilai.dokumen, v.nilai.alasan, input.actingUserId, now, input.pinjamanId);
+        const sesudah = {
+            pinjamanId: input.pinjamanId,
+            ...v.nilai,
+            dicatatOleh: input.actingUserId,
+        };
+        await tulisAudit(db, {
+            userId: input.actingUserId,
+            action: sebelum ? 'UBAH_PENYELESAIAN' : 'CATAT_PENYELESAIAN',
+            pinjamanId: input.pinjamanId,
+            sebelum,
+            sesudah: { ...sesudah, nomorPinjaman: row.nomor_pinjaman },
+        });
+        return sesudah;
+    });
+}
+/**
+ * Batalkan pencatatan (salah catat / perkara dicabut / klaim ditarik).
+ * Kolom dikosongkan; riwayatnya tetap ada di audit_log. Pinjaman kembali
+ * digolongkan menurut tunggakan/agunan seperti biasa.
+ */
+async function batalkanPenyelesaianPinjaman(input) {
+    const alasan = (input.alasan ?? '').trim();
+    if (!alasan)
+        throw new Error('Alasan pembatalan wajib diisi.');
+    await (0, db_1.withTransaction)(async (db) => {
+        await (0, PermissionService_1.requirePermission)(db, input.actingUserId, 'pinjaman', 'approve');
+        const row = await db.getFirstAsync(SQL_BACA, input.pinjamanId);
+        if (!row)
+            throw new Error('Pinjaman tidak ditemukan.');
+        const sebelum = (0, PenyelesaianPinjaman_1.bacaPenyelesaianDariRow)(input.pinjamanId, row);
+        if (!sebelum)
+            throw new Error('Pinjaman ini tidak memiliki pencatatan penyelesaian ke Pengadilan/asuransi.');
+        await db.runAsync(`UPDATE pinjaman
+         SET penyelesaian_jalur = NULL, penyelesaian_tanggal = NULL, penyelesaian_nomor = NULL,
+             penyelesaian_dokumen = NULL, penyelesaian_alasan = NULL, penyelesaian_oleh = NULL, updated_at = ?
+       WHERE id = ?`, new Date().toISOString(), input.pinjamanId);
+        await tulisAudit(db, {
+            userId: input.actingUserId,
+            action: 'BATAL_PENYELESAIAN',
+            pinjamanId: input.pinjamanId,
+            sebelum: { ...sebelum, nomorPinjaman: row.nomor_pinjaman },
+            sesudah: { dibatalkan: true, alasan },
+        });
+    });
+}
+
+},9019,[778,828,918,785,9018]);
+__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){case "react/jsx-runtime":return _$r(6);case "react":return _$r(11);case "react-native":return {View:_$r(81).default,Text:_$r(232).default,TouchableOpacity:_$r(477).default,ActivityIndicator:_$r(475).default,StyleSheet:_$r(19).default,Modal:_$r(483).default,ScrollView:_$r(287).default,__esModule:true};case "@expo/vector-icons":return _$r(678);case "@/components/AreaAmanKeyboard":return _$r(858);case "@/components/DatePicker":return _$r(913);case "@/components/FocusTextInput":return _$r(1300);case "@/store/useNotifyStore":return _$r(765);case "@/store/useAppStore":return _$r(794);case "@/hooks/usePermission":return _$r(856);case "@/theme/colors":return _$r(772);case "@/theme/modal":return _$r(1295);case "@/theme/form":return _$r(879);case "@/utils/tanggal":return _$r(918);case "@/accounting/PenyelesaianPinjaman":return _$r(9018);case "@/services/PenyelesaianPinjamanService":return _$r(9019);}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};
+"use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports,"__esModule", { value: true });
+exports.default=PenyelesaianPinjamanCard;
+const jsx_runtime_1 = require("react/jsx-runtime");
+const react_1 = __importStar(require("react"));
+const react_native_1 = require("react-native");
+const vector_icons_1 = require("@expo/vector-icons");
+const AreaAmanKeyboard_1 = __importDefault(require("@/components/AreaAmanKeyboard"));
+const DatePicker_1 = __importDefault(require("@/components/DatePicker"));
+const FocusTextInput_1 = __importDefault(require("@/components/FocusTextInput"));
+const useNotifyStore_1 = require("@/store/useNotifyStore");
+const useAppStore_1 = require("@/store/useAppStore");
+const usePermission_1 = require("@/hooks/usePermission");
+const colors_1 = require("@/theme/colors");
+const modal_1 = require("@/theme/modal");
+const form_1 = require("@/theme/form");
+const tanggal_1 = require("@/utils/tanggal");
+const PenyelesaianPinjaman_1 = require("@/accounting/PenyelesaianPinjaman");
+const PenyelesaianPinjamanService_1 = require("@/services/PenyelesaianPinjamanService");
+function PenyelesaianPinjamanCard({ pinjamanId, statusPinjaman, tanggalPinjaman, penyelesaian, onBerubah }) {
+    const currentUser = (0, useAppStore_1.useAppStore)((s) => s.currentUser);
+    const { can } = (0, usePermission_1.usePermission)();
+    const bolehMencatat = can('pinjaman', 'approve');
+    const [formTerbuka, setFormTerbuka] = (0, react_1.useState)(false);
+    const [batalTerbuka, setBatalTerbuka] = (0, react_1.useState)(false);
+    const [jalur, setJalur] = (0, react_1.useState)('PENGADILAN');
+    const [tanggal, setTanggal] = (0, react_1.useState)((0, tanggal_1.getTanggalLokalHariIni)());
+    const [nomor, setNomor] = (0, react_1.useState)('');
+    const [dokumen, setDokumen] = (0, react_1.useState)('');
+    const [alasan, setAlasan] = (0, react_1.useState)('');
+    const [alasanBatal, setAlasanBatal] = (0, react_1.useState)('');
+    const [galat, setGalat] = (0, react_1.useState)([]);
+    const [proses, setProses] = (0, react_1.useState)(false);
+    const aktif = statusPinjaman === 'AKTIF';
+    if (!aktif && !penyelesaian)
+        return null;
+    const bukaForm = () => {
+        setJalur(penyelesaian?.jalur ?? 'PENGADILAN');
+        setTanggal(penyelesaian?.tanggal || (0, tanggal_1.getTanggalLokalHariIni)());
+        setNomor(penyelesaian?.nomor ?? '');
+        setDokumen(penyelesaian?.dokumen ?? '');
+        setAlasan(penyelesaian?.alasan ?? '');
+        setGalat([]);
+        setFormTerbuka(true);
+    };
+    const simpan = async () => {
+        if (!currentUser)
+            return;
+        // Validasi yang sama dengan service, supaya pesan muncul di form (bukan hanya saat simpan).
+        const v = (0, PenyelesaianPinjaman_1.validasiPenyelesaian)({ jalur, tanggal, nomor, dokumen, alasan }, (0, tanggal_1.getTanggalLokalHariIni)(), tanggalPinjaman);
+        if (!v.valid) {
+            setGalat(v.galat);
+            return;
+        }
+        setGalat([]);
+        setProses(true);
+        try {
+            await (0, PenyelesaianPinjamanService_1.catatPenyelesaianPinjaman)({ pinjamanId, jalur, tanggal, nomor, dokumen, alasan, actingUserId: currentUser.id });
+            setFormTerbuka(false);
+            await onBerubah();
+            (0, useNotifyStore_1.notify)('Tercatat', 'Penyelesaian dicatat. Pinjaman digolongkan Macet sejak tanggal tersebut (Laporan Kolektibilitas Piutang). Tidak ada jurnal yang dibuat.');
+        }
+        catch (e) {
+            setGalat([e instanceof Error ? e.message : 'Terjadi kesalahan.']);
+        }
+        finally {
+            setProses(false);
+        }
+    };
+    const batalkan = async () => {
+        if (!currentUser || !alasanBatal.trim())
+            return;
+        setProses(true);
+        try {
+            await (0, PenyelesaianPinjamanService_1.batalkanPenyelesaianPinjaman)({ pinjamanId, alasan: alasanBatal.trim(), actingUserId: currentUser.id });
+            setBatalTerbuka(false);
+            setAlasanBatal('');
+            await onBerubah();
+            (0, useNotifyStore_1.notify)('Dibatalkan', 'Pencatatan penyelesaian dibatalkan. Riwayatnya tetap tersimpan di audit log.');
+        }
+        catch (e) {
+            (0, useNotifyStore_1.notify)('Gagal', e instanceof Error ? e.message : 'Terjadi kesalahan.');
+        }
+        finally {
+            setProses(false);
+        }
+    };
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.kartu, testID: "kartu-penyelesaian-pinjaman", children: [(0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.judulBaris, children: [(0, jsx_runtime_1.jsx)(vector_icons_1.Ionicons, { name: "hammer-outline", size: 18, color: colors_1.colors.primary }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.judul, children: "Penyelesaian Pengadilan / Asuransi" })] }), penyelesaian ? ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: s.pil, children: (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: s.pilTeks, children: ["MACET sejak ", penyelesaian.tanggal] }) }), (0, jsx_runtime_1.jsx)(Baris, { label: "Jalur", nilai: PenyelesaianPinjaman_1.LABEL_JALUR_PENYELESAIAN[penyelesaian.jalur] }), (0, jsx_runtime_1.jsx)(Baris, { label: PenyelesaianPinjaman_1.LABEL_NOMOR_PENYELESAIAN[penyelesaian.jalur], nilai: penyelesaian.nomor }), (0, jsx_runtime_1.jsx)(Baris, { label: "Dokumen", nilai: penyelesaian.dokumen }), penyelesaian.alasan ? (0, jsx_runtime_1.jsx)(Baris, { label: "Keterangan", nilai: penyelesaian.alasan }) : null, (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.catatan, children: "Kriteria Macet angka 3 (SOM 12.1). Dicatat manual; perubahannya tersimpan di audit log. Tidak ada jurnal." }), bolehMencatat && aktif && ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.aksi, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: s.tombolSekunder, onPress: bukaForm, testID: "tombol-ubah-penyelesaian", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.tombolSekunderTeks, children: "Ubah" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: s.tombolBahaya, onPress: () => setBatalTerbuka(true), testID: "tombol-batal-penyelesaian", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.tombolBahayaTeks, children: "Batalkan Pencatatan" }) })] }))] })) : ((0, jsx_runtime_1.jsxs)(jsx_runtime_1.Fragment, { children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.catatan, children: "Belum ada. Catat bila penyelesaian pinjaman ini sudah diserahkan ke Pengadilan Negeri atau sudah diajukan klaim ganti rugi ke perusahaan asuransi kredit \u2014 pinjaman akan digolongkan Macet (SOM 12.1 kriteria Macet angka 3)." }), bolehMencatat ? ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: s.tombolUtama, onPress: bukaForm, testID: "tombol-catat-penyelesaian", children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.tombolUtamaTeks, children: "Catat Penyelesaian" }) })) : ((0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.catatan, children: "Hanya Admin/Pengurus yang dapat mencatat." }))] })), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: formTerbuka, transparent: true, animationType: "fade", onRequestClose: () => setFormTerbuka(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: s.overlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: s.scrollIsi, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.modalKartu, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.modalJudul, children: penyelesaian ? 'Ubah Penyelesaian' : 'Catat Penyelesaian' }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.modalSub, children: "Isi dari dokumen resmi. Pinjaman akan digolongkan Macet sejak tanggal ini. Tidak ada jurnal yang dibuat." }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.label, children: "Jalur *" }), (0, jsx_runtime_1.jsx)(react_native_1.View, { style: s.jalurBaris, children: PenyelesaianPinjaman_1.DAFTAR_JALUR_PENYELESAIAN.map((j) => ((0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [s.chip, jalur === j && s.chipAktif], onPress: () => setJalur(j), accessibilityRole: "radio", accessibilityState: { selected: jalur === j }, children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: [s.chipTeks, jalur === j && s.chipTeksAktif], children: PenyelesaianPinjaman_1.LABEL_JALUR_PENYELESAIAN[j] }) }, j))) }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: s.label, children: [PenyelesaianPinjaman_1.LABEL_TANGGAL_PENYELESAIAN[jalur], " *"] }), (0, jsx_runtime_1.jsx)(DatePicker_1.default, { value: tanggal, onChange: setTanggal }), (0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: s.label, children: [PenyelesaianPinjaman_1.LABEL_NOMOR_PENYELESAIAN[jalur], " *"] }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: s.input, value: nomor, onChangeText: setNomor, placeholder: jalur === 'PENGADILAN' ? 'mis. 123/Pdt.G/2026/PN Xxx' : 'mis. KLM-2026-0001' }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.label, children: "Dokumen bukti *" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: s.input, value: dokumen, onChangeText: setDokumen, placeholder: "mis. Surat gugatan tgl 1-9-2026 / Surat klaim No. ..." }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.label, children: "Keterangan (opsional)" }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [s.input, s.inputBanyak], value: alasan, onChangeText: setAlasan, multiline: true, placeholder: "Catatan tambahan" }), galat.length > 0 && ((0, jsx_runtime_1.jsx)(react_native_1.View, { style: s.galatKotak, testID: "galat-penyelesaian", children: galat.map((g, i) => ((0, jsx_runtime_1.jsxs)(react_native_1.Text, { style: s.galatTeks, children: ["\u2022 ", g] }, i))) })), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.modalAksi, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: s.batalTombol, onPress: () => setFormTerbuka(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.batalTeks, children: "Tutup" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [s.simpanTombol, proses && s.nonaktif], onPress: simpan, disabled: proses, testID: "simpan-penyelesaian", children: proses ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.simpanTeks, children: "Simpan" }) })] })] }) }) }) }), (0, jsx_runtime_1.jsx)(react_native_1.Modal, { visible: batalTerbuka, transparent: true, animationType: "fade", onRequestClose: () => setBatalTerbuka(false), children: (0, jsx_runtime_1.jsx)(AreaAmanKeyboard_1.default, { varian: "dialog", style: s.overlay, children: (0, jsx_runtime_1.jsx)(react_native_1.ScrollView, { contentContainerStyle: s.scrollIsi, keyboardShouldPersistTaps: "handled", children: (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.modalKartu, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.modalJudul, children: "Batalkan Pencatatan" }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.modalSub, children: "Pencatatan dikosongkan; pinjaman kembali digolongkan menurut tunggakan dan agunannya. Riwayat tetap ada di audit log." }), (0, jsx_runtime_1.jsx)(FocusTextInput_1.default, { style: [s.input, s.inputBanyak], value: alasanBatal, onChangeText: setAlasanBatal, multiline: true, placeholder: "Alasan pembatalan (wajib diisi)" }), (0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.modalAksi, children: [(0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: s.batalTombol, onPress: () => setBatalTerbuka(false), children: (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.batalTeks, children: "Tutup" }) }), (0, jsx_runtime_1.jsx)(react_native_1.TouchableOpacity, { style: [s.bahayaTombol, (!alasanBatal.trim() || proses) && s.nonaktif], onPress: batalkan, disabled: !alasanBatal.trim() || proses, children: proses ? (0, jsx_runtime_1.jsx)(react_native_1.ActivityIndicator, { color: colors_1.colors.white }) : (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.simpanTeks, children: "Batalkan" }) })] })] }) }) }) })] }));
+}
+function Baris({ label, nilai }) {
+    return ((0, jsx_runtime_1.jsxs)(react_native_1.View, { style: s.baris, children: [(0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.barisLabel, children: label }), (0, jsx_runtime_1.jsx)(react_native_1.Text, { style: s.barisNilai, children: nilai })] }));
+}
+const s = react_native_1.StyleSheet.create({
+    kartu: { backgroundColor: colors_1.colors.surface, borderWidth: 1, borderColor: colors_1.colors.border, borderRadius: colors_1.radius.md, padding: colors_1.spacing.md, marginBottom: colors_1.spacing.lg },
+    judulBaris: { flexDirection: 'row', alignItems: 'center', gap: colors_1.spacing.sm, marginBottom: colors_1.spacing.sm },
+    judul: { fontSize: 15, fontWeight: '800', color: colors_1.colors.text },
+    pil: { alignSelf: 'flex-start', backgroundColor: colors_1.colors.dangerBg, borderRadius: colors_1.radius.pill, paddingHorizontal: 10, paddingVertical: 3, marginBottom: colors_1.spacing.sm },
+    pilTeks: { fontSize: 11, fontWeight: '800', color: colors_1.colors.danger },
+    baris: { flexDirection: 'row', justifyContent: 'space-between', gap: colors_1.spacing.md, paddingVertical: 3 },
+    barisLabel: { fontSize: 12, color: colors_1.colors.textMuted, flexShrink: 0 },
+    barisNilai: { fontSize: 12, color: colors_1.colors.text, fontWeight: '600', flex: 1, textAlign: 'right' },
+    catatan: { fontSize: 11, color: colors_1.colors.textMuted, lineHeight: 16, marginTop: colors_1.spacing.sm },
+    aksi: { flexDirection: 'row', gap: colors_1.spacing.sm, marginTop: colors_1.spacing.md },
+    tombolUtama: { backgroundColor: colors_1.colors.primary, borderRadius: colors_1.radius.sm, paddingVertical: 11, alignItems: 'center', marginTop: colors_1.spacing.md },
+    tombolUtamaTeks: { color: colors_1.colors.white, fontWeight: '700', fontSize: 13 },
+    tombolSekunder: { flex: 1, borderWidth: 1, borderColor: colors_1.colors.primary, borderRadius: colors_1.radius.sm, paddingVertical: 10, alignItems: 'center' },
+    tombolSekunderTeks: { color: colors_1.colors.primary, fontWeight: '700', fontSize: 13 },
+    tombolBahaya: { flex: 1, borderWidth: 1, borderColor: colors_1.colors.danger, borderRadius: colors_1.radius.sm, paddingVertical: 10, alignItems: 'center' },
+    tombolBahayaTeks: { color: colors_1.colors.danger, fontWeight: '700', fontSize: 13 },
+    overlay: { ...modal_1.modalUi.backdrop },
+    scrollIsi: { ...modal_1.modalUi.scrollContent },
+    modalKartu: { ...modal_1.modalUi.card },
+    modalJudul: { fontSize: 16, fontWeight: '800', color: colors_1.colors.text },
+    modalSub: { fontSize: 12, color: colors_1.colors.textMuted, lineHeight: 17, marginTop: 4, marginBottom: colors_1.spacing.sm },
+    label: { fontSize: 12, fontWeight: '700', color: colors_1.colors.text, marginTop: colors_1.spacing.md, marginBottom: 4 },
+    input: { ...form_1.formUi.inputStandalone },
+    inputBanyak: { ...form_1.formUi.inputStandaloneMultiline },
+    jalurBaris: { flexDirection: 'row', flexWrap: 'wrap', gap: colors_1.spacing.sm },
+    chip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: colors_1.radius.pill, borderWidth: 1, borderColor: colors_1.colors.border },
+    chipAktif: { backgroundColor: colors_1.colors.primary, borderColor: colors_1.colors.primary },
+    chipTeks: { fontSize: 12, color: colors_1.colors.text },
+    chipTeksAktif: { color: colors_1.colors.white, fontWeight: '600' },
+    galatKotak: { backgroundColor: colors_1.colors.dangerBg, borderRadius: colors_1.radius.sm, padding: colors_1.spacing.sm, marginTop: colors_1.spacing.md },
+    galatTeks: { fontSize: 12, color: colors_1.colors.danger, lineHeight: 17 },
+    modalAksi: { flexDirection: 'row', justifyContent: 'flex-end', gap: colors_1.spacing.sm, marginTop: colors_1.spacing.lg },
+    batalTombol: { paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10 },
+    batalTeks: { color: colors_1.colors.textMuted, fontWeight: '600' },
+    simpanTombol: { backgroundColor: colors_1.colors.primary, paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10, borderRadius: colors_1.radius.sm },
+    bahayaTombol: { backgroundColor: colors_1.colors.danger, paddingHorizontal: colors_1.spacing.lg, paddingVertical: 10, borderRadius: colors_1.radius.sm },
+    simpanTeks: { color: colors_1.colors.white, fontWeight: '700' },
+    nonaktif: { opacity: 0.5 },
+});
+
+},9020,[6,11,81,232,477,475,19,483,287,678,858,913,1300,765,794,856,772,1295,879,918,9018,9019]);
 __r(516);
 __r(2);
 __r(0);

@@ -1285,7 +1285,8 @@ export function periksaSyaratPinjamanImport(
       kunci: 'syarat-pinjaman-lampau',
       tingkat: 'PERINGATAN',
       judul: `${temuan.length} pinjaman tidak memenuhi syarat pada tanggal pinjamannya`,
-      pesan: `${JUDUL_SHEET.PINJAMAN}: ${rincian}${sisa > 0 ? ` · …dan ${sisa} pinjaman lain` : ''}. ${catatan}`,
+      // Setiap alasan sudah berakhir dengan titik (lihat alasanSebagaiPeringatan).
+      pesan: `${JUDUL_SHEET.PINJAMAN}: ${rincian}${sisa > 0 ? ` · …dan ${sisa} pinjaman lain.` : ''} ${catatan}`,
     },
   ];
 }

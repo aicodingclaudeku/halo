@@ -53,10 +53,12 @@ test('skenario mencakup jalur perhitungan penting (bukan uji kosong)', () => {
   assert.ok(A.labaRugi.totalBeban > 0 && A.arusKas.terekonsiliasi, 'laba rugi & arus kas terisi dan arus kas terekonsiliasi');
 });
 
-test('koperasi.db tetap schema v81, tanpa tabel baru dari modul LAN', () => {
+test('koperasi.db tetap schema v82, tanpa tabel baru dari modul LAN', () => {
   // DIPERBARUI 1.0.17 / RC-S133.6.2: skema aplikasi v81 (sidik import & koreksi_transaksi, migrasi milik
   // source KOPKU, bukan modul LAN) — invarian "modul LAN tidak menambah tabel ke koperasi.db" TIDAK berubah.
-  assert.equal(A.schema, 81);
+  // DIPERBARUI 1.0.19 / RC-S133.6.4: skema aplikasi v82 (enam kolom pinjaman.penyelesaian_*, migrasi milik
+  // source KOPKU) — invarian "modul LAN tidak menambah tabel ke koperasi.db" TIDAK berubah.
+  assert.equal(A.schema, 82);
   assert.deepEqual(B.tabel, A.tabel);
   for (const t of ['sesi', 'lan_akses', 'audit_lan', 'whatsapp_notifications', 'idempotensi', 'login_gagal', 'server_meta']) assert.ok(!B.tabel.includes(t), t);
 });
@@ -84,6 +86,9 @@ test('berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host
   // diperbarui setelah tambalan scripts/tambal-renderer-rc-s133.6.3.js (export Kolektibilitas Piutang: indeks
   // kolom Rupiah, data fiskal, dokumen berseksi, Excel teks dibungkus) — lihat docs/laporan-tambal-rc-s133.6.3.json.
   // Skema TETAP v81 (tanpa migrasi).
+  // DIPERBARUI 1.0.19 / RC-S133.6.4: hash bundle, kopku-setup.nsi (versi 1.0.19) dan package-lock.json
+  // diperbarui setelah tambalan scripts/tambal-renderer-rc-s133.6.4.js (syarat pinjaman per tanggal pengajuan,
+  // pencatatan penyelesaian Pengadilan/asuransi) — lihat docs/laporan-tambal-rc-s133.6.4.json. Skema v82.
   const { lepas } = require(path.join(ROOT, 'scripts', 'pasang-menu-lan-wa.js'));
   for (const [p, h] of Object.entries(m)) {
     const f = path.join(ROOT, p);
