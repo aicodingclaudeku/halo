@@ -1,0 +1,106 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 13,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/EksekusiImportDataAwal.ts",
+   "id": 1525,
+   "baru": false,
+   "require": 22,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/PanduanImportData.ts",
+   "id": 9003,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/TurunanMigrasiPinjaman.ts",
+   "id": 1533,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/TemplateDataAwal.ts",
+   "id": 1522,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/FinancialReports.ts",
+   "id": 1400,
+   "baru": false,
+   "require": 16,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/StatusSaldoAwalPlan.ts",
+   "id": 1451,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/ImportDataAwalService.ts",
+   "id": 1519,
+   "baru": false,
+   "require": 13,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/ArusKasScreen.tsx",
+   "id": 1499,
+   "baru": false,
+   "require": 19,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "ActivityIndicator",
+    "StyleSheet",
+    "TouchableOpacity"
+   ]
+  },
+  {
+   "berkas": "src/screens/Laporan/PosisiKeuanganScreen.tsx",
+   "id": 1487,
+   "baru": false,
+   "require": 24,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "ActivityIndicator",
+    "StyleSheet",
+    "StyleProp",
+    "ViewStyle",
+    "TextStyle",
+    "TouchableOpacity"
+   ]
+  },
+  {
+   "berkas": "src/screens/Pengaturan/ImportDataAwalScreen.tsx",
+   "id": 1518,
+   "baru": false,
+   "require": 19,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  }
+ ]
+}

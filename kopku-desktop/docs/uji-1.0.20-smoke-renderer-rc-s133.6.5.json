@@ -1,0 +1,71 @@
+{
+ "hasil": {
+  "skema tetap v82 (tanpa migrasi baru)": {
+   "ok": true,
+   "info": "82"
+  },
+  "T-01 Buku Besar ber-filter: saldo awal ikut, saldo akhir = Neraca Saldo": {
+   "ok": true,
+   "info": "{\"sa\":101300000,\"akhir\":101320000,\"ns\":101320000}"
+  },
+  "T-01 ekspor Buku Besar memuat baris Saldo Awal": {
+   "ok": true
+  },
+  "T-02 parsePersenInput(\"1,5\") = 1,5; \"0,75\" = 0,75": {
+   "ok": true
+  },
+  "T-05 bayar pinjaman belum cair ditolak": {
+   "ok": true,
+   "info": "Pinjaman berstatus \"DIAJUKAN\" tidak dapat menerima pembayaran angsuran (harus sudah dicairkan dan belum lunas)."
+  },
+  "T-03 pencairan sebelum pengajuan ditolak": {
+   "ok": true,
+   "info": "Tanggal pencairan (2026-02-01) tidak boleh sebelum tanggal pengajuan (2026-03-01). Ubah tanggal pengajuan bila perlu."
+  },
+  "T-03 bayar sebelum tanggal akad/pencairan ditolak": {
+   "ok": true,
+   "info": "Tanggal pembayaran (2026-02-15) tidak boleh sebelum tanggal akad/pencairan pinjaman (2026-03-01)."
+  },
+  "T-07 jasa 1000% dan admin > pokok ditolak saat pengajuan": {
+   "ok": true,
+   "info": "Persentase jasa 1000% per periode tidak wajar (maksimal 100%). Periksa salah ketik, mis. 15 untuk 1,5. | Biaya admin harus lebih kecil dari jumlah pinjaman."
+  },
+  "T-10 tanggal fiktif & NIK salah ditolak di layanan": {
+   "ok": true,
+   "info": "Tanggal jurnal \"2026-02-30\" tidak sah — harus tanggal yang ada di kalender dengan format YYYY-MM-DD. | NIK \"123\" harus 16 digit angka."
+  },
+  "T-03 setoran sebelum anggota bergabung ditolak": {
+   "ok": true,
+   "info": "Tanggal transaksi (2025-12-01) tidak boleh sebelum tanggal anggota bergabung (2026-01-05)."
+  },
+  "T-08 tanggal CUSTOM 2026-06-31 / 2026-5-1 tidak sah": {
+   "ok": true
+  },
+  "T-12 anggota mirip terdeteksi": {
+   "ok": true
+  },
+  "T-04/T-13 pratinjau: BLOKIR tanggal masa depan, PERINGATAN pembulatan": {
+   "ok": true,
+   "info": "ringkasan-pinjaman:INFO,tanggal-masa-depan:BLOKIR,nominal-dibulatkan:PERINGATAN,admin-tidak-diimpor:INFO"
+  },
+  "T-07 parser: Jasa Persen 150 ditolak": {
+   "ok": true,
+   "info": "[{\"baris\":3,\"pesan\":\"Jasa Persen 150 tidak wajar: 150% per bulan (maksimal 100%). Bila angkanya per tahun, isi Satuan Jasa = TAHUN; bila maksudnya 1,5% tulis 1,5.\"}]"
+  },
+  "T-04 eksekutor: tanpa jurnal 2099": {
+   "ok": true,
+   "info": "[\"Tanggal 2099-01-01 setelah hari ini (2026-10-12) — tanggal masa depan tidak dapat diimpor.\",\"Tanggal 2099-01-01 setelah hari ini (2026-10-12) — tanggal masa depan tidak dapat diimpor.\"]"
+  },
+  "T-16 denda per hari ikut diimpor": {
+   "ok": true,
+   "info": "{\"denda_aktif\":1,\"denda_tipe\":\"PER_HARI\",\"denda_nilai\":1000}"
+  },
+  "semua jurnal seimbang": {
+   "ok": true,
+   "info": "0"
+  }
+ },
+ "pageErrors": [
+  "PAGEERROR A network error occurred."
+ ]
+}

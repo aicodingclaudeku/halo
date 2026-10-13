@@ -1,0 +1,507 @@
+diff --git a/MULAI-DI-SINI.md b/MULAI-DI-SINI.md
+index 40e61ca..c9df5ea 100644
+--- a/MULAI-DI-SINI.md
++++ b/MULAI-DI-SINI.md
+@@ -1,14 +1,27 @@
+-# KOPKU Desktop 1.0.21 — Source Code Aplikasi Windows
++# KOPKU Desktop 1.0.22 — Source Code Aplikasi Windows
+ 
+ Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+ 
++## Yang baru di 1.0.22 (source KOPKU RC-S133.6.7 — perbaikan temuan audit DAMY; skema database TETAP v82)
++Tanpa migrasi database: data 1.0.21 terbuka apa adanya. Rincian & bukti: `docs/RC-S133.6.7_PERBAIKAN_TEMUAN_TERBUKA_AUDIT_DAMY.md`.
++- **Keluar anggota yang masih punya pinjaman ditolak.** Lunasi pinjaman dulu (Bayar Piutang/Pelunasan), lalu ajukan keluar. Layar Keluar Anggota menampilkan peringatan dan mengunci tombol Ajukan. Jadwal, status pinjaman, buku pembantu, dan buku besar tetap sama.
++- **Import Saldo Lama:** saldo awal akun pendapatan/beban (sheet 7) dibukukan sehari sebelum cut-off, sehingga LHU bulan cut-off tidak lagi memuat pendapatan/beban Jan–Jun (LHU tahunan tetap memuatnya).
++- **Tanggal masa depan ditolak juga di layanan** (setor/tarik simpanan, saldo awal) — bukan hanya di pemilih tanggal; berlaku juga untuk input dari browser LAN.
++- **Setoran simpanan ganda** (isi sama persis, < 10 detik) ditolak di layanan.
++- **Neraca Saldo** menolak tanggal tidak sah; **CALK** menulis narasi penyusutan sesuai mode (Otomatis/Manual).
++- **LPEA:** koreksi setoran yang dibuat sesudah tanggal laporan tidak lagi mengubah basis tabungan periode lampau.
++- 37 aset ikon/font `renderer/assets/node_modules` sudah dilengkapi (`npm run cek:aset` OK).
++- `renderer/` = bundle 1.0.21-perbaikan-audit + tambalan **RC-S133.6.7** (`scripts/tambal-renderer-rc-s133.6.7.js`, laporan `docs/laporan-tambal-rc-s133.6.7.json`). Uji: `npm run test:lan` 77/77, `npm run test:keamanan` 14/14, uji layar Chromium 146/146.
++- **Belum diubah (menunggu keputusan pengurus):** batas suku bunga simpanan berjangka.
++- **Aplikasi HP perlu APK baru** dari source RC-S133.6.7 agar aturan yang sama berlaku di HP.
++
+ ## Yang baru di 1.0.21 (source KOPKU RC-S133.6.6 — UI/UX desktop & LAN; skema database TETAP v82)
+ Tanpa migrasi database: data 1.0.20 terbuka apa adanya, HP (APK RC-S133.6.5) tetap dapat sinkron.
+ - **Popup desktop tidak lagi bergaya Android.** Dialog notifikasi/konfirmasi kini kotak dialog desktop: bilah judul dengan ikon kecil & ×, pesan rata kiri, bilah tombol abu-abu; tombol utama hijau (merah bila menghapus) paling kiri dan langsung terfokus, Batal paling kanan; Enter = tombol utama, Esc = Batal. Pemilih (Pilih Akun/Anggota/Pinjaman/Rekening, filter, dsb.) tampil sebagai **jendela dialog di tengah**, bukan layar penuh yang meluncur dari bawah; lembar konfirmasi dipusatkan. Rincian: `docs/RC-S133.6.6_UI_UX_POPUP_DESKTOP.md`.
+ - **Tidak ada lagi pengaturan di browser LAN.** Menu *Pengaturan* (Pengguna & Izin, Akses LAN Pengguna, Audit Log LAN, WhatsApp Reminder, Log WhatsApp, Status Server) dihapus beserta endpoint servernya. Semua diatur di aplikasi: **Pengaturan › LAN & WhatsApp** kini juga berisi **Akses LAN Pengguna** (saklar + profil Pengawas per pengguna), **Sesi aktif di browser** (Akhiri sesi), dan **Audit log LAN**.
+ - **Browser menunjukkan dengan jelas bahwa data sudah tersimpan:** setelah setiap input muncul dialog bukti "Data berhasil disimpan" berisi ringkasan, nomor transaksi, waktu & nama pencatat, dengan **Cetak bukti** dan *Input lagi*.
+ - **Ekspor dari browser mengikuti aplikasi:** tombol **Ekspor ▾ PDF / Excel / CSV** di laporan & daftar. Berkas dibuat oleh KOPKU Desktop dengan builder & layanan ekspor yang sama dengan tombol Export di aplikasi (kop, logo, penanda tangan). Butuh izin Export. Buku Besar di browser kini juga membawa Saldo Awal seperti di aplikasi.
+-- `renderer/` = bundle 1.0.20 + tambalan source **KOPKU RC-S133.6.6** (`scripts/tambal-renderer-rc-s133.6.6.js`, laporan `docs/laporan-tambal-rc-s133.6.6.json`) + layar LAN & WhatsApp versi baru (`scripts/pasang-menu-lan-wa.js`). Uji: `npm run test:lan` 77/77, `npm run test:keamanan` 14/14, uji asap `test/smoke-renderer-rc-s133.6.6-chromium.js` 14/14 (dan 6.5: 17/17), alur browser `test/lan/ui-browser.py` 25/25. Rincian LAN: `docs/LAN-MULTIUSER-WHATSAPP.md` §00. Tangkapan layar: `docs/tangkapan-layar/1.0.21-*.png`.
++- `renderer/` = bundle 1.0.20 + tambalan source **KOPKU RC-S133.6.6** (`scripts/tambal-renderer-rc-s133.6.6.js`, laporan `docs/laporan-tambal-rc-s133.6.6.json`), kemudian tambalan perbaikan audit DAMY (`scripts/tambal-renderer-rc-s133.6.6-perbaikan-audit.js`, `docs/PERBAIKAN_AUDIT_TRANSAKSI_DATA_LAPORAN.md`) + layar LAN & WhatsApp versi baru (`scripts/pasang-menu-lan-wa.js`). Uji: `npm run test:lan` 77/77, `npm run test:keamanan` 14/14, uji asap `test/smoke-renderer-rc-s133.6.6-chromium.js` 14/14 (dan 6.5: 17/17), alur browser `test/lan/ui-browser.py` 25/25. Rincian LAN: `docs/LAN-MULTIUSER-WHATSAPP.md` §00. Tangkapan layar: `docs/tangkapan-layar/1.0.21-*.png`.
+ 
+ ## Yang baru di 1.0.20 (source KOPKU RC-S133.6.5 — skema database TETAP v82)
+ Perbaikan temuan audit **KOPKU-AUDIT-TEST-DAMY** yang sudah divalidasi. Tanpa migrasi database: data 1.0.19 terbuka apa adanya dan HP (APK RC-S133.6.4 atau RC-S133.6.5) tetap dapat sinkron. Rincian & bukti: `docs/RC-S133.6.5_PERBAIKAN_TEMUAN_AUDIT_DAMY.md`.
+diff --git a/docs/PERBAIKAN_AUDIT_TRANSAKSI_DATA_LAPORAN.md b/docs/PERBAIKAN_AUDIT_TRANSAKSI_DATA_LAPORAN.md
+index 04e60c9..8ed4efe 100644
+--- a/docs/PERBAIKAN_AUDIT_TRANSAKSI_DATA_LAPORAN.md
++++ b/docs/PERBAIKAN_AUDIT_TRANSAKSI_DATA_LAPORAN.md
+@@ -152,8 +152,8 @@ Sumber temuan: paket `KOPKU-AUDIT-TEST-DAMY.zip` (982 kasus uji, 146 pemeriksaan
+ ## Cara memakai (Windows 1.0.21)
+ 
+ - Bundle renderer `renderer/_expo/static/js/web/entry-*.js` sudah **ditambal** agar memuat perbaikan di atas: 23 modul diganti (daftar + id di `docs/laporan-tambal-perbaikan-audit.json`). Cara penambalan: `scripts/tambal-renderer-rc-s133.6.6-perbaikan-audit.js` (pola sama dengan tambalan 1.0.x sebelumnya).
+-- Cara resmi tetap `npm run build:renderer` dari source RC yang diperbaiki (paket `KOPKU-Source-RC-S133.6.6-DIPERBAIKI`).
+-- Nomor versi tetap 1.0.21, skema tetap v82. Kode Electron (main/preload/LAN/server) tidak diubah.
++- Cara resmi tetap membangun renderer dari source RC yang diperbaiki: `node scripts/build-renderer.js` (paket `KOPKU-Source-RC-S133.6.6-DIPERBAIKI`). *(Diperbaiki di 1.0.22: dulu tertulis `npm run build:renderer`, skrip yang tidak ada di package.json paket ini.)*
++- Nomor versi tetap 1.0.21 (dinaikkan ke 1.0.22 pada RC-S133.6.7), skema tetap v82. Kode Electron (main/preload/LAN/server) tidak diubah.
+ - `test/lan/baseline-manifest.json` diperbarui (hash bundle baru) mengikuti kebiasaan tiap rilis tambalan; `npm run test:lan` 77/77 lulus, `npm run test:keamanan` 14/14 lulus.
+ - Uji layar di Chromium pada bundle baru (data simulasi DAMY, input manual dan impor): 72/72 angka layar cocok dengan SQLite, 46/46 interaksi (cari/filter) lulus.
+ - Belum diuji: aplikasi Electron terpasang (installer .exe) di Windows sungguhan — build installer dan uji manual perlu dilakukan di mesin Windows.
+diff --git a/docs/RC-S133.6.7_PERBAIKAN_TEMUAN_TERBUKA_AUDIT_DAMY.md b/docs/RC-S133.6.7_PERBAIKAN_TEMUAN_TERBUKA_AUDIT_DAMY.md
+new file mode 100644
+index 0000000..07a1de4
+--- /dev/null
++++ b/docs/RC-S133.6.7_PERBAIKAN_TEMUAN_TERBUKA_AUDIT_DAMY.md
+@@ -0,0 +1,75 @@
++# RC-S133.6.7 — Perbaikan temuan terbuka audit DAMY + temuan audit ulang
++
++Berlaku untuk **KOPKU RC-S133.6.7** (source HP/RC) dan **KOPKU Desktop Windows 1.0.22**. Dasar: RC-S133.6.6-DIPERBAIKI / Windows 1.0.21-DIPERBAIKI. **Skema database TETAP v82** (tanpa migrasi; HP dan desktop tetap dapat sinkron dengan versi v82 mana pun, tetapi aturan baru hanya berlaku di perangkat yang sudah memakai versi ini).
++
++Sumber temuan: paket `KOPKU-AUDIT-TEST-DAMY` (F1–F31) dan audit ulang 13 Oktober 2026 (N1–N6).
++
++## Keputusan pengurus yang dipakai
++
++| Temuan | Keputusan |
++|---|---|
++| F16b | **Tolak keluar dulu**: anggota yang masih punya sisa pokok pinjaman tidak dapat diproses keluar. |
++| F29 | Saldo awal akun pendapatan/beban dari sheet 7 dibukukan **H-1 cut-off**. |
++| F6 | **Tanpa ubah skema**: tolak setoran identik yang masuk < 10 detik dari setoran yang sama. |
++| F10 | **Dibiarkan terbuka** (batas suku bunga berjangka belum ditetapkan). |
++
++## Yang diperbaiki
++
++### F2 · RENDAH · Tanggal masa depan di lapisan layanan
++- `utils/tanggalMasaDepan.ts` (baru): `pastikanBukanMasaDepan()` memakai jam aplikasi (`getTanggalLokalHariIni`, termasuk simulasi waktu developer).
++- Dipakai di `SimpananService` (setor, tarik sukarela, setor gabungan/data awal) dan `SaldoAwalAkunService` (tambah & edit saldo awal; sekaligus wajib tanggal kalender).
++- Keputusan lama T-10 ("layanan dipanggil sinkron") tidak berlaku lagi: sinkron HP↔PC menyalin basis data utuh dan tidak memanggil layanan; input LAN dinilai dengan jam PC server.
++
++### F6 · SEDANG · Kiriman ganda di layanan (tanpa ubah skema)
++- `SimpananService.pastikanBukanKirimGanda()`: setoran dengan anggota, tanggal, pencatat, dan rincian jenis+nominal yang **sama persis** dengan setoran yang tercatat < 10 detik sebelumnya ditolak ("dianggap kiriman ganda"). Setoran identik yang sah dapat dicatat lagi setelah jeda.
++- Import Excel dan pencatatan ulang hasil Koreksi Transaksi melewati penjaga ini (`lewatiPenjagaKirimGanda`) karena punya penjaga duplikat sendiri.
++
++### F16b · TINGGI · Keluar anggota yang masih punya pinjaman
++- `KeluarAnggotaService.pastikanTidakAdaPinjamanBerjalan()`: menolak **pengajuan** dan **pembayaran** keluar anggota (termasuk pengajuan lama yang sudah disetujui) serta jalur lama `SimpananService.keluarAnggota` bila masih ada sisa pokok pinjaman AKTIF/MACET. Pesan menyebut sisa pokok dan nomor pinjamannya.
++- Layar Keluar Anggota menampilkan peringatan dan mengunci tombol **Ajukan** selama ada sisa pinjaman.
++- Cara memproses: lunasi pinjaman lewat Bayar Piutang/Pelunasan (boleh dari penarikan sukarela), lalu ajukan keluar. Jadwal, status pinjaman, buku pembantu, dan buku besar tetap sama.
++
++### F22 · RENDAH · Neraca Saldo tanggal tak valid
++- `Ledger.getTrialBalance()` mewajibkan tanggal kalender `YYYY-MM-DD`.
++
++### F23 · RENDAH · Narasi CALK penyusutan
++- `AccountingPolicyService.sesuaikanNarasiPenyusutan()` + `narasiProsesPenyusutan()`; CALK membaca mode penyusutan (default OTOMATIS) dan menulis narasi yang sesuai. Fungsi `getKebijakanAkuntansiNarasi()` tidak berubah tanda tangannya.
++
++### F29 · SEDANG · LHU sesudah cut-off memuat Jan–Jun
++- `EksekusiImportDataAwal` (sheet 7): akun **PENDAPATAN/BEBAN** dibukukan pada **H-1 cut-off** (cut-off 2026-07-01 → 2026-06-30), sama dengan jasa data awal (sheet 6). Akun neraca tetap pada tanggal cut-off. LHU tahunan tetap memuat angka Jan–Jun; LHU bulan cut-off bersih.
++- Catatan: bila cut-off 1 Januari, H-1 jatuh di tahun buku sebelumnya; bila periode itu sudah ditutup, baris tersebut ditolak dengan pesan periode tertutup.
++
++### N1 · SEDANG · LPEA: koreksi sesudah tanggal laporan mengubah periode lampau
++- `LpeaRepository.basisTabungan`: setoran yang dikoreksi hanya dikecualikan bila jurnal pembaliknya bertanggal ≤ tanggal laporan (sama dengan buku besar).
++- `SimpananService.koreksiSimpanan`: baris KOREKSI kini bertanggal lokal hari ini (sama dengan jurnal pembalik); dulu tanggal UTC.
++
++### N2 · N3 · N4 (paket Windows)
++- Versi Windows **1.0.22** (`package.json`, `package-lock.json`, `installer/kopku-setup.nsi`).
++- `MULAI-DI-SINI.md` diperbarui; dokumen ini disalin ke `docs/`.
++- 37 aset ikon/font `renderer/assets/node_modules` dilengkapi lewat `scripts/lengkapi-aset-renderer.js` (diverifikasi SHA-256 terhadap manifest); `cek-aset-renderer` OK, tidak ada lagi "A network error occurred".
++
++### N5 · N6 (paket uji)
++- `src/__tests__/audit-damy/jamAudit.ts`: jam uji dikunci ke 2026-10-12 di setiap suite audit (set `AUDIT_JAM_NYATA=1` untuk jam sistem).
++- TP-16 memilih transaksi secara deterministik (`created_at DESC, nomor_transaksi DESC`).
++
++## Tidak diubah
++- **F10** suku bunga berjangka tanpa batas atas — keputusan pengurus (BJK-NEG-20 tetap GAGAL).
++- **F7** 7 suite uji bawaan gagal karena dokumen kebijakan (`POLICY_REGISTER_RC-S53.md`, `POLICY_DECISION_RC-S53.md`, `RC-S58_DEVICE_QA_CHECKLIST.md`, dst.) tidak ada di paket — perlu dokumen aslinya.
++
++## Uji yang diselaraskan dengan aturan baru
++- `audit-damy`: TRX-SIMU-13 (kiriman kedua ditolak), KEL-03 (ditolak) + KEL-03b (jalur lama) + KEL-03c (lunasi dulu lalu keluar), LPEA-21 baru (regresi N1), jam dikunci, TP-16 deterministik.
++- `ImbalanKeluarAnggotaRcS53`: 3 uji kompensasi diganti menjadi uji penolakan (aturan F16b).
++- `ImbalanKeluarAnggotaUiRcS53`: pola tombol menerima kunci tambahan sisa pinjaman.
++- `ImportSaldoLamaSetaraRcS133_4_6`: tanggal saldo awal pendapatan/beban = H-1 cut-off.
++
++## Bukti uji
++- Suite audit DAMY (jam 2026-10-12): **985 kasus — 982 LULUS, 1 GAGAL (BJK-NEG-20/F10), 1 TIDAK BERLAKU, 1 TIDAK DAPAT DIUJI**; 24 suite / 242 tes Jest lulus.
++- Kontrol: LPEA-21 GAGAL pada source sebelum perbaikan (selisih −Rp77.000) dan LULUS sesudahnya.
++- Manual vs impor (A vs B2): 0 selisih. Snapshot A/B/B2 = snapshot audit lalu: 0 selisih finansial. Pembanding independen 0 selisih; grid 4.902 nilai 0 selisih; validasi DB 32/32 per DB.
++- Regresi bawaan: 368 suite / 6.812 tes; gagal hanya 7 suite F7 (sama dengan sebelum perubahan).
++- `npx tsc --noEmit`: bersih.
++- Windows 1.0.22: `test:keamanan` 14/14, `test:lan` 77/77, uji layar 146/146 (tanpa galat halaman), uji langsung fungsi di bundle: 6/6 perbaikan baru + 8/8 perbaikan lama, F10 sama dengan RC.
++
++## Cara memakai
++- RC/HP: bangun ulang APK dari source ini. Tidak ada migrasi.
++- Windows: bundle sudah ditambal (`scripts/tambal-renderer-rc-s133.6.7.js`, laporan `docs/laporan-tambal-rc-s133.6.7.json`); build installer seperti biasa (`npm run dist:win`). Belum diuji: installer `.exe` terpasang di Windows sungguhan.
+diff --git a/docs/laporan-tambal-rc-s133.6.7.json b/docs/laporan-tambal-rc-s133.6.7.json
+new file mode 100644
+index 0000000..e1a0489
+--- /dev/null
++++ b/docs/laporan-tambal-rc-s133.6.7.json
+@@ -0,0 +1,89 @@
++{
++ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
++ "modul": [
++  {
++   "berkas": "src/utils/tanggalMasaDepan.ts",
++   "id": 9102,
++   "baru": true,
++   "require": 1,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/accounting/Ledger.ts",
++   "id": 1354,
++   "baru": false,
++   "require": 1,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/import/EksekusiImportDataAwal.ts",
++   "id": 1525,
++   "baru": false,
++   "require": 22,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/reports/FinancialReports.ts",
++   "id": 1400,
++   "baru": false,
++   "require": 15,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/reports/LpeaRepository.ts",
++   "id": 1497,
++   "baru": false,
++   "require": 2,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/services/AccountingPolicyService.ts",
++   "id": 963,
++   "baru": false,
++   "require": 4,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/services/KeluarAnggotaService.ts",
++   "id": 1418,
++   "baru": false,
++   "require": 6,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/services/KoreksiTransaksiService.ts",
++   "id": 9016,
++   "baru": false,
++   "require": 9,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/services/SaldoAwalAkunService.ts",
++   "id": 1450,
++   "baru": false,
++   "require": 8,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/services/SimpananService.ts",
++   "id": 974,
++   "baru": false,
++   "require": 10,
++   "reactNative": []
++  },
++  {
++   "berkas": "src/screens/Transaksi/KeluarAnggotaFormScreen.tsx",
++   "id": 1417,
++   "baru": false,
++   "require": 17,
++   "reactNative": [
++    "ActivityIndicator",
++    "ScrollView",
++    "StyleSheet",
++    "Text",
++    "TouchableOpacity",
++    "View"
++   ]
++  }
++ ]
++}
+\ No newline at end of file
+diff --git a/installer/kopku-setup.nsi b/installer/kopku-setup.nsi
+index 8fa8549..80506a7 100644
+--- a/installer/kopku-setup.nsi
++++ b/installer/kopku-setup.nsi
+@@ -13,7 +13,7 @@ ManifestDPIAware true
+ 
+ !define APP_NAME "KOPKU Desktop"
+ !define APP_EXE "KOPKU Desktop.exe"
+-!define APP_VERSION "1.0.21"
++!define APP_VERSION "1.0.22"
+ !define PUBLISHER "KOPKU"
+ !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\KOPKUDesktop"
+ !ifndef SRC
+@@ -28,7 +28,7 @@ OutFile "${OUT}"
+ InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
+ InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
+ BrandingText "KOPKU — Keuangan Koperasi Simpan Pinjam"
+-VIProductVersion "1.0.21.0"
++VIProductVersion "1.0.22.0"
+ VIAddVersionKey /LANG=1057 "ProductName" "${APP_NAME}"
+ VIAddVersionKey /LANG=1057 "CompanyName" "${PUBLISHER}"
+ VIAddVersionKey /LANG=1057 "FileDescription" "Pemasang ${APP_NAME}"
+diff --git a/package-lock.json b/package-lock.json
+index e5129eb..0b1edc1 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "kopku-desktop",
+-  "version": "1.0.21",
++  "version": "1.0.22",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "kopku-desktop",
+-      "version": "1.0.21",
++      "version": "1.0.22",
+       "dependencies": {
+         "qrcode": "^1.5.4"
+       },
+diff --git a/package.json b/package.json
+index 0e8fb6c..f96a049 100644
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "kopku-desktop",
+   "productName": "KOPKU Desktop",
+-  "version": "1.0.21",
++  "version": "1.0.22",
+   "description": "KOPKU Desktop untuk Windows — source Electron + UI yang sudah di-build (renderer/). UI berasal dari source aplikasi KOPKU (src/, app/).",
+   "author": "KOPKU",
+   "private": true,
+diff --git a/scripts/tambal-renderer-rc-s133.6.7.js b/scripts/tambal-renderer-rc-s133.6.7.js
+new file mode 100644
+index 0000000..8be2422
+--- /dev/null
++++ b/scripts/tambal-renderer-rc-s133.6.7.js
+@@ -0,0 +1,183 @@
++'use strict';
++/**
++ * Menambal bundle renderer KOPKU Desktop 1.0.21-perbaikan-audit menjadi 1.0.22 (RC-S133.6.7):
++ * perbaikan temuan TERBUKA audit DAMY (F2, F6, F16b, F22, F23, F29) dan temuan audit ulang N1.
++ * Hanya modul yang berubah di source RC-S133.6.7 yang diganti (daftar BERUBAH); satu modul baru
++ * (utils/tanggalMasaDepan). Cara resmi tetap build renderer dari source RC-S133.6.7.
++ *
++ * Pemakaian:
++ *   node scripts/tambal-renderer-rc-s133.6.7.js <renderer> <src RC-S133.6.7> <laporan.json> <src RC-S133.6.6-DIPERBAIKI>
++ */
++const fs = require('fs');
++const path = require('path');
++let ts;
++try {
++  ts = require('typescript');
++} catch {
++  ts = require(process.env.TYPESCRIPT_PATH || '/opt/node22/lib/node_modules/typescript');
++}
++const { cariBerkasBundle } = require(path.join(__dirname, '..', 'electron', 'server', 'bundleIndex'));
++const { bangunPeta, segmenModul, kunciSpesifier } = require('./peta-modul-bundle');
++
++const [rendererDir, srcBaru, laporanOut, ...srcLama] = process.argv.slice(2);
++if (!rendererDir || !srcBaru || !laporanOut || srcLama.length === 0) {
++  console.error('pakai: node scripts/tambal-renderer-rc-s133.6.7.js <renderer> <src baru> <laporan.json> <src lama> [src lama ...]');
++  process.exit(2);
++}
++
++// Penanda unik dari source RC-S133.6.7 — tambalan idempoten.
++const PENANDA = 'Lunasi pinjaman terlebih dahulu lewat menu Bayar Piutang Anggota';
++const berkasBundle = cariBerkasBundle(rendererDir);
++let teks = fs.readFileSync(berkasBundle, 'utf8');
++if (teks.includes(PENANDA)) {
++  console.log('Bundle sudah berisi tambalan RC-S133.6.7:', path.basename(berkasBundle));
++  process.exit(0);
++}
++if (!teks.includes('belum punya jadwal angsuran, sehingga belum dapat dicairkan')) throw new Error('Bundle masukan harus 1.0.21 yang sudah memuat perbaikan audit DAMY (RC-S133.6.6-DIPERBAIKI).');
++
++const laporan = { bundle: path.basename(berkasBundle), modul: [] };
++let SEG = segmenModul(teks);
++
++const PENANDA_DEFAULT = {
++  'app/index': ['PIN_DISABLED', 'PIN_LOCKED', "'LOGIN'"],
++  'navigation/RootNavigator': ['name:"SinkronPerangkat"', 'name:"UserForm"'],
++  'desktop/BingkaiAplikasi': ['Keuangan koperasi yang tertib dan transparan.', 'sidebarAktif'],
++  // Layar hanya ber-ekspor default → dikenali dari teks uniknya.
++  'screens/Laporan/PerubahanEkuitasScreen': ['Tidak ada mutasi ekuitas pada periode ini.', 'Rekonsiliasi Periode Komparatif ke Posisi Keuangan'],
++  'screens/Pengaturan/ImportDataAwalScreen': ['Tombol Import aktif setelah seluruh kesalahan', 'nilai-cut-off'],
++  // varian web (.web.tsx) dari dialog notifikasi global
++  'components/AppNotificationHost': ['urutkanTombolDesktop', 'Escape'],
++  'screens/Pengaturan/RiwayatImportScreen': ['Nama berkas tidak tercatat', 'Log Per Baris'],
++  'screens/Laporan/PosisiKeuanganScreen': ['Laporan Posisi Keuangan', 'opsi-saldo-awal-draf'],
++  'screens/Laporan/HistoryTransaksiDetailScreen': ['Transaksi tidak ditemukan. Data mungkin sudah dihapus', 'Rincian Jurnal'],
++  // 1.0.19: penanda lama ('Batasan Fiskal…') kini juga ada di ReportTableBuilders; pakai teks khas layar.
++  'screens/Laporan/KolektibilitasPiutangScreen': ['Juklat SOM No. 3/2025 angka 15', 'Cadangan risiko: Lancar'],
++  'screens/Pinjaman/PinjamanDetailScreen': ['Pinjaman tidak ditemukan. Data mungkin sudah dihapus atau ID tidak valid.', 'Batalkan Pinjaman'],
++  'screens/Pinjaman/PinjamanFormScreen': ['Tanggal Pengajuan *', 'Tujuan Pinjaman'],
++  // 1.0.20 / RC-S133.6.5 — layar ber-ekspor default yang ikut berubah.
++  'screens/Laporan/BukuBesarScreen': ['Tidak ada mutasi pada akun & rentang tanggal ini.'],
++  'screens/Anggota/AnggotaFormScreen': ['Nomor anggota akan dibuat otomatis saat data disimpan.'],
++  'screens/Shu/ShuFormScreen': ['Total persentase harus 100%'],
++  'screens/Simpanan/SimpananFormScreen': ['Bukti penempatan dapat dicetak dari detail kontrak.'],
++  'screens/Transaksi/BayarAngsuranFormScreen': ['Pembayaran piutang anggota berhasil dicatat.'],
++  'screens/Transaksi/TarikSimpananFormScreen': ['Penarikan simpanan sukarela berhasil disimpan.'],
++  // 1.0.21 + perbaikan audit
++  'screens/Laporan/BuktiTransaksiDetailScreen': ['Data bukti tidak ditemukan.', 'Porsi Pokok'],
++  // RC-S133.6.7
++  'screens/Transaksi/KeluarAnggotaFormScreen': ['Ajukan Keluar Anggota', 'Ringkasan Pengurang'],
++};
++const P = bangunPeta(teks, srcLama, PENANDA_DEFAULT);
++if (P.konflik.length) throw new Error('Peta modul bertentangan:\n' + P.konflik.join('\n'));
++
++// Modul yang berubah pada perbaikan audit (lihat CATATAN-PERBAIKAN-AUDIT.md).
++const BERUBAH = [
++  { rel: 'utils/tanggalMasaDepan', baru: true },
++  { rel: 'accounting/Ledger' },
++  { rel: 'import/EksekusiImportDataAwal' },
++  { rel: 'reports/FinancialReports' },
++  { rel: 'reports/LpeaRepository' },
++  { rel: 'services/AccountingPolicyService' },
++  { rel: 'services/KeluarAnggotaService' },
++  { rel: 'services/KoreksiTransaksiService' },
++  { rel: 'services/SaldoAwalAkunService' },
++  { rel: 'services/SimpananService' },
++  { rel: 'screens/Transaksi/KeluarAnggotaFormScreen' },
++];
++function fileBaru(b) {
++  const dasar = path.join(srcBaru, 'src', b.rel);
++  for (const e of ['.web.tsx', '.web.ts', '.tsx', '.ts']) if (fs.existsSync(dasar + e)) return dasar + e;
++  throw new Error('source baru tidak ada: ' + b.rel);
++}
++let maxId = Math.max(...SEG.keys());
++for (const b of BERUBAH) {
++  const k = '@/' + b.rel;
++  if (b.baru) {
++    if (P.peta.has(k)) throw new Error(`${b.rel} ditandai baru tetapi sudah ada di bundle (#${P.peta.get(k)})`);
++    b.id = ++maxId;
++    P.peta.set(k, b.id);
++  } else {
++    b.id = P.peta.get(k);
++    if (b.id === undefined || !SEG.has(b.id)) throw new Error(`modul lama ${b.rel} tidak terpetakan`);
++  }
++}
++const tambahan = [];
++for (const b of BERUBAH) {
++  const file = fileBaru(b);
++  const src = fs.readFileSync(file, 'utf8');
++  const namaRn = [];
++  for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*'react-native'/g)) {
++    for (const p of m[1].split(',')) {
++      const n = p.trim();
++      if (!n || n.startsWith('type ')) continue;
++      namaRn.push(n.split(/\s+as\s+/)[0].trim());
++    }
++  }
++  const out = ts.transpileModule(src, {
++    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true },
++    fileName: path.basename(file),
++  })
++    .outputText.replace(/\bexports\.([A-Za-z_$][\w$]*) = /g, 'exports.$1=')
++    .replace(/Object\.defineProperty\(exports, "/g, 'Object.defineProperty(exports,"');
++  const spes = [...new Set([...out.matchAll(/require\((["'])([^"']+)\1\)/g)].map((m) => m[2]))];
++  const kasus = [];
++  const deps = [];
++  for (const n of spes) {
++    if (n === 'react-native') {
++      const isi = namaRn
++        .filter((k) => new RegExp(`react_native_\\d*\\.${k}\\b`).test(out))
++        .map((k) => {
++          const id = P.peta.get('rn:' + k);
++          if (id === undefined) throw new Error(`${b.rel}: komponen react-native ${k} tidak terpetakan`);
++          deps.push(id);
++          return `${k}:_$r(${id}).default`;
++        });
++      kasus.push(`case "react-native":return {${isi.join(',')},__esModule:true};`);
++      continue;
++    }
++    const kunci = kunciSpesifier(n, b.rel);
++    const id = P.peta.get(kunci);
++    if (id === undefined) throw new Error(`${b.rel}: require("${n}") [${kunci}] tidak terpetakan`);
++    deps.push(id);
++    kasus.push(`case ${JSON.stringify(n)}:return _$r(${id});`);
++  }
++  const fac =
++    `__d(function(global,_$r,_$i,_$a,module,exports,_$d){var require=function(n){switch(n){${kasus.join('')}}throw new Error("KOPKU patch: modul tidak dipetakan "+n)};\n` +
++    out.replace(/\/\/# sourceMappingURL.*$/m, '') +
++    `\n},${b.id},[${[...new Set(deps)].join(',')}]);`;
++  laporan.modul.push({ berkas: path.relative(srcBaru, file), id: b.id, baru: !!b.baru, require: spes.length, reactNative: namaRn });
++  if (b.baru) tambahan.push(fac);
++  else {
++    const s = SEG.get(b.id);
++    teks = teks.slice(0, s.mulai) + fac + teks.slice(s.akhir);
++    SEG = segmenModul(teks);
++  }
++}
++{
++  const ekor = /(\n__r\(\d+\);)+\s*$/.exec(teks);
++  const pos = ekor ? ekor.index : teks.length;
++  teks = teks.slice(0, pos) + '\n' + tambahan.join('\n') + teks.slice(pos);
++  SEG = segmenModul(teks);
++}
++
++// (Modul modal-desktop sudah ada di bundle 1.0.21; tidak disentuh.)
++
++// ---------------------------------------------------------------------------
++// PEMERIKSAAN AKHIR
++// ---------------------------------------------------------------------------
++for (const b of BERUBAH) if (!new RegExp(`\\},${b.id},\\[[0-9,]*\\]\\);`).test(teks)) throw new Error(`modul ${b.rel} (#${b.id}) hilang`);
++for (const wajib of [PENANDA, '__kopkuModalDesktop', 'belum punya jadwal angsuran, sehingga belum dapat dicairkan', 'tidak boleh setelah hari ini', 'dianggap kiriman ganda', 'Tanggal Neraca Saldo', 'dibukukan otomatis oleh aplikasi', 'jr.tanggal <= ?']) {
++  if (!teks.includes(wajib)) throw new Error(`penanda RC-S133.6.7 tidak ada di bundle: ${wajib}`);
++}
++for (const larang of ['AsistenClaude', 'api.anthropic.com', 'kopku.claude']) {
++  if (teks.includes(larang)) throw new Error(`sisa Claude di bundle: ${larang}`);
++}
++try {
++  new Function(teks.replace(/^#!.*\n/, ''));
++} catch (e) {
++  throw new Error('bundle hasil tidak valid secara sintaks: ' + e.message);
++}
++
++fs.writeFileSync(berkasBundle + '.tmp', teks);
++fs.renameSync(berkasBundle + '.tmp', berkasBundle);
++fs.writeFileSync(laporanOut, JSON.stringify(laporan, null, 1));
++console.log(JSON.stringify({ modul: laporan.modul.map((l) => [l.berkas, l.id, l.require]) }));
+diff --git a/test/lan/baseline-manifest.json b/test/lan/baseline-manifest.json
+index 49cf935..83d6e0e 100644
+--- a/test/lan/baseline-manifest.json
++++ b/test/lan/baseline-manifest.json
+@@ -10,9 +10,9 @@
+   "electron/hosts/sqliteHost.js": "fdfabafa4456ae9a91eaa7fa5fc5618ec8d70dbe13d17519f58b0112881b1003",
+   "electron/uri.js": "78749b164d9ed217931f64a33917e1f636f0e5d7acd16306529c5651532f0180",
+   "installer/firewall.nsh": "2075db0373908ddc949cc4f24ba7500bf6cc8e5910ce425bc1ca4e9d5ba681b0",
+-  "installer/kopku-setup.nsi": "e2e558679f408d419e12ac6fd5f6c8efa571e3f38e606e902a94545703cf8c9a",
+-  "package-lock.json": "8529fbaf3b014d2cdba14ed6a266918126f41ff1f4db04b6148634ce26e67697",
+-  "renderer/_expo/static/js/web/entry-15353e1719ccf374e65fdb58e3482a5d.js": "47b435b2a5be823122ae55dc019fc324957b24f0feae25a9aa3efdaf3dd42119",
++  "installer/kopku-setup.nsi": "00b545771974931daa5c1c72700fd676de20dfece374a4f85c10a1714b33557d",
++  "package-lock.json": "320c37310452b95c177711ff3ac3e8bce760c20ed65e5fc1722c6e2668d16bec",
++  "renderer/_expo/static/js/web/entry-15353e1719ccf374e65fdb58e3482a5d.js": "da0930c74f034f52538e07bda40ac92f9b43643c9fda0224436860d788f5a565",
+   "renderer/assets/assets/img/logo-kopku.43bb5c9ff90597eb8e1f4a35c308095c.png": "dbcbef17afb8187b6ee089cad3a223f64128bb10464713a9d85807109fd4bfea",
+   "renderer/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/AntDesign.3f78af31cca60105799838a1a7a59fbd.ttf": "08a9d5b513cf947e22ede81e9a843bd8d7763a63444cd21484bfde7662cc6543",
+   "renderer/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Entypo.31b5ffea3daddc69dd01a1f3d6cf63c5.ttf": "16f92298587bab2b469bc13c0dfc6d5d171bca10bad0c9053ad16bc023bf717d",
+@@ -77,5 +77,5 @@
+   "test/smoke-lisensi.js": "c589fa4aeb25f1c28aa1d638afc090ddca3c33bf2ee86a293d3fe3156f7bf348",
+   "test/smoke-setup.js": "f02abd76f1ad6b66317ffa98187d5adf32fc67db6020cce9265eb401a6c97b8a"
+  },
+- "sumber": "KOPKU-Windows-Source-1.0.5.zip (asli) — renderer dari KOPKU-Source-RC-S133.4.5 (expo export) + tambalan modul Import Data Awal RC-S133.4.6 dan RC-S133.4.7 (scripts/tambal-renderer-rc-s133.4.6.js lalu tambal-renderer-rc-s133.4.7.js — lihat docs), versi paket 1.0.10 · 1.0.20: tambalan RC-S133.6.5 (scripts/tambal-renderer-rc-s133.6.5.js; perbaikan temuan audit KOPKU-AUDIT-TEST-DAMY) · 1.0.21: tambalan RC-S133.6.6 (scripts/tambal-renderer-rc-s133.6.6.js; UI/UX popup desktop)"
++ "sumber": "KOPKU-Windows-Source-1.0.5.zip (asli) — renderer dari KOPKU-Source-RC-S133.4.5 (expo export) + tambalan modul Import Data Awal RC-S133.4.6 dan RC-S133.4.7 (scripts/tambal-renderer-rc-s133.4.6.js lalu tambal-renderer-rc-s133.4.7.js — lihat docs), versi paket 1.0.10 · 1.0.20: tambalan RC-S133.6.5 (scripts/tambal-renderer-rc-s133.6.5.js; perbaikan temuan audit KOPKU-AUDIT-TEST-DAMY) · 1.0.21: tambalan RC-S133.6.6 (scripts/tambal-renderer-rc-s133.6.6.js; UI/UX popup desktop) · 1.0.22: tambalan RC-S133.6.7 (scripts/tambal-renderer-rc-s133.6.7.js; perbaikan temuan terbuka audit DAMY F2/F6/F16b/F22/F23/F29 + N1)"
+ }
+diff --git a/test/lan/regresi.test.js b/test/lan/regresi.test.js
+index 2b6be5c..c5daf86 100644
+--- a/test/lan/regresi.test.js
++++ b/test/lan/regresi.test.js
+@@ -102,6 +102,9 @@ test('berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host
+   // dialog desktop) — lihat docs/laporan-tambal-rc-s133.6.6.json. Skema TETAP v82.
+   // DIPERBARUI pasca-audit KOPKU-AUDIT-TEST-DAMY (versi tetap 1.0.21): hash bundle diperbarui setelah
+   // scripts/tambal-renderer-rc-s133.6.6-perbaikan-audit.js — lihat docs/laporan-tambal-perbaikan-audit.json. Skema TETAP v82.
++  // DIPERBARUI 1.0.22 / RC-S133.6.7: hash bundle, kopku-setup.nsi (versi 1.0.22) dan package-lock.json diperbarui
++  // setelah scripts/tambal-renderer-rc-s133.6.7.js (temuan terbuka audit DAMY F2/F6/F16b/F22/F23/F29 + audit ulang N1)
++  // — lihat docs/laporan-tambal-rc-s133.6.7.json. Skema TETAP v82.
+   const { lepas } = require(path.join(ROOT, 'scripts', 'pasang-menu-lan-wa.js'));
+   for (const [p, h] of Object.entries(m)) {
+     const f = path.join(ROOT, p);

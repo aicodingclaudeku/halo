@@ -1,0 +1,173 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/accounting/ShuCalculator.ts",
+   "id": 1492,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 12,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/EksekusiImportDataAwal.ts",
+   "id": 1525,
+   "baru": false,
+   "require": 22,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/ExcelDataAwalParser.ts",
+   "id": 1520,
+   "baru": false,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/LpeaRepository.ts",
+   "id": 1497,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/repositories/AnggotaRepository.ts",
+   "id": 920,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/BuktiTransaksiDetailScreen.tsx",
+   "id": 1474,
+   "baru": false,
+   "require": 12,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "ActivityIndicator",
+    "StyleSheet",
+    "TouchableOpacity"
+   ]
+  },
+  {
+   "berkas": "src/services/AsetService.ts",
+   "id": 1371,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/BuktiTransaksiService.ts",
+   "id": 1423,
+   "baru": false,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/CashReconciliationService.ts",
+   "id": 1478,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/DataReferensiService.ts",
+   "id": 1299,
+   "baru": false,
+   "require": 3,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/KasBankService.ts",
+   "id": 961,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/KeluarAnggotaService.ts",
+   "id": 1418,
+   "baru": false,
+   "require": 6,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/KoperasiMasterService.ts",
+   "id": 951,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PendapatanDimukaService.ts",
+   "id": 1476,
+   "baru": false,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PenyusutanPropertiInvestasiService.ts",
+   "id": 1334,
+   "baru": false,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PenyusutanService.ts",
+   "id": 1312,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PeriodCloseService.ts",
+   "id": 1481,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PinjamanService.ts",
+   "id": 1345,
+   "baru": false,
+   "require": 20,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/RATService.ts",
+   "id": 1425,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/ShuService.ts",
+   "id": 1490,
+   "baru": false,
+   "require": 12,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/SimpananBerjangkaService.ts",
+   "id": 975,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/UtangService.ts",
+   "id": 967,
+   "baru": false,
+   "require": 10,
+   "reactNative": []
+  }
+ ]
+}

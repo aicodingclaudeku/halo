@@ -1,0 +1,40 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 11,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/KolektibilitasPiutangScreen.tsx",
+   "id": 1471,
+   "baru": false,
+   "require": 23,
+   "reactNative": [
+    "View",
+    "Text",
+    "FlatList",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet"
+   ]
+  },
+  {
+   "berkas": "src/export/ExcelLaporanBuilder.ts",
+   "id": 945,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/ExcelSeksiBuilder.ts",
+   "id": 944,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  }
+ ]
+}

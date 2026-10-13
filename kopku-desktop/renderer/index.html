@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head><meta http-equiv="Content-Security-Policy" content="default-src 'self' app: kopkufs: data: blob:; script-src 'self' app: 'unsafe-inline'; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: kopkufs: data: blob:; font-src 'self' app: data:; connect-src 'self' app: kopkufs: data: blob:">
+    <meta charset="utf-8" />
+    <meta httpEquiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>KOPKU Desktop</title>
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+  <link rel="icon" href="/favicon.ico" /><style id="kopku-desktop">
+html,body{font-family:"Segoe UI Variable","Segoe UI",-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter",Roboto,"Helvetica Neue",Arial,sans-serif;-webkit-font-smoothing:antialiased;background:#F1F3F6}
+::selection{background:rgba(20,108,60,.22)}
+*{scrollbar-width:thin;scrollbar-color:#C4CBD4 transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#C9D0D8;border-radius:8px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:#A9B2BD;border:2px solid transparent;background-clip:content-box}
+input,textarea{outline:none!important}
+*:focus{outline:none}
+[role=button]:focus-visible,[role=tab]:focus-visible,[role=link]:focus-visible,[role=search]:focus-visible,[role=checkbox]:focus-visible,[role=switch]:focus-visible{outline:2px solid rgba(20,108,60,.55);outline-offset:2px;border-radius:8px}
+[role=button],[role=tab]{transition:background-color .12s ease,border-color .12s ease,opacity .12s ease}
+</style></head>
+
+  <body>
+    <!-- Use static rendering with Expo Router to support running without JavaScript. -->
+    <noscript>
+      You need to enable JavaScript to run this app.
+    </noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  <script src="/_expo/static/js/web/entry-15353e1719ccf374e65fdb58e3482a5d.js" defer></script>
+</body>
+</html>

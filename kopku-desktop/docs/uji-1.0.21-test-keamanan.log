@@ -1,0 +1,96 @@
+TAP version 13
+# (node:3376) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: aplikasi TERPASANG mengabaikan KOPKU_SMOKE, KOPKU_DEVTOOLS, KOPKU_USERDATA
+ok 1 - aplikasi TERPASANG mengabaikan KOPKU_SMOKE, KOPKU_DEVTOOLS, KOPKU_USERDATA
+  ---
+  duration_ms: 131.726437
+  type: 'test'
+  ...
+# Subtest: mode uji (electron .) tetap dapat memakai variabel uji
+ok 2 - mode uji (electron .) tetap dapat memakai variabel uji
+  ---
+  duration_ms: 100.514932
+  type: 'test'
+  ...
+# Subtest: aplikasi terpasang menolak saklar debug
+ok 3 - aplikasi terpasang menolak saklar debug
+  ---
+  duration_ms: 711.383883
+  type: 'test'
+  ...
+# Subtest: saklarDebug: argv & command line Chromium
+ok 4 - saklarDebug: argv & command line Chromium
+  ---
+  duration_ms: 0.528657
+  type: 'test'
+  ...
+# Subtest: penjaga semua webContents: DevTools ditutup, webview & navigasi keluar ditolak
+ok 5 - penjaga semua webContents: DevTools ditutup, webview & navigasi keluar ditolak
+  ---
+  duration_ms: 104.60454
+  type: 'test'
+  ...
+# Subtest: tidak ada variabel KOPKU_* di main.js yang lolos tanpa penjaga mode uji
+ok 6 - tidak ada variabel KOPKU_* di main.js yang lolos tanpa penjaga mode uji
+  ---
+  duration_ms: 0.919492
+  type: 'test'
+  ...
+# Subtest: package.json: Electron Fuses anti-bypass & titik masuk
+ok 7 - package.json: Electron Fuses anti-bypass & titik masuk
+  ---
+  duration_ms: 0.565375
+  type: 'test'
+  ...
+# Subtest: verifikasi-fuse membaca fuse wire
+ok 8 - verifikasi-fuse membaca fuse wire
+  ---
+  duration_ms: 0.677551
+  type: 'test'
+  ...
+# Subtest: 1.0.14: entri "kopku" milik KOPKU dilepas dari Claude Desktop, server lain & berkas rusak tidak disentuh
+ok 9 - 1.0.14: entri "kopku" milik KOPKU dilepas dari Claude Desktop, server lain & berkas rusak tidak disentuh
+  ---
+  duration_ms: 3.493837
+  type: 'test'
+  ...
+# Subtest: 1.0.14: entry.js --kopku-mcp-stdio langsung keluar (tanpa jendela, tanpa IPC, tanpa data)
+ok 10 - 1.0.14: entry.js --kopku-mcp-stdio langsung keluar (tanpa jendela, tanpa IPC, tanpa data)
+  ---
+  duration_ms: 42.645458
+  type: 'test'
+  ...
+# Subtest: pak: header + isi + integritas dapat dibaca ulang persis
+ok 11 - pak: header + isi + integritas dapat dibaca ulang persis
+  ---
+  duration_ms: 27.159228
+  type: 'test'
+  ...
+# Subtest: fuse: dibalik sesuai package.json lalu lolos verifikasi-fuse
+ok 12 - fuse: dibalik sesuai package.json lalu lolos verifikasi-fuse
+  ---
+  duration_ms: 1.881878
+  type: 'test'
+  ...
+# Subtest: fuse: penanda ganda / tidak ada → berhenti
+ok 13 - fuse: penanda ganda / tidak ada → berhenti
+  ---
+  duration_ms: 1.233417
+  type: 'test'
+  ...
+# Subtest: rakit-win-tanpa-npm.sh memasang asar, fuse, dan resource integritas
+ok 14 - rakit-win-tanpa-npm.sh memasang asar, fuse, dan resource integritas
+  ---
+  duration_ms: 0.479998
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1278.664112

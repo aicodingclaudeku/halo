@@ -1,0 +1,248 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/utils/tanggalKalender.ts",
+   "id": 9021,
+   "baru": true,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/utils/persen.ts",
+   "id": 9022,
+   "baru": true,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/hooks/useKirimSekali.ts",
+   "id": 9023,
+   "baru": true,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/utils/tanggal.ts",
+   "id": 918,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/accounting/AccountingEngine.ts",
+   "id": 958,
+   "baru": false,
+   "require": 3,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/accounting/Ledger.ts",
+   "id": 1354,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/FinancialReports.ts",
+   "id": 1400,
+   "baru": false,
+   "require": 15,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 12,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/BukuBesarScreen.tsx",
+   "id": 1486,
+   "baru": false,
+   "require": 19,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet"
+   ]
+  },
+  {
+   "berkas": "src/accounting/PinjamanCalculator.ts",
+   "id": 1346,
+   "baru": false,
+   "require": 3,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PinjamanService.ts",
+   "id": 1345,
+   "baru": false,
+   "require": 20,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/SimpananService.ts",
+   "id": 974,
+   "baru": false,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/UserManagementService.ts",
+   "id": 1510,
+   "baru": false,
+   "require": 8,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/repositories/AnggotaRepository.ts",
+   "id": 920,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Anggota/AnggotaFormScreen.tsx",
+   "id": 1287,
+   "baru": false,
+   "require": 18,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Switch"
+   ]
+  },
+  {
+   "berkas": "src/screens/Pinjaman/PinjamanFormScreen.tsx",
+   "id": 1438,
+   "baru": false,
+   "require": 23,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Modal"
+   ]
+  },
+  {
+   "berkas": "src/screens/Shu/ShuFormScreen.tsx",
+   "id": 1503,
+   "baru": false,
+   "require": 13,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/screens/Simpanan/SimpananFormScreen.tsx",
+   "id": 1426,
+   "baru": false,
+   "require": 35,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/screens/Transaksi/BayarAngsuranFormScreen.tsx",
+   "id": 1343,
+   "baru": false,
+   "require": 23,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "FlatList",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Modal"
+   ]
+  },
+  {
+   "berkas": "src/screens/Transaksi/TarikSimpananFormScreen.tsx",
+   "id": 1335,
+   "baru": false,
+   "require": 31,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Modal"
+   ]
+  },
+  {
+   "berkas": "src/import/ExcelDataAwalParser.ts",
+   "id": 1520,
+   "baru": false,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/TemplateDataAwal.ts",
+   "id": 1522,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/PanduanImportData.ts",
+   "id": 9003,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/MigrasiPinjamanPlan.ts",
+   "id": 1528,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/EksekusiMigrasiPinjaman.ts",
+   "id": 1527,
+   "baru": false,
+   "require": 3,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/EksekusiImportDataAwal.ts",
+   "id": 1525,
+   "baru": false,
+   "require": 20,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/database/db.ts",
+   "id": 778,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  }
+ ]
+}

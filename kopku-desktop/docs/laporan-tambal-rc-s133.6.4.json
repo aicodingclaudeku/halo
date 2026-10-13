@@ -1,0 +1,205 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/validators/BusinessRuleEngine.ts",
+   "id": 966,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/SimpananService.ts",
+   "id": 974,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/LoanEligibilityService.ts",
+   "id": 1347,
+   "baru": false,
+   "require": 5,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PinjamanService.ts",
+   "id": 1345,
+   "baru": false,
+   "require": 19,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Pinjaman/PinjamanFormScreen.tsx",
+   "id": 1438,
+   "baru": false,
+   "require": 21,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ScrollView",
+    "StyleSheet",
+    "ActivityIndicator",
+    "Modal"
+   ]
+  },
+  {
+   "berkas": "src/import/EksekusiImportDataAwal.ts",
+   "id": 1525,
+   "baru": false,
+   "require": 20,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/PanduanImportData.ts",
+   "id": 9003,
+   "baru": false,
+   "require": 6,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/RiwayatImportPlan.ts",
+   "id": 1524,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/RiwayatImportRepository.ts",
+   "id": 1523,
+   "baru": false,
+   "require": 2,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/ImportDataAwalService.ts",
+   "id": 1519,
+   "baru": false,
+   "require": 12,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Pengaturan/ImportDataAwalScreen.tsx",
+   "id": 1518,
+   "baru": false,
+   "require": 19,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/screens/Pengaturan/RiwayatImportScreen.tsx",
+   "id": 1539,
+   "baru": false,
+   "require": 10,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "src/database/schema.ts",
+   "id": 782,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/database/db.ts",
+   "id": 778,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/accounting/PenyelesaianPinjaman.ts",
+   "id": 9018,
+   "baru": true,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PenyelesaianPinjamanService.ts",
+   "id": 9019,
+   "baru": true,
+   "require": 5,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/components/pinjaman/PenyelesaianPinjamanCard.tsx",
+   "id": 9020,
+   "baru": true,
+   "require": 16,
+   "reactNative": [
+    "View",
+    "Text",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet",
+    "Modal",
+    "ScrollView"
+   ]
+  },
+  {
+   "berkas": "src/services/KolektibilitasSomService.ts",
+   "id": 925,
+   "baru": false,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/LoanImpairmentService.ts",
+   "id": 965,
+   "baru": false,
+   "require": 9,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Pinjaman/PinjamanDetailScreen.tsx",
+   "id": 1439,
+   "baru": false,
+   "require": 27,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet",
+    "Modal",
+    "Pressable"
+   ]
+  },
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 12,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/KolektibilitasPiutangScreen.tsx",
+   "id": 1471,
+   "baru": false,
+   "require": 23,
+   "reactNative": [
+    "View",
+    "Text",
+    "FlatList",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet"
+   ]
+  }
+ ]
+}

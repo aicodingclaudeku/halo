@@ -1,0 +1,60 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/accounting/InstallmentDate.ts",
+   "id": 1348,
+   "require": 1,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/ExcelDataAwalParser.ts",
+   "id": 1520,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/import/EksekusiImportDataAwal.ts",
+   "id": 1525,
+   "require": 19,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/ImportDataAwalService.ts",
+   "id": 1519,
+   "require": 10,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/FinancialReports.ts",
+   "id": 1400,
+   "require": 15,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "require": 11,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/JuklatPdf.ts",
+   "id": 928,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Laporan/PerubahanEkuitasScreen.tsx",
+   "id": 1498,
+   "require": 17,
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "ActivityIndicator",
+    "StyleSheet",
+    "TouchableOpacity"
+   ]
+  }
+ ]
+}

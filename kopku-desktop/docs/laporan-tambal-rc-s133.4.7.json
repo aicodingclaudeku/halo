@@ -1,0 +1,165 @@
+{
+ "tabelReactNative": {
+  "View": 81,
+  "Text": 232,
+  "ScrollView": 287,
+  "TouchableOpacity": 477,
+  "StyleSheet": 19,
+  "ActivityIndicator": 475,
+  "Animated": 275,
+  "Modal": 483,
+  "useWindowDimensions": 508
+ },
+ "paket": {
+  "react/jsx-runtime": "_$r(6)",
+  "react": "_$r(11)",
+  "@react-navigation/native": "_$r(119)",
+  "@expo/vector-icons": "_$r(678)",
+  "expo-file-system/legacy": "_$r(781)",
+  "expo-document-picker": "_$r(820)",
+  "expo-sharing": "_$r(819)",
+  "xlsx-js-style": "_$r(935)",
+  "react-native-safe-area-context": "_$r(13)"
+ },
+ "modul": [
+  {
+   "berkas": "import/PanduanImportData.ts",
+   "id": 9003,
+   "baru": true,
+   "require": 3,
+   "deps": [
+    1520,
+    1522,
+    783
+   ],
+   "reactNative": []
+  },
+  {
+   "berkas": "components/panduan/IlustrasiImport.tsx",
+   "id": 9004,
+   "baru": true,
+   "require": 6,
+   "deps": [
+    772,
+    9003
+   ],
+   "reactNative": [
+    "Animated",
+    "ScrollView",
+    "StyleSheet",
+    "Text",
+    "View"
+   ]
+  },
+  {
+   "berkas": "components/panduan/PanduanImportSlide.tsx",
+   "id": 9005,
+   "baru": true,
+   "require": 8,
+   "deps": [
+    772,
+    9003,
+    9004
+   ],
+   "reactNative": [
+    "Animated",
+    "Modal",
+    "ScrollView",
+    "StyleSheet",
+    "Text",
+    "TouchableOpacity",
+    "View",
+    "useWindowDimensions"
+   ]
+  },
+  {
+   "berkas": "import/TemplateDataAwal.ts",
+   "id": 1522,
+   "baru": false,
+   "require": 2,
+   "deps": [
+    1520,
+    783
+   ],
+   "reactNative": []
+  },
+  {
+   "berkas": "import/TemplateWorkbook.ts",
+   "id": 1521,
+   "baru": false,
+   "require": 3,
+   "deps": [
+    1522,
+    946
+   ],
+   "reactNative": []
+  },
+  {
+   "berkas": "services/ImportDataAwalService.ts",
+   "id": 1519,
+   "baru": false,
+   "require": 10,
+   "deps": [
+    1520,
+    1521,
+    778,
+    1523,
+    1525,
+    1524
+   ],
+   "reactNative": []
+  },
+  {
+   "berkas": "screens/Pengaturan/ImportDataAwalScreen.tsx",
+   "id": 1518,
+   "baru": false,
+   "require": 18,
+   "deps": [
+    913,
+    9005,
+    1519,
+    1520,
+    9003,
+    794,
+    765,
+    772,
+    1289,
+    918,
+    910,
+    1532,
+    1530
+   ],
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  },
+  {
+   "berkas": "screens/Pengaturan/StrukturTemplateScreen.tsx",
+   "id": 1534,
+   "baru": false,
+   "require": 12,
+   "deps": [
+    9005,
+    1522,
+    1520,
+    1519,
+    765,
+    772,
+    1289
+   ],
+   "reactNative": [
+    "View",
+    "Text",
+    "ScrollView",
+    "TouchableOpacity",
+    "StyleSheet",
+    "ActivityIndicator"
+   ]
+  }
+ ]
+}

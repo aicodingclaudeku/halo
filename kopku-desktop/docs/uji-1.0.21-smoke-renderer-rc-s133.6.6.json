@@ -1,0 +1,51 @@
+{
+ "pembungkus Modal desktop terpasang": {
+  "ok": true
+ },
+ "dialog konfirmasi: Batal paling kanan (gaya Windows)": {
+  "ok": true,
+  "info": "Hapus,Batal"
+ },
+ "Esc menutup dialog": {
+  "ok": true
+ },
+ "fokus awal di tombol utama; Enter = tombol utama tepat sekali": {
+  "ok": true,
+  "info": "Hapus / H"
+ },
+ "Esc = Batal tepat sekali": {
+  "ok": true,
+  "info": "B"
+ },
+ "Enter menutup notifikasi": {
+  "ok": true
+ },
+ "layar LAN: bagian Akses LAN Pengguna": {
+  "ok": true
+ },
+ "layar LAN: sesi aktif & audit log": {
+  "ok": true
+ },
+ "layar LAN: tidak menyebut Panel Web": {
+  "ok": true
+ },
+ "daftar pengguna dari User Management dikirim": {
+  "ok": true
+ },
+ "ubah profil → lanmu:aksesSimpan": {
+  "ok": true,
+  "info": "{\"pengguna\":{\"id\":\"db01c7fd-f037-4bdc-99e7-303716fadfe3\",\"nama\":\"Budi Pengawas\",\"username\":\"pengawas\",\"role\":\"PENGURUS\",\"aktif\":true},\"aktif\":true,\"profil\":\"PENGAWAS\",\"oleh\":{\"userId\":\"14df1d7a-cf6c-42ac-92fb-a1afd0fa5b15\",\"username\":\"admin\"}}"
+ },
+ "latar dialog meredupkan layar": {
+  "ok": true,
+  "info": "1440"
+ },
+ "pemilih akun tampil sebagai jendela dialog (bukan layar penuh)": {
+  "ok": true,
+  "info": "760"
+ },
+ "tanpa galat halaman": {
+  "ok": true,
+  "info": ""
+ }
+}

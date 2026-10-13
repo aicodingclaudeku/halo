@@ -1,0 +1,31 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/components/AppNotificationHost.web.tsx",
+   "id": 677,
+   "baru": false,
+   "require": 6,
+   "reactNative": [
+    "View",
+    "Text",
+    "Pressable",
+    "Modal",
+    "StyleSheet"
+   ]
+  },
+  {
+   "berkas": "desktop/shims/modal-desktop.js",
+   "id": 9101,
+   "baru": true,
+   "require": 5,
+   "reactNative": [
+    "Modal",
+    "View",
+    "Pressable",
+    "StyleSheet"
+   ]
+  }
+ ],
+ "modalRnw": 483
+}

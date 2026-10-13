@@ -1,0 +1,144 @@
+{
+ "bundle": "entry-15353e1719ccf374e65fdb58e3482a5d.js",
+ "modul": [
+  {
+   "berkas": "src/services/PenurunanNilaiJasaPinjamanService.ts",
+   "id": 9103,
+   "baru": true,
+   "require": 13,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Transaksi/PenurunanNilaiJasaPinjamanScreen.tsx",
+   "id": 9104,
+   "baru": true,
+   "require": 20,
+   "reactNative": [
+    "ActivityIndicator",
+    "FlatList",
+    "StyleSheet",
+    "Text",
+    "TouchableOpacity",
+    "View"
+   ]
+  },
+  {
+   "berkas": "src/config/defaultCOA.ts",
+   "id": 783,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/accounting/SaldoAwalRealisasiKas.ts",
+   "id": 1403,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/accounting/CashFlowClassification.ts",
+   "id": 1401,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/HistoryTransaksiService.ts",
+   "id": 1303,
+   "baru": false,
+   "require": 7,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/JuklatPdf.ts",
+   "id": 928,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/export/ReportTableBuilders.ts",
+   "id": 921,
+   "baru": false,
+   "require": 13,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/FinancialReports.ts",
+   "id": 1400,
+   "baru": false,
+   "require": 17,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/reports/UrutanPenyajianPosisiKeuangan.ts",
+   "id": 930,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/AccountingPolicyService.ts",
+   "id": 963,
+   "baru": false,
+   "require": 4,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/services/PinjamanService.ts",
+   "id": 1345,
+   "baru": false,
+   "require": 21,
+   "reactNative": []
+  },
+  {
+   "berkas": "src/screens/Transaksi/PenyesuaianScreen.tsx",
+   "id": 1331,
+   "baru": false,
+   "require": 9,
+   "reactNative": [
+    "ScrollView",
+    "StyleSheet",
+    "Text",
+    "TouchableOpacity",
+    "View"
+   ]
+  },
+  {
+   "berkas": "src/screens/Laporan/KolektibilitasPiutangScreen.tsx",
+   "id": 1471,
+   "baru": false,
+   "require": 24,
+   "reactNative": [
+    "View",
+    "Text",
+    "FlatList",
+    "TouchableOpacity",
+    "ActivityIndicator",
+    "StyleSheet"
+   ]
+  },
+  {
+   "berkas": "src/navigation/RootNavigator.tsx (sisipan 2 rute)",
+   "id": 891,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "izinRute (sisipan 1 baris)",
+   "id": null,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  },
+  {
+   "berkas": "katalogMenu (sisipan 1 baris)",
+   "id": null,
+   "baru": false,
+   "require": 0,
+   "reactNative": []
+  }
+ ]
+}

@@ -1,0 +1,130 @@
+OK    admin melihat semua grup menu 28
+OK    tidak ada menu pengaturan di web (1.0.21) ['Dashboard', 'Anggota', 'Pengurus & Pengawas', 'Daftar Akun', 'Data Bank & Kas', 'Setor Simpanan', 'Tarik Simpanan Sukarela', 'Riwayat Simpanan', 'Saldo Simpanan Anggota', 'Simpanan Berjangka', 'Pinjaman Anggota', 'Ajukan Pinjaman', 'Bayar Angsuran', 'Kas Masuk', 'Kas Keluar', 'Pemindahan Saldo', 'Riwayat Kas & Bank', 'Posisi Keuangan', 'Laporan Hasil Usaha', 'Laba Rugi', 'Arus Kas', 'Perubahan Ekuitas', 'Neraca Saldo', 'Buku Besar', 'Kolektibilitas', 'Tunggakan', 'History Transaksi', 'SHU']
+OK    Ctrl+K membuka menu http://127.0.0.1:47999/#/laporan/buku-besar
+OK    simulasi angsuran tampil (6 baris) 6
+OK    pengajuan tersimpan → bukti + detail DIAJUKAN Data berhasil disimpan
+Pengajuan pinjaman tersimpan
+Status DIAJUKAN — menunggu pencairan oleh pengguna dengan izin Setuju.
+Nomor pinjaman
+PJ-2026-000005
+Anggota
+Anggota Uji 2 (A00002)
+Tanggal pengajuan
+12 Okt 2026
+Jumlah pinjaman
+Rp 3.000.000
+Tenor
+6 bulan
+Jasa
+Efektif · 1.5% per periode
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Ajukan lagi
+Selesai
+OK    pencairan lewat klik → bukti + AKTIF Data berhasil disimpan
+Pencairan pinjaman tersimpan
+Pinjaman AKTIF; jadwal angsuran & jurnal pencairan sudah dibuat.
+Nomor pinjaman
+PJ-2026-000005
+Anggota
+Anggota Uji 2 (A00002)
+Tanggal pencairan
+12 Okt 2026
+Jumlah pinjaman
+Rp 3.000.000
+Dibayar dari
+Kas Tunai
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Selesai
+OK    tarik sukarela → bukti dengan nomor & nominal Data berhasil disimpan
+Penarikan simpanan sukarela tersimpan
+Tersimpan di KOPKU Desktop (komputer server) dan langsung tercatat di laporan.
+Nomor transaksi
+ST-TARIK-2026-000001
+Anggota
+Anggota Uji 3 (A00003)
+Tanggal
+12 Okt 2026
+Nominal ditarik
+Rp 750.000
+Dibayar dari
+Kas Tunai
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Tarik lagi
+Selesai
+OK    kas keluar → bukti Data berhasil disimpan
+Kas keluar tersimpan
+Tersimpan di KOPKU Desktop (komputer server) dan langsung tercatat di laporan.
+Kategori beban
+Beban Administrasi dan Umum
+Dibayar dari
+Kas Tunai
+Tanggal
+12 Okt 2026
+Nominal
+Rp 85.000
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Input kas keluar lagi
+Selesai
+OK    transfer ke rekening yang sama ditolak server Rekening sumber dan rekening tujuan transfer tidak boleh sama.
+OK    neraca saldo → buku besar 
+OK    history → detail jurnal 
+OK    ekspor CSV dari browser neraca-saldo_2026-10-12_084520.csv
+OK    ekspor Excel dari browser neraca-saldo_2026-10-12_084520.xlsx
+OK    setor → bukti berisi anggota, nominal, pencatat Data berhasil disimpan
+Setoran simpanan tersimpan
+Tersimpan di KOPKU Desktop (komputer server) dan langsung tercatat di laporan.
+Nomor transaksi
+SP-WAJIB-2026-000005
+Anggota
+Anggota Uji 2 (A00002)
+Jenis simpanan
+Simpanan Wajib
+Periode wajib
+2026-10
+Tanggal
+12 Okt 2026
+Nominal
+Rp 125.000
+Sumber dana
+Kas Tunai
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Lihat riwayat
+Input setoran lagi
+OK    HP: tidak ada geser horizontal 390
+OK    admin bayar angsuran → bukti Data berhasil disimpan
+Pembayaran angsuran tersimpan
+Tersimpan di KOPKU Desktop (komputer server) dan langsung tercatat di laporan.
+Nomor pinjaman
+PJ-2026-000005
+Anggota
+Anggota Uji 2 (A00002)
+Pinjaman
+PJ-2026-000005 · angsuran ke-1
+Tanggal bayar
+12 Okt 2026
+Pokok
+Rp 481.576
+Jasa
+Rp 45.000
+Total diterima
+Rp 526.576
+Diterima di
+Kas Tunai
+Dicatat oleh Administrator (admin) · 12 Okt 2026, 08.45
+Cetak bukti
+Selesai
+OK    HP dengan data lama → konflik (tidak bayar ganda) Angsuran ini baru saja berubah (mungkin sudah dibayar pengguna lain). Muat ulang data sebelum membayar.
+OK    bendahara: tanpa Pengguna & Izin / Daftar Akun 
+OK    operator (Petugas): tanpa Pemindahan Saldo & pengaturan 
+OK    operator tidak melihat tombol Cairkan/Batalkan 
+OK    pengawas: hanya menu baca ['Dashboard', 'Anggota', 'Pengurus & Pengawas', 'Riwayat Simpanan', 'Saldo Simpanan Anggota', 'Simpanan Berjangka', 'Pinjaman Anggota', 'Posisi Keuangan', 'Laporan Hasil Usaha', 'Laba Rugi', 'Arus Kas', 'Perubahan Ekuitas', 'Neraca Saldo', 'Buku Besar', 'Kolektibilitas', 'Tunggakan', 'History Transaksi', 'SHU']
+OK    pengawas tanpa tombol Bayar/Pelunasan 
+OK    pengawas membuka URL transaksi langsung → layar tanpa izin 
+OK    keluar 
+OK    tanpa galat JavaScript []
+{"lulus": 25, "total": 25, "gagal": []}

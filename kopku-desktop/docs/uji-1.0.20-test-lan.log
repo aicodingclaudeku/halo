@@ -1,0 +1,471 @@
+
+> kopku-desktop@1.0.20 test:lan
+> node --test --test-concurrency=1 "test/lan/*.test.js"
+
+TAP version 13
+# (node:1817) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: health: online tanpa data sensitif, tanpa login
+ok 1 - health: online tanpa data sensitif, tanpa login
+  ---
+  duration_ms: 1391.268007
+  type: 'test'
+  ...
+# Subtest: endpoint terproteksi tanpa sesi → 401; tanpa izin role → 403
+ok 2 - endpoint terproteksi tanpa sesi → 401; tanpa izin role → 403
+  ---
+  duration_ms: 40.682322
+  type: 'test'
+  ...
+# Subtest: login admin: cookie HttpOnly SameSite=Strict, token tidak ada di body, hash token di DB
+ok 3 - login admin: cookie HttpOnly SameSite=Strict, token tidak ada di body, hash token di DB
+  ---
+  duration_ms: 251.408628
+  type: 'test'
+  ...
+# Subtest: login gagal: pesan generik + audit LOGIN_GAGAL, password tidak tercatat
+ok 4 - login gagal: pesan generik + audit LOGIN_GAGAL, password tidak tercatat
+  ---
+  duration_ms: 301.778554
+  type: 'test'
+  ...
+# Subtest: brute force: 5x gagal → akun terkunci (429) walau password benar, tercatat di DB
+ok 5 - brute force: 5x gagal → akun terkunci (429) walau password benar, tercatat di DB
+  ---
+  duration_ms: 583.920746
+  type: 'test'
+  ...
+# Subtest: akses LAN: non-admin ditolak sampai diberi Admin; Anggota tidak pernah boleh
+ok 6 - akses LAN: non-admin ditolak sampai diberi Admin; Anggota tidak pernah boleh
+  ---
+  duration_ms: 1101.131155
+  type: 'test'
+  ...
+# Subtest: RBAC server-side mengikuti matriks KOPKU existing (+ Pengawas baca saja)
+ok 7 - RBAC server-side mengikuti matriks KOPKU existing (+ Pengawas baca saja)
+  ---
+  duration_ms: 642.646481
+  type: 'test'
+  ...
+# Subtest: CSRF & Idempotency-Key wajib untuk request ubah data
+ok 8 - CSRF & Idempotency-Key wajib untuk request ubah data
+  ---
+  duration_ms: 100.752273
+  type: 'test'
+  ...
+# Subtest: validasi input server: tanggal, nominal, enum, tipe konten, ukuran badan
+ok 9 - validasi input server: tanggal, nominal, enum, tipe konten, ukuran badan
+  ---
+  duration_ms: 131.352242
+  type: 'test'
+  ...
+# Subtest: tidak ada endpoint SQL/berkas/database; galat tanpa stack trace
+ok 10 - tidak ada endpoint SQL/berkas/database; galat tanpa stack trace
+  ---
+  duration_ms: 120.069899
+  type: 'test'
+  ...
+# Subtest: Host header asing ditolak (proteksi DNS rebinding)
+ok 11 - Host header asing ditolak (proteksi DNS rebinding)
+  ---
+  duration_ms: 11.883735
+  type: 'test'
+  ...
+# Subtest: sesi: idle timeout, logout, user dinonaktifkan di desktop → sesi dicabut
+ok 12 - sesi: idle timeout, logout, user dinonaktifkan di desktop → sesi dicabut
+  ---
+  duration_ms: 280.751952
+  type: 'test'
+  ...
+# Subtest: cabut akses LAN berlaku segera untuk sesi yang sedang aktif
+ok 13 - cabut akses LAN berlaku segera untuk sesi yang sedang aktif
+  ---
+  duration_ms: 254.779096
+  type: 'test'
+  ...
+# Subtest: lisensi tidak valid → semua endpoint bisnis & login fail-closed (503)
+ok 14 - lisensi tidak valid → semua endpoint bisnis & login fail-closed (503)
+  ---
+  duration_ms: 83.648952
+  type: 'test'
+  ...
+# Subtest: audit LAN: login, logout, mutasi tercatat tanpa password/token/cookie
+ok 15 - audit LAN: login, logout, mutasi tercatat tanpa password/token/cookie
+  ---
+  duration_ms: 3.451315
+  type: 'test'
+  ...
+# (node:1825) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: backup → transaksi LAN → restore → API membaca data hasil restore; server DB utuh
+ok 16 - backup → transaksi LAN → restore → API membaca data hasil restore; server DB utuh
+  ---
+  duration_ms: 3493.355157
+  type: 'test'
+  ...
+# (node:1832) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Desktop Mode: kanal IPC lama utuh, webPreferences aman tidak berubah, menu lama utuh
+ok 17 - Desktop Mode: kanal IPC lama utuh, webPreferences aman tidak berubah, menu lama utuh
+  ---
+  duration_ms: 1224.49295
+  type: 'test'
+  ...
+# Subtest: Desktop Mode: halaman dimuat → TIDAK ada server, adapter, atau injeksi kode
+ok 18 - Desktop Mode: halaman dimuat → TIDAK ada server, adapter, atau injeksi kode
+  ---
+  duration_ms: 105.883489
+  type: 'test'
+  ...
+# Subtest: menu Berkas › LAN & WhatsApp… membuka layar Pengaturan (bukan jendela terpisah)
+ok 19 - menu Berkas › LAN & WhatsApp… membuka layar Pengaturan (bukan jendela terpisah)
+  ---
+  duration_ms: 0.516468
+  type: 'test'
+  ...
+# Subtest: saklar Server LAN ON: IPC hanya dari jendela utama; server online; WhatsApp tetap OFF
+ok 20 - saklar Server LAN ON: IPC hanya dari jendela utama; server online; WhatsApp tetap OFF
+  ---
+  duration_ms: 157.310773
+  type: 'test'
+  ...
+# Subtest: end-to-end: browser → HTTP → main → preload → adapter → service KOPKU asli
+ok 21 - end-to-end: browser → HTTP → main → preload → adapter → service KOPKU asli
+  ---
+  duration_ms: 280.538343
+  type: 'test'
+  ...
+# Subtest: navigasi dalam-halaman SPA (did-start-loading tanpa did-finish-load) TIDAK memutus layanan
+ok 22 - navigasi dalam-halaman SPA (did-start-loading tanpa did-finish-load) TIDAK memutus layanan
+  ---
+  duration_ms: 173.670088
+  type: 'test'
+  ...
+# Subtest: muat ulang halaman: bridge diputus lalu adapter dipasang ulang otomatis
+ok 23 - muat ulang halaman: bridge diputus lalu adapter dipasang ulang otomatis
+  ---
+  duration_ms: 315.548634
+  type: 'test'
+  ...
+# Subtest: saklar WhatsApp ON saat LAN ON → penjadwal berjalan; pengaturan & kredensial non-rahasia dari desktop
+ok 24 - saklar WhatsApp ON saat LAN ON → penjadwal berjalan; pengaturan & kredensial non-rahasia dari desktop
+  ---
+  duration_ms: 27.291943
+  type: 'test'
+  ...
+# Subtest: saklar Server LAN OFF → port tertutup, WhatsApp Reminder TETAP berjalan
+ok 25 - saklar Server LAN OFF → port tertutup, WhatsApp Reminder TETAP berjalan
+  ---
+  duration_ms: 8.244729
+  type: 'test'
+  ...
+# Subtest: muat ulang halaman saat hanya WhatsApp ON: adapter dipasang ulang, penjadwal tetap berjalan
+ok 26 - muat ulang halaman saat hanya WhatsApp ON: adapter dipasang ulang, penjadwal tetap berjalan
+  ---
+  duration_ms: 201.388498
+  type: 'test'
+  ...
+# Subtest: saklar WhatsApp OFF (LAN juga OFF) → semua berhenti; LAN bisa dinyalakan lagi tanpa WhatsApp
+ok 27 - saklar WhatsApp OFF (LAN juga OFF) → semua berhenti; LAN bisa dinyalakan lagi tanpa WhatsApp
+  ---
+  duration_ms: 30.419486
+  type: 'test'
+  ...
+# Subtest: kembali ke Desktop Mode: server berhenti (Server Offline)
+ok 28 - kembali ke Desktop Mode: server berhenti (Server Offline)
+  ---
+  duration_ms: 5.538133
+  type: 'test'
+  ...
+# (node:1839) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: dua client membaca data authoritative yang sama lewat API
+ok 29 - dua client membaca data authoritative yang sama lewat API
+  ---
+  duration_ms: 1790.841266
+  type: 'test'
+  ...
+# Subtest: dua client membayar angsuran yang SAMA bersamaan → hanya satu tercatat, lainnya KONFLIK
+ok 30 - dua client membayar angsuran yang SAMA bersamaan → hanya satu tercatat, lainnya KONFLIK
+  ---
+  duration_ms: 58.092769
+  type: 'test'
+  ...
+# Subtest: Idempotency-Key sama (klik ganda / retry jaringan) → satu transaksi, respons identik
+ok 31 - Idempotency-Key sama (klik ganda / retry jaringan) → satu transaksi, respons identik
+  ---
+  duration_ms: 38.820676
+  type: 'test'
+  ...
+# Subtest: desktop + 2 client LAN bertransaksi bersamaan: semua atomik, tanpa galat transaksi bersarang, jurnal seimbang
+ok 32 - desktop + 2 client LAN bertransaksi bersamaan: semua atomik, tanpa galat transaksi bersarang, jurnal seimbang
+  ---
+  duration_ms: 237.010482
+  type: 'test'
+  ...
+# Subtest: KONTROL NEGATIF: tanpa mutex transaksi, dua transaksi bersamaan pada koneksi yang sama gagal
+ok 33 - KONTROL NEGATIF: tanpa mutex transaksi, dua transaksi bersamaan pada koneksi yang sama gagal
+  ---
+  duration_ms: 8.005777
+  type: 'test'
+  ...
+# Subtest: database dikunci proses lain → 503 DB_SIBUK tanpa detail internal; retry kunci yang sama sukses sekali
+ok 34 - database dikunci proses lain → 503 DB_SIBUK tanpa detail internal; retry kunci yang sama sukses sekali
+  ---
+  duration_ms: 46.65451
+  type: 'test'
+  ...
+# Subtest: server offline → restart → browser reconnect: sesi tetap berlaku, retry dengan kunci yang sama tidak menggandakan
+ok 35 - server offline → restart → browser reconnect: sesi tetap berlaku, retry dengan kunci yang sama tidak menggandakan
+  ---
+  duration_ms: 148.984934
+  type: 'test'
+  ...
+# Subtest: KOPKU Desktop belum siap (adapter terputus) → 503 tanpa crash, pulih setelah siap
+ok 36 - KOPKU Desktop belum siap (adapter terputus) → 503 tanpa crash, pulih setelah siap
+  ---
+  duration_ms: 11.396449
+  type: 'test'
+  ...
+# Subtest: ubah anggota: konflik versi (dua pengguna mengedit bersamaan)
+ok 37 - ubah anggota: konflik versi (dua pengguna mengedit bersamaan)
+  ---
+  duration_ms: 39.976176
+  type: 'test'
+  ...
+# (node:1846) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: sesi: peta izin = Permission Matrix existing (Pengawas dipersempit ke baca)
+ok 38 - sesi: peta izin = Permission Matrix existing (Pengawas dipersempit ke baca)
+  ---
+  duration_ms: 2405.770818
+  type: 'test'
+  ...
+# Subtest: RBAC server-side: semua endpoint baru × 5 peran mengikuti matriks
+ok 39 - RBAC server-side: semua endpoint baru × 5 peran mengikuti matriks
+  ---
+  duration_ms: 505.613176
+  type: 'test'
+  ...
+# Subtest: dashboard: bagian hanya diisi sesuai izin lihat
+ok 40 - dashboard: bagian hanya diisi sesuai izin lihat
+  ---
+  duration_ms: 62.089837
+  type: 'test'
+  ...
+# Subtest: transaksi harian lewat LAN: tarik, kas masuk/keluar, transfer, ajukan → simulasi = jadwal, cairkan, batalkan
+ok 41 - transaksi harian lewat LAN: tarik, kas masuk/keluar, transfer, ajukan → simulasi = jadwal, cairkan, batalkan
+  ---
+  duration_ms: 145.697652
+  type: 'test'
+  ...
+# Subtest: klik ganda (Idempotency-Key sama) pada transaksi baru → satu transaksi
+ok 42 - klik ganda (Idempotency-Key sama) pada transaksi baru → satu transaksi
+  ---
+  duration_ms: 29.557446
+  type: 'test'
+  ...
+# Subtest: skenario langsung (desktop) vs lewat API LAN: seluruh hasil identik
+ok 43 - skenario langsung (desktop) vs lewat API LAN: seluruh hasil identik
+  ---
+  duration_ms: 4257.559416
+  type: 'test'
+  ...
+# Subtest: skenario mencakup jalur perhitungan penting (bukan uji kosong)
+ok 44 - skenario mencakup jalur perhitungan penting (bukan uji kosong)
+  ---
+  duration_ms: 0.364235
+  type: 'test'
+  ...
+# Subtest: koperasi.db tetap schema v82, tanpa tabel baru dari modul LAN
+ok 45 - koperasi.db tetap schema v82, tanpa tabel baru dari modul LAN
+  ---
+  duration_ms: 0.230893
+  type: 'test'
+  ...
+# Subtest: berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host, shim, installer, skrip, smoke test)
+ok 46 - berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host, shim, installer, skrip, smoke test)
+  ---
+  duration_ms: 161.138377
+  type: 'test'
+  ...
+# 37 aset renderer/assets/node_modules belum dilengkapi (tidak ikut ZIP sumber) — jalankan `npm run lengkapi:aset` sebelum build.
+# (node:1874) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: normalisasi nomor Indonesia
+ok 47 - normalisasi nomor Indonesia
+  ---
+  duration_ms: 1.370075
+  type: 'test'
+  ...
+# Subtest: validasi config server: nilai aneh dibuang ke bawaan aman
+ok 48 - validasi config server: nilai aneh dibuang ke bawaan aman
+  ---
+  duration_ms: 0.389926
+  type: 'test'
+  ...
+# Subtest: kredensial WhatsApp: env > berkas > secure store; ringkasan tanpa nilai rahasia
+ok 49 - kredensial WhatsApp: env > berkas > secure store; ringkasan tanpa nilai rahasia
+  ---
+  duration_ms: 2.749327
+  type: 'test'
+  ...
+# Subtest: serverDb: migrasi idempoten, versi tercatat, versi lebih baru ditolak
+ok 50 - serverDb: migrasi idempoten, versi tercatat, versi lebih baru ditolak
+  ---
+  duration_ms: 74.178183
+  type: 'test'
+  ...
+# Subtest: whatsapp_notifications: UNIQUE (pinjaman, jenis, tanggal_jadwal) mencegah duplikat
+ok 51 - whatsapp_notifications: UNIQUE (pinjaman, jenis, tanggal_jadwal) mencegah duplikat
+  ---
+  duration_ms: 1.326587
+  type: 'test'
+  ...
+# Subtest: sesi: kedaluwarsa idle & absolut, cabut; hanya hash token tersimpan
+ok 52 - sesi: kedaluwarsa idle & absolut, cabut; hanya hash token tersimpan
+  ---
+  duration_ms: 3.585966
+  type: 'test'
+  ...
+# Subtest: pembatas login: penundaan progresif & kunci 15 menit per username dan per IP
+ok 53 - pembatas login: penundaan progresif & kunci 15 menit per username dan per IP
+  ---
+  duration_ms: 3.031678
+  type: 'test'
+  ...
+# Subtest: audit & logger: rahasia dibuang/disamarkan
+ok 54 - audit & logger: rahasia dibuang/disamarkan
+  ---
+  duration_ms: 1.174906
+  type: 'test'
+  ...
+# Subtest: akses LAN: ANGGOTA & nonaktif ditolak; non-admin perlu izin eksplisit; admin bisa dicabut
+ok 55 - akses LAN: ANGGOTA & nonaktif ditolak; non-admin perlu izin eksplisit; admin bisa dicabut
+  ---
+  duration_ms: 0.423333
+  type: 'test'
+  ...
+# Subtest: otorisasi: fail-closed tanpa aturan; Pengawas hanya view; matriks existing menentukan
+ok 56 - otorisasi: fail-closed tanpa aturan; Pengawas hanya view; matriks existing menentukan
+  ---
+  duration_ms: 0.72287
+  type: 'test'
+  ...
+# Subtest: jaringan: hanya alamat privat; Host harus IP/localhost/nama komputer
+ok 57 - jaringan: hanya alamat privat; Host harus IP/localhost/nama komputer
+  ---
+  duration_ms: 0.695293
+  type: 'test'
+  ...
+# Subtest: validasi input
+ok 58 - validasi input
+  ---
+  duration_ms: 0.714184
+  type: 'test'
+  ...
+# Subtest: klasifikasi galat Cloud API
+ok 59 - klasifikasi galat Cloud API
+  ---
+  duration_ms: 0.180243
+  type: 'test'
+  ...
+# Subtest: WhatsAppService: kredensial belum lengkap / nomor tidak sah tidak memanggil jaringan
+ok 60 - WhatsAppService: kredensial belum lengkap / nomor tidak sah tidak memanggil jaringan
+  ---
+  duration_ms: 0.804247
+  type: 'test'
+  ...
+# Subtest: indeks modul bundle: semua layanan yang dibutuhkan ditemukan tepat satu; nama ambigu ditolak
+ok 61 - indeks modul bundle: semua layanan yang dibutuhkan ditemukan tepat satu; nama ambigu ditolak
+  ---
+  duration_ms: 79.000767
+  type: 'test'
+  ...
+# (node:1881) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: API WhatsApp: token tidak dikirim ke browser, test message hanya ke nomor admin, log terfilter
+ok 62 - API WhatsApp: token tidak dikirim ke browser, test message hanya ke nomor admin, log terfilter
+  ---
+  duration_ms: 2270.944633
+  type: 'test'
+  ...
+# (node:1888) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: KOPKU dibuka ulang dengan Server LAN OFF + WhatsApp ON → hanya penjadwal yang berjalan (port tertutup)
+ok 63 - KOPKU dibuka ulang dengan Server LAN OFF + WhatsApp ON → hanya penjadwal yang berjalan (port tertutup)
+  ---
+  duration_ms: 1894.328413
+  type: 'test'
+  ...
+# (node:1895) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: sebelum jam kirim (07:30) tidak ada reminder dibuat
+ok 64 - sebelum jam kirim (07:30) tidak ada reminder dibuat
+  ---
+  duration_ms: 1324.169352
+  type: 'test'
+  ...
+# Subtest: H-3 (12 Okt 08:30, jatuh tempo 15 Okt): nomor sah terkirim, nomor tidak sah skipped tanpa dikirim
+ok 65 - H-3 (12 Okt 08:30, jatuh tempo 15 Okt): nomor sah terkirim, nomor tidak sah skipped tanpa dikirim
+  ---
+  duration_ms: 58.272945
+  type: 'test'
+  ...
+# Subtest: eksekusi ganda: tick ulang, scheduler kedua (lease), restart, & tick bersamaan → tidak ada pesan ganda
+ok 66 - eksekusi ganda: tick ulang, scheduler kedua (lease), restart, & tick bersamaan → tidak ada pesan ganda
+  ---
+  duration_ms: 11.681714
+  type: 'test'
+  ...
+# Subtest: H-1: angsuran sudah dibayar & pinjaman sudah lunas tidak diingatkan
+ok 67 - H-1: angsuran sudah dibayar & pinjaman sudah lunas tidak diingatkan
+  ---
+  duration_ms: 59.679233
+  type: 'test'
+  ...
+# Subtest: H (internet offline): tetap pending, jatah percobaan tidak habis; terkirim saat online; dibayar sebelum terkirim → skipped
+ok 68 - H (internet offline): tetap pending, jatah percobaan tidak habis; terkirim saat online; dibayar sebelum terkirim → skipped
+  ---
+  duration_ms: 66.765259
+  type: 'test'
+  ...
+# Subtest: 401 token ditolak: pending + scheduler dijeda (tidak menghabiskan percobaan); setelah diperbaiki → terkirim
+ok 69 - 401 token ditolak: pending + scheduler dijeda (tidak menghabiskan percobaan); setelah diperbaiki → terkirim
+  ---
+  duration_ms: 68.978088
+  type: 'test'
+  ...
+# Subtest: 429 lalu sukses (backoff); 500 tiga kali → failed; template salah → failed tanpa retry; timeout
+ok 70 - 429 lalu sukses (backoff); 500 tiga kali → failed; template salah → failed tanpa retry; timeout
+  ---
+  duration_ms: 155.983581
+  type: 'test'
+  ...
+# Subtest: pemulihan crash: baris 'sending' → failed (tidak dikirim ulang); pending kedaluwarsa → skipped
+ok 71 - pemulihan crash: baris 'sending' → failed (tidak dikirim ulang); pending kedaluwarsa → skipped
+  ---
+  duration_ms: 16.183253
+  type: 'test'
+  ...
+# Subtest: reminder nonaktif → scheduler tidak membuat/mengirim apa pun
+ok 72 - reminder nonaktif → scheduler tidak membuat/mengirim apa pun
+  ---
+  duration_ms: 11.748905
+  type: 'test'
+  ...
+# Subtest: token tidak pernah muncul di log berkas, database, maupun pesan galat
+ok 73 - token tidak pernah muncul di log berkas, database, maupun pesan galat
+  ---
+  duration_ms: 1.399596
+  type: 'test'
+  ...
+1..73
+# tests 73
+# suites 0
+# pass 73
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 30933.686299
