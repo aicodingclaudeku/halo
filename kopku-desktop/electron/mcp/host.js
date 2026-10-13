@@ -170,7 +170,10 @@ class McpHost {
       this._simpan(p);
       this._catat({ alat: '(pengaturan)', ok: true, ket: `${p.aktif ? 'Menyala' : 'Mati'} · data per anggota ${p.perAnggota ? 'diizinkan' : 'tidak diizinkan'} · ubah data ${p.bolehTulis ? 'DIIZINKAN' : 'tidak diizinkan'} · ${p.cara === 'ekstensi' ? 'ekstensi .mcpb' : 'konfigurasi Claude Desktop'} · oleh ${u.username}` });
       if (p.aktif) await this._mulai();
-      else await this._henti();
+      else {
+        await this._henti();
+        if (this.chatgpt) await this.chatgpt.henti();
+      }
       return this.status();
     });
   }
@@ -184,7 +187,10 @@ class McpHost {
   }
 
   async henti() {
-    return this._serial(() => this._henti());
+    return this._serial(async () => {
+      await this._henti();
+      if (this.chatgpt) await this.chatgpt.henti();
+    });
   }
 
   async _mulai() {
@@ -320,6 +326,23 @@ class McpHost {
     return this._tolak(res, 404, 'Tidak ditemukan.');
   }
 
+  /** Izin ubah data per sumber: ChatGPT butuh izin tambahan tersendiri (1.0.29). */
+  _bolehTulisDari(k, sumber) {
+    if (!k.bolehTulis) return false;
+    if (sumber === 'chatgpt') return !!(this.chatgpt && this.chatgpt.bolehTulis());
+    return true;
+  }
+
+  /** Daftar alat untuk sumber tertentu ('claude' | 'chatgpt'). */
+  async daftarAlat(sumber) {
+    try {
+      const k = await this._konteks();
+      return this._daftarDariKonteks(Object.assign({}, k, { bolehTulis: this._bolehTulisDari(k, sumber) }));
+    } catch {
+      return untukMcp(ALAT.filter((a) => this.baca().perAnggota || !a.perAnggota));
+    }
+  }
+
   /** Alat yang boleh dipakai pada pengaturan & izin saat ini. */
   async _daftarDariKonteks(k) {
     const baca = await alatTersedia({ perAnggota: k.perAnggota, boleh: k.boleh });
@@ -378,7 +401,7 @@ class McpHost {
           throw galat(`Backup otomatis sebelum perubahan gagal (${e.message}). Perubahan DIBATALKAN demi keamanan data.`, 'BACKUP_GAGAL');
         }
         this.backupTerakhir = this._now();
-        this._catat({ alat: '(backup otomatis)', ok: true, ket: 'sebelum perubahan data oleh Claude' });
+        this._catat({ alat: '(backup otomatis)', ok: true, ket: 'sebelum perubahan data oleh AI' });
       },
       boleh,
       hariIni: hariIniLokal(this._now()),
@@ -398,18 +421,22 @@ class McpHost {
     return null;
   }
 
-  /** Jalankan satu alat (dipakai HTTP & uji). */
-  async panggil(nama, args) {
+  /** Jalankan satu alat (dipakai HTTP & uji). `opsi.sumber`: 'claude' (bawaan) | 'chatgpt'. */
+  async panggil(nama, args, opsi = {}) {
     const mulai = this._now();
+    const sumber = opsi.sumber === 'chatgpt' ? 'chatgpt' : 'claude';
+    const namaAi = sumber === 'chatgpt' ? 'ChatGPT' : 'Claude';
     let hasil;
     try {
-      const k = await this._konteks();
+      const k0 = await this._konteks();
+      const k = Object.assign({}, k0, { bolehTulis: this._bolehTulisDari(k0, sumber) });
       const n = String(nama || '');
       if (NAMA_TULIS.has(n)) {
         const adaKonfirmasi = args && typeof args === 'object' && typeof args.konfirmasi === 'string' && args.konfirmasi.trim();
         const batas = adaKonfirmasi ? this._cekBatasUbah() : null;
         if (!k.bolehTulis) {
-          hasil = { content: [{ type: 'text', text: 'Perubahan data oleh Claude TIDAK diizinkan di KOPKU Desktop (Pengaturan › Asisten AI › "Izinkan Claude mengubah data"). Minta admin KOPKU menyalakannya, atau lakukan perubahan di aplikasi.' }], isError: true };
+          const sakelar = sumber === 'chatgpt' && k0.bolehTulis ? 'ChatGPT › "Izinkan ChatGPT mengubah data"' : '"Izinkan Claude mengubah data"';
+          hasil = { content: [{ type: 'text', text: `Perubahan data oleh ${namaAi} TIDAK diizinkan di KOPKU Desktop (Pengaturan › Asisten AI › ${sakelar}). Minta admin KOPKU menyalakannya, atau lakukan perubahan di aplikasi.` }], isError: true };
         } else if (batas) hasil = { content: [{ type: 'text', text: batas }], isError: true };
         else hasil = await jalankanAlatTulis(n, args, k, this.kodeKonfirmasi, this._now());
       } else hasil = await jalankanAlat(n, args, k);
@@ -426,6 +453,7 @@ class McpHost {
       ket = 'UBAH: ' + hasil._ringkasLog;
     } else if (!hasil.isError && NAMA_TULIS.has(String(nama)) && /MENUNGGU_KONFIRMASI|PRATINJAU_BERUBAH/.test(hasil.content[0].text)) ket = 'pratinjau (belum disimpan)';
     delete hasil._ringkasLog;
+    if (sumber === 'chatgpt') ket = '[ChatGPT] ' + ket;
     this._catat({ alat: String(nama || '?').slice(0, 60), ok: !hasil.isError, ms: this._now() - mulai, ket });
     delete hasil._galat;
     return hasil;

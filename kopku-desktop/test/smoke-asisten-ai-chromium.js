@@ -224,6 +224,7 @@ function klienStdio(perintah, args) {
         bukaFolder: () => ai('asistenAi:bukaFolder'),
         unduhClaude: () => ai('asistenAi:unduhClaude'),
         bukaFolderEkstensi: () => ai('asistenAi:bukaFolderEkstensi'),
+        aturChatGPT: (o) => ai('asistenAi:aturChatGPT', o),
       },
       app: { openDataFolder: nol, onMenu() { return () => {}; }, setTitle() {} },
     };
@@ -288,12 +289,12 @@ function klienStdio(perintah, args) {
   await pg.waitForTimeout(600);
   await pg.screenshot({ path: path.join(OUT, '40-ctrl-k-claude.png') });
   const palet = await pg.evaluate(() => document.body.innerText);
-  ok('Ctrl+K "claude" menemukan Asisten AI', /Asisten AI/.test(palet) && /Hubungkan ke Claude/.test(palet));
+  ok('Ctrl+K "claude" menemukan Asisten AI', /Asisten AI/.test(palet) && /Claude & ChatGPT/.test(palet));
   await pg.keyboard.press('Enter');
   await pg.waitForTimeout(3000);
   await pg.screenshot({ path: path.join(OUT, '41-asisten-mati.png'), fullPage: true });
   let teks = await pg.evaluate(() => document.body.innerText);
-  ok('layar Asisten AI terbuka (bawaan mati)', /Hubungkan ke Claude/.test(teks) && /\bOFF\b/.test(teks) && /Belum terpasang/.test(teks), teks.slice(0, 120).replace(/\n/g, ' | '));
+  ok('layar Asisten AI terbuka (bawaan mati)', /Aktifkan Asisten AI/.test(teks) && /\bOFF\b/.test(teks) && /Belum terpasang/.test(teks), teks.slice(0, 120).replace(/\n/g, ' | '));
   ok('Claude Desktop terdeteksi dari folder konfigurasi', /Claude Desktop terdeteksi/.test(teks));
   ok('menu "Asisten AI" ada di sidebar Pengaturan (setelah LAN & WhatsApp)', /LAN & WhatsApp\s*\n\s*Asisten AI/.test(teks));
 
@@ -302,23 +303,23 @@ function klienStdio(perintah, args) {
   await pg.waitForTimeout(1200);
   const judulSlide = [];
   const slideTeks = async () => pg.evaluate(() => { const el = document.querySelector('[data-testid=panduan-asisten-ai]'); return el ? el.innerText : ''; });
-  for (let i = 1; i <= 10; i++) {
+  for (let i = 1; i <= 11; i++) {
     const t = await slideTeks();
     judulSlide.push(t.split('\n').find((l) => /^\d+\. /.test(l.trim())) || t.slice(0, 40));
     await pg.screenshot({ path: path.join(OUT, `39-panduan-${String(i).padStart(2, '0')}.png`) });
-    if (i < 10) {
+    if (i < 11) {
       if (i % 2) await pg.locator('[data-testid=panduan-maju]').click();
       else await pg.keyboard.press('ArrowRight');
       await pg.waitForTimeout(1300);
     }
   }
   const akhirTeks = await slideTeks();
-  ok('panduan slide: 10 slide berbeda, dapat dimaju (tombol & panah)', new Set(judulSlide).size === 10 && /10\s*\/\s*10/.test(akhirTeks), judulSlide.join(' | '));
+  ok('panduan slide: 11 slide berbeda, dapat dimaju (tombol & panah)', new Set(judulSlide).size === 11 && /11\s*\/\s*11/.test(akhirTeks), judulSlide.join(' | '));
   const animasi = await pg.evaluate(() => [...document.querySelectorAll('[data-testid=panduan-asisten-ai] *')].filter((el) => getComputedStyle(el).animationName !== 'none').length);
   ok('panduan slide memakai animasi CSS', animasi > 0, `elemen beranimasi: ${animasi}`);
   await pg.keyboard.press('ArrowLeft');
   await pg.waitForTimeout(800);
-  ok('panah kiri kembali ke slide sebelumnya', /9\s*\/\s*10/.test(await slideTeks()));
+  ok('panah kiri kembali ke slide sebelumnya', /10\s*\/\s*11/.test(await slideTeks()));
   await pg.keyboard.press('Escape');
   await pg.waitForTimeout(600);
   ok('Esc menutup panduan', (await slideTeks()) === '');
@@ -410,6 +411,53 @@ function klienStdio(perintah, args) {
   ok('layar: sakelar ubah data ON, alat ubah data aktif, aktivitas "Diubah"', /Ubah data aktif/.test(teks) && /Alat ubah data \(16\)/i.test(teks) && /Diubah/.test(teks) && /UBAH: Setor simpanan wajib/.test(teks));
   await pg.evaluate(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; });
 
+  // ---- 1.0.29: tab ChatGPT
+  const klikTombol = (re) => pg.evaluate((src) => { const r = new RegExp(src); const b = [...document.querySelectorAll('[role=button]')].find((x) => r.test((x.innerText || '').trim())); if (b) b.click(); return !!b; }, re.source);
+  await pg.locator('[data-testid=tab-chatgpt]').click();
+  await pg.waitForTimeout(800);
+  await pg.screenshot({ path: path.join(OUT, '50-chatgpt-mati.png'), fullPage: true });
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('tab ChatGPT di menu Asisten AI (bawaan mati, kartu Claude disembunyikan)', /Nyalakan akses ChatGPT/.test(teks) && !/Pasang di Claude Desktop/.test(teks) && /KOPKU TIDAK membuka akses internet sendiri/.test(teks));
+  await pg.locator('[data-testid=saklar-chatgpt]').click();
+  await pg.waitForTimeout(700);
+  await pg.screenshot({ path: path.join(OUT, '51-konfirmasi-chatgpt.png') });
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('dialog ChatGPT menjelaskan risiko internet & URL rahasia', /Nyalakan akses ChatGPT\?/.test(teks) && /ANDA sendiri yang menjalankan terowongan/.test(teks) && /Jangan bagikan URL/.test(teks));
+  await klikTombol(/^Nyalakan$/);
+  await pg.waitForTimeout(2500);
+  await pg.keyboard.press('Enter');
+  let gst = (await handler.get('asistenAi:status')()).chatgpt;
+  ok('server ChatGPT menyala di 127.0.0.1', gst.aktif === true && /^http:\/\/127\.0\.0\.1:\d+$/.test(gst.alamatLokal), gst.alamatLokal);
+  await pg.waitForTimeout(500);
+  await pg.locator('[data-testid=input-alamat-publik]').fill('https://kopku-uji.trycloudflare.com');
+  await pg.locator('[data-testid=tombol-simpan-alamat]').click();
+  await pg.waitForTimeout(2000);
+  await pg.keyboard.press('Enter');
+  await pg.waitForTimeout(600);
+  gst = (await handler.get('asistenAi:status')()).chatgpt;
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('layar menampilkan perintah terowongan & URL konektor rahasia', teks.includes(gst.perintahTerowongan) && /https:\/\/kopku-uji\.trycloudflare\.com\/mcp\/[0-9a-f]{64}/.test(teks), gst.urlChatGPT && gst.urlChatGPT.replace(/[0-9a-f]{64}/, '…'));
+  await pg.locator('[data-testid=tombol-salin-url-chatgpt]').click();
+  await pg.waitForTimeout(800);
+  await pg.keyboard.press('Enter');
+  ok('tombol Salin URL konektor', disalin.includes(gst.urlChatGPT));
+  const rpcGpt = (method, params) => fetch(gst.alamatLokal + new URL(gst.urlChatGPT).pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).then((r) => r.json());
+  const rg = await rpcGpt('tools/call', { name: 'ringkasan_koperasi', arguments: {} });
+  ok('ChatGPT (HTTP) membaca ringkasan koperasi lewat URL konektor', !rg.result.isError && /anggotaAktif/.test(rg.result.content[0].text), rg.result.content[0].text.slice(0, 100));
+  ok('ChatGPT: alat ubah data TIDAK ditawarkan sebelum izin ChatGPT', !(await rpcGpt('tools/list', {})).result.tools.some((t) => t.name === 'kas_masuk'));
+  await pg.locator('[data-testid=saklar-chatgpt-ubah]').click();
+  await pg.waitForTimeout(700);
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('dialog "Izinkan ChatGPT MENGUBAH data"', /Izinkan ChatGPT MENGUBAH data\?/.test(teks));
+  await klikTombol(/^Izinkan$/);
+  await pg.waitForTimeout(2000);
+  await pg.keyboard.press('Enter');
+  await pg.waitForTimeout(600);
+  ok('izin ubah data ChatGPT → alat ubah data ditawarkan ke ChatGPT', (await rpcGpt('tools/list', {})).result.tools.some((t) => t.name === 'kas_masuk'));
+  await pg.screenshot({ path: path.join(OUT, '52-chatgpt-menyala.png'), fullPage: true });
+  await pg.locator('[data-testid=tab-claude]').click();
+  await pg.waitForTimeout(800);
+
   // ---- cara 2: ekstensi .mcpb
   await pg.locator('[data-testid=tombol-ekstensi-claude]').click();
   await pg.waitForTimeout(2500);
@@ -470,7 +518,7 @@ function klienStdio(perintah, args) {
   await pg.keyboard.press('Enter');
   await pg.waitForTimeout(2500);
   teks = await pg.evaluate(() => document.body.innerText);
-  ok('kartu "Asisten AI" di layar Semua Pengaturan', /Asisten AI/.test(teks) && /Hubungkan ke Claude Desktop \(MCP\)/.test(teks));
+  ok('kartu "Asisten AI" di layar Semua Pengaturan', /Asisten AI/.test(teks) && /Claude & ChatGPT \(MCP\)/.test(teks));
   await pg.screenshot({ path: path.join(OUT, '47-semua-pengaturan.png'), fullPage: true });
 
   ok('tanpa galat halaman', logs.length === 0, logs.slice(0, 3).join(' | '));

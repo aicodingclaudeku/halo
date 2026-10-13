@@ -119,7 +119,7 @@ module.exports = (win, app) => {
           await tunggu(2500);
           await shot('50-asisten-mati');
           t = await teks();
-          cek('menu Berkas › Asisten AI… membuka layar', /Hubungkan ke Claude/.test(t) && /Pasang di Claude Desktop/.test(t));
+          cek('menu Berkas › Asisten AI… membuka layar', /Aktifkan Asisten AI/.test(t) && /Pasang di Claude Desktop/.test(t));
           cek('bawaan MATI', (await js('kopkuDesktop.asistenAi.status()')).aktif === false);
 
           // ---- nyalakan lewat sakelar di layar + dialog konfirmasi asli

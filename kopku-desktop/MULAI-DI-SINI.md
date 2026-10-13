@@ -1,6 +1,14 @@
-# KOPKU Desktop 1.0.28 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.29 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.29 — ChatGPT di menu Pengaturan › Asisten AI (opsional)
+- **Menu Asisten AI kini punya dua tab: Claude dan ChatGPT.** Sakelar bersama di atas: **Aktifkan Asisten AI**, **Izinkan data per anggota**, **Izinkan AI mengubah data** (berlaku untuk keduanya).
+- **Tab ChatGPT:** sakelar **Nyalakan akses ChatGPT** (bawaan MATI, hanya Admin, dialog peringatan risiko, tidak menyala otomatis saat KOPKU dibuka). KOPKU menyalakan server MCP khusus ChatGPT **hanya di 127.0.0.1** (port tetap) dengan **kunci rahasia 256-bit** di URL. Langkah di layar: (1) jalankan terowongan HTTPS Anda sendiri, mis. `cloudflared tunnel --url http://127.0.0.1:<port>` (perintah + tombol Salin), (2) tempel alamat publik `https://…`, (3) salin **URL konektor** ke ChatGPT › Settings › Apps & Connectors › Developer mode › Create (Authentication: No authentication). Tombol **Ganti kunci** membuat URL lama langsung tidak berlaku.
+- **KOPKU tidak membuka akses internet sendiri** — terowongan dipasang & dijalankan pengguna. Pengaman server ChatGPT: jalur/kunci salah → 404 tanpa keterangan, hanya POST JSON-RPC, Origin peramban selain chatgpt.com ditolak, batas 120 permintaan/menit, badan ≤ 256 KB, log bertanda `[ChatGPT]`, mati bila Asisten AI dimatikan.
+- **Izin ubah data ChatGPT terpisah** ("Izinkan ChatGPT mengubah data", bawaan mati, butuh "Izinkan AI mengubah data"); alat, penyaring privasi, kebijakan, pratinjau + kode konfirmasi, backup otomatis, batas 10 perubahan/menit sama dengan Claude.
+- Panduan animasi kini **11 slide** (slide ChatGPT). Menu & pencarian Ctrl+K: "chatgpt", "gpt", "openai".
+- Uji: `test:mcp` 42/42 (baru 9: `test/mcp/asisten-ai-chatgpt.test.js`), `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 45/45 (termasuk tab ChatGPT + panggilan HTTP sungguhan ke URL konektor), Electron nyata 20/20. Tangkapan layar: `docs/tangkapan-layar/1.0.29-*.png`.
 
 ## Yang baru di 1.0.28 — Asisten AI: lebih aman & rahasia, pilih folder ekstensi, panduan animasi
 - **Struktur aplikasi tidak dibocorkan ke AI:** semua keluaran alat lewat penyaring baru `electron/mcp/privasi.js` — ID teknis (UUID, kunci `*Id`), jalur berkas/folder, URI internal, jejak stack, dan pesan/nama tabel SQL dibuang atau disamarkan; galat ditampilkan generik. Rujukan untuk AI cukup nomor yang terlihat di aplikasi (nomor anggota/pinjaman/transaksi, kode akun).
@@ -9,7 +17,7 @@ Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap diban
 - **Batas laju perubahan:** maks. 10 perubahan/menit dan 120/jam lewat AI (pratinjau tidak dibatasi); input massal diarahkan ke Import Data Awal.
 - **Ekstensi Claude `.mcpb`: pengguna memilih folder simpan** lewat dialog "Simpan sebagai" (bawaan **Dokumen › KOPKU Desktop**); folder terakhir diingat, ditampilkan di layar, dan ada tombol **Buka folder ekstensi**. Batal = tidak ada berkas dibuat.
 - **Panduan animasi 10 slide** (tombol "Baru di sini? Lihat panduan bergambar" di atas layar Asisten AI): pasang Claude, menyalakan konektor, mulai ulang Claude, bertanya, mengubah data dengan persetujuan, koreksi & import, ekstensi .mcpb, keamanan. Navigasi tombol/titik/panah ←/→, Esc menutup, putar otomatis.
-- **ChatGPT belum disertakan** — butuh server MCP yang dapat dijangkau dari internet (HTTPS publik); lihat `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md` §K.
+- ChatGPT belum disertakan di 1.0.28 (ditambahkan di 1.0.29).
 - Uji: `test:mcp` 33/33 (baru: penyaring, semua alat baca tanpa ID/jalur/SQL, kebijakan, berkas kirim tanpa komentar, dialog folder .mcpb, batas laju), `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 36/36 (termasuk 10 slide beranimasi), **Electron nyata 20/20**. Tangkapan layar: `docs/tangkapan-layar/1.0.28-*.png`.
 
 ## Yang baru di 1.0.27 — Asisten AI dapat MENGUBAH data (input, import, koreksi) — opsional

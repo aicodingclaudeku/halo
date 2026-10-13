@@ -232,3 +232,29 @@ lebih besar daripada konektor lokal, ini perlu keputusan pemilik sebelum dibangu
 **Hasil uji:** `test:mcp` 33/33, `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 36/36, Electron 44.5.1 nyata 20/20.
 Tangkapan layar: `docs/tangkapan-layar/1.0.28-*.png`.
 
+## §L 1.0.29 — ChatGPT di menu Asisten AI
+
+```
+ChatGPT (server OpenAI) ──HTTPS──▶ terowongan milik pengguna (mis. Cloudflare Tunnel)
+   ──▶ http://127.0.0.1:<port tetap>/mcp/<kunci 64 hex>   electron/mcp/chatgpt.js (AksesChatGPT)
+      ──▶ stdio.tangani (protokol MCP yang sama) ──▶ McpHost.panggil(nama, args, { sumber: 'chatgpt' })
+```
+
+- **Layar:** tab Claude | ChatGPT di bawah sakelar bersama (Aktifkan Asisten AI, data per anggota, ubah data).
+  Tab ChatGPT: sakelar akses + dialog risiko, izin ubah data ChatGPT, langkah 1 perintah terowongan, langkah 2
+  alamat publik (wajib `https://`, bukan alamat lokal, tanpa kredensial/parameter), langkah 3 URL konektor + Salin +
+  Ganti kunci, hitungan permintaan diterima/ditolak. Kanal IPC: `asistenAi:aturChatGPT`; status ada di
+  `asistenAi:status` → `chatgpt`.
+- **Penyimpanan:** `<folder data>/mcp/chatgpt.json` (mode 0600): kunci, port, alamat publik, izin ubah data.
+- **Pengaman:** bawaan mati; hanya Admin (izin ubah Pengaturan); butuh Asisten AI menyala; tidak menyala otomatis;
+  hanya 127.0.0.1; jalur/kunci salah → 404 generik (perbandingan waktu-konstan); GET → 405; Origin selain
+  chatgpt.com/chat.openai.com → 404; 120 permintaan/menit → 429; badan ≤ 256 KB; alat ubah data hanya ditawarkan
+  bila "Izinkan AI mengubah data" DAN "Izinkan ChatGPT mengubah data" menyala; log `[ChatGPT]`; Asisten AI
+  dimatikan / KOPKU ditutup → server ChatGPT mati.
+- **Bukan bagian KOPKU:** memasang/menjalankan terowongan internet. Itu keputusan & tanggung jawab pengguna; layar
+  menjelaskan risikonya (siapa pun yang mengetahui URL dapat memakai alat atas nama pengguna yang menyalakan).
+
+**Hasil uji:** `test/mcp/asisten-ai-chatgpt.test.js` 9/9 (HTTP sungguhan, service & SQLite asli); `test:mcp` 42/42;
+`test:lan` 81/81; `test:keamanan` 15/15; layar Chromium 45/45; Electron 44.5.1 nyata 20/20.
+Tangkapan layar: `docs/tangkapan-layar/1.0.29-*.png`.
+

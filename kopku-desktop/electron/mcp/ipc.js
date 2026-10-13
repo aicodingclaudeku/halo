@@ -11,6 +11,7 @@ const path = require('node:path');
 const claudeConfig = require('./claudeConfig');
 const { buatMcpb } = require('./mcpb');
 const { siapkanServerLokal, cariNode } = require('./serverLokal');
+const { AksesChatGPT } = require('./chatgpt');
 
 /**
  * @param {object} o
@@ -29,9 +30,12 @@ const { siapkanServerLokal, cariNode } = require('./serverLokal');
  * @param {{ showSaveDialog: Function }} [o.dialog] dialog Electron (pilih folder simpan .mcpb)
  * @param {() => any} [o.jendela] jendela induk dialog
  * @param {string} [o.folderDokumen] folder Dokumen pengguna (lokasi bawaan .mcpb)
+ * @param {import('./chatgpt').AksesChatGPT} [o.chatgpt] akses ChatGPT (1.0.29; bawaan dibuat di sini)
  */
 function daftarkanIpcAsistenAi(o) {
   const { h, host, dataDir, lingkungan } = o;
+  // 1.0.29 — ChatGPT: server MCP HTTP terpisah di 127.0.0.1 (terowongan internet disediakan pengguna sendiri).
+  const chatgpt = o.chatgpt || new AksesChatGPT({ host, dataDir });
   const platform = o.platform || process.platform;
   // 1.0.26 — Node.js terpasang dipakai lebih dulu: stdin `KOPKU Desktop.exe` (aplikasi GUI Electron)
   // tertutup seketika di Windows sehingga Claude melapor "Server disconnected" (lihat serverLokal.js).
@@ -72,6 +76,7 @@ function daftarkanIpcAsistenAi(o) {
     Object.assign(host.status(), {
       claude: claudeConfig.statusClaude({ entri: entri(), lingkungan }),
       folderEkstensi: folderEkstensi(),
+      chatgpt: chatgpt.status(),
       runtime: runtime(),
       riwayat: host.riwayat(15),
       potonganManual: claudeConfig.potonganManual(entri()),
@@ -144,6 +149,17 @@ function daftarkanIpcAsistenAi(o) {
   h('asistenAi:buatEkstensi', async (penggunaId) => {
     await host._cekPengubah(penggunaId);
     return buatEkstensi(penggunaId);
+  });
+  h('asistenAi:aturChatGPT', async (input) => {
+    const i = input && typeof input === 'object' ? input : {};
+    await chatgpt.atur({
+      aktif: i.aktif === undefined ? undefined : i.aktif === true,
+      bolehTulis: i.bolehTulis === undefined ? undefined : i.bolehTulis === true,
+      gantiKunci: i.gantiKunci === true,
+      alamatPublik: i.alamatPublik === undefined ? undefined : i.alamatPublik === null ? null : String(i.alamatPublik).slice(0, 300),
+      penggunaId: i.penggunaId,
+    });
+    return statusLengkap();
   });
   h('asistenAi:bukaFolderEkstensi', async () => {
     const f = folderEkstensi();

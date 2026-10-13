@@ -44,6 +44,7 @@ const DEPENDENSI = {
   uiDesktop: D.uiDesktop,
   notify: D.notify,
   useAppStore: D.useAppStore,
+  TextInput: D.TextInput, // 1.0.29 — alamat publik ChatGPT
 };
 
 // Pasangan [nama, jangkar, sisipan] — jangkar = sisipan menu LAN & WhatsApp; sisipan diletakkan tepat SETELAH-nya.
@@ -52,15 +53,21 @@ const SISIPAN = [
   [
     'KATALOG',
     "e('Pengaturan','Pengaturan','LanWhatsApp','LAN & WhatsApp','wifi-outline',{ket:'Server LAN multi-user & WhatsApp Reminder (ON/OFF)',sidebar:!0,kata:'lan server multi user jaringan browser whatsapp wa reminder pengingat angsuran'}),",
-    "e('Pengaturan','Pengaturan','AsistenAi','Asisten AI','sparkles-outline',{ket:'Hubungkan ke Claude (MCP) \\u2014 tanya data koperasi, baca saja',sidebar:!0,kata:'ai asisten claude anthropic mcp chatbot tanya kecerdasan buatan konektor'}),",
+    "e('Pengaturan','Pengaturan','AsistenAi','Asisten AI','sparkles-outline',{ket:'Claude & ChatGPT (MCP) \\u2014 tanya & kelola data koperasi',sidebar:!0,kata:'ai asisten claude anthropic chatgpt gpt openai mcp chatbot tanya kecerdasan buatan konektor'}),",
   ],
   [
     'PengaturanMenu',
     "{route:'LanWhatsApp',icon:'wifi-outline',title:'LAN & WhatsApp',sub:'Server LAN multi-user & WhatsApp Reminder \\u2014 nyalakan/matikan',resource:'pengaturan'},",
-    "{route:'AsistenAi',icon:'sparkles-outline',title:'Asisten AI',sub:'Hubungkan ke Claude Desktop (MCP) \\u2014 tanya data koperasi, baca saja',resource:'pengaturan'},",
+    "{route:'AsistenAi',icon:'sparkles-outline',title:'Asisten AI',sub:'Claude & ChatGPT (MCP) \\u2014 tanya & kelola data koperasi',resource:'pengaturan'},",
   ],
   ['onMenu', "'lanwa'===e&&h.navigate('Pengaturan',{screen:'LanWhatsApp',initial:!1}),", "'asistenai'===e&&h.navigate('Pengaturan',{screen:'AsistenAi',initial:!1}),"],
 ];
+
+// Teks sisipan versi lama (1.0.25–1.0.28) — dikenali saat melepas agar bundle lama dapat ditingkatkan.
+const SISIPAN_LAMA = {
+  KATALOG: ["e('Pengaturan','Pengaturan','AsistenAi','Asisten AI','sparkles-outline',{ket:'Hubungkan ke Claude (MCP) \\u2014 tanya data koperasi, baca saja',sidebar:!0,kata:'ai asisten claude anthropic mcp chatbot tanya kecerdasan buatan konektor'}),"],
+  PengaturanMenu: ["{route:'AsistenAi',icon:'sparkles-outline',title:'Asisten AI',sub:'Hubungkan ke Claude Desktop (MCP) \\u2014 tanya data koperasi, baca saja',resource:'pengaturan'},"],
+};
 
 const PENANDA = 'name:"AsistenAi"';
 
@@ -108,7 +115,10 @@ function lepas(teks) {
   const awal = teks.lastIndexOf('\n__d(function(g,r,i,a,m,_e,d){', akhir.index);
   teks = teks.slice(0, awal) + teks.slice(akhir.index + akhir[0].length);
   teks = teks.replace(new RegExp(`,\\(0,\\w+\\.jsx\\)\\(\\w+\\.Screen,\\{name:"AsistenAi",component:\\w+\\(${MODUL_ID}\\)\\.default,options:\\{title:'Asisten AI'\\}\\}\\)`), '');
-  for (const [nama, jangkar, sisip] of SISIPAN) teks = ganti(teks, jangkar + sisip, jangkar, nama);
+  for (const [nama, jangkar, sisip] of SISIPAN) {
+    const lama = (SISIPAN_LAMA[nama] || []).find((x) => !teks.includes(jangkar + sisip) && teks.includes(jangkar + x));
+    teks = ganti(teks, jangkar + (lama || sisip), jangkar, nama);
+  }
   return teks;
 }
 

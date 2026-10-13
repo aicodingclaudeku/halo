@@ -32,6 +32,7 @@ const T = r(d[10]);
 const UI = r(d[11]).ui;
 const notify = r(d[12]).notify;
 const useAppStore = r(d[13]).useAppStore;
+const TextInput = interop(r(d[14])).default;
 
 const C = T.colors;
 const h = React.createElement;
@@ -209,10 +210,10 @@ const SLIDE = [
     ),
   },
   {
-    judul: '2. Nyalakan "Hubungkan ke Claude"',
+    judul: '2. Nyalakan "Aktifkan Asisten AI"',
     teks: 'Di KOPKU: Pengaturan › Asisten AI › nyalakan sakelar, lalu pilih "Hubungkan". KOPKU otomatis mendaftarkan konektor "kopku" ke Claude Desktop.',
     gambar: () => h(Jendela, { judul: 'KOPKU › Pengaturan › Asisten AI' },
-      h(TuasAnimasi, { tunda: 900, label: 'Hubungkan ke Claude' }),
+      h(TuasAnimasi, { tunda: 900, label: 'Aktifkan Asisten AI' }),
       h(View, { style: [sp.barisPil, { marginTop: 14 }] }, h(Pil, { teks: 'Siap dipakai Claude', ikon: 'checkmark-circle', tunda: 1500 }), h(Pil, { teks: 'Konektor "kopku" terpasang', ikon: 'link-outline', tunda: 1800 }))
     ),
   },
@@ -278,7 +279,17 @@ const SLIDE = [
     ),
   },
   {
-    judul: '8. Aman dan rahasia',
+    judul: '8. ChatGPT (opsional)',
+    teks: 'Tab ChatGPT: nyalakan server ChatGPT, jalankan terowongan HTTPS Anda sendiri (mis. Cloudflare Tunnel), tempel alamat publiknya, lalu salin URL konektor ke ChatGPT › Settings › Apps & Connectors › Developer mode. Rahasiakan URL itu.',
+    gambar: () => h(Jendela, { judul: 'ChatGPT › Konektor baru' },
+      h(View, { style: [sp.dialogBaris, an('kanan', 300, 400)] }, h(Ionicons, { name: 'server-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'KOPKU: 127.0.0.1 (hanya komputer ini)')),
+      h(View, { style: [sp.dialogBaris, an('kanan', 800, 400)] }, h(Ionicons, { name: 'globe-outline', size: 18, color: C.warning }), h(Text, { style: sp.jurnalTeks }, 'Terowongan HTTPS milik Anda')),
+      h(View, { style: [sp.dialogBaris, an('kanan', 1300, 400)] }, h(Ionicons, { name: 'link-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'https://…/mcp/•••••• (rahasia)')),
+      h(View, { style: [sp.barisPil, { marginTop: 12 }] }, h(Pil, { teks: 'Ubah data: izin terpisah', ikon: 'create-outline', warna: 'kuning', tunda: 1800 }), h(Pil, { teks: 'Ganti kunci kapan saja', ikon: 'key-outline', tunda: 2200 }))
+    ),
+  },
+  {
+    judul: '9. Aman dan rahasia',
     teks: 'Asisten AI dirancang hanya untuk pekerjaan koperasi yang sah.',
     gambar: () => h(View, { style: { gap: 10, paddingHorizontal: 10 } },
       h(Poin, { ikon: 'eye-off-outline', teks: 'NIK, alamat, nomor HP, tanggal lahir, rekening tidak pernah dikirim', tunda: 200 }),
@@ -416,6 +427,8 @@ function AsistenAiScreen() {
   const [manual, setManual] = useState(false);
   const hidup = useRef(true);
   const [panduan, setPanduan] = useState(false);
+  const [tab, setTab] = useState('claude');
+  const [alamatPublik, setAlamatPublik] = useState(null);
   const tutupPanduan = useCallback(() => setPanduan(false), []);
 
   const muat = useCallback(async () => {
@@ -550,8 +563,8 @@ function AsistenAiScreen() {
     Kartu,
     { testID: 'kartu-asisten-saklar' },
     h(Saklar, {
-      judul: 'Hubungkan ke Claude',
-      sub: 'Tanya data koperasi dengan bahasa sehari-hari dari aplikasi Claude Desktop di komputer ini. Membaca data; mengubah data hanya bila diizinkan di bawah.',
+      judul: 'Aktifkan Asisten AI',
+      sub: 'Tanya data koperasi dengan bahasa sehari-hari dari Claude Desktop di komputer ini atau dari ChatGPT (tab ChatGPT). Membaca data; mengubah data hanya bila diizinkan di bawah.',
       ikon: 'sparkles-outline',
       nilai: aktif,
       onUbah: ubahAktif,
@@ -562,14 +575,14 @@ function AsistenAiScreen() {
     }),
     st.galat ? h(View, { style: s.galat }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, st.galat)) : null,
     aktif && st.pengguna
-      ? h(View, { style: s.infoBaris }, h(Ionicons, { name: 'person-circle-outline', size: 16, color: C.textMuted }), h(Text, { style: s.redup }, 'Claude membaca atas nama ', h(Text, { style: s.tebal }, st.pengguna.nama || st.pengguna.username), ' (@' + st.pengguna.username + ') dan mengikuti izinnya di Permission Matrix.'))
+      ? h(View, { style: s.infoBaris }, h(Ionicons, { name: 'person-circle-outline', size: 16, color: C.textMuted }), h(Text, { style: s.redup }, 'AI membaca atas nama ', h(Text, { style: s.tebal }, st.pengguna.nama || st.pengguna.username), ' (@' + st.pengguna.username + ') dan mengikuti izinnya di Permission Matrix.'))
       : null,
     h(View, { style: s.blok },
       h(Saklar, {
         judul: 'Izinkan data per anggota',
         sub: st.perAnggota
-          ? 'Claude dapat membaca nama & nomor anggota, saldo simpanan, pinjaman, jadwal angsuran, tunggakan, dan riwayat transaksi.'
-          : 'MATI: Claude hanya menerima angka total, laporan keuangan, dan kolektibilitas — tanpa nama anggota.',
+          ? 'AI dapat membaca nama & nomor anggota, saldo simpanan, pinjaman, jadwal angsuran, tunggakan, dan riwayat transaksi.'
+          : 'MATI: AI hanya menerima angka total, laporan keuangan, dan kolektibilitas — tanpa nama anggota.',
         ikon: 'people-outline',
         nilai: !!st.perAnggota,
         onUbah: ubahPerAnggota,
@@ -580,9 +593,9 @@ function AsistenAiScreen() {
     ),
     h(View, { style: s.blok },
       h(Saklar, {
-        judul: 'Izinkan Claude mengubah data',
+        judul: 'Izinkan AI mengubah data',
         sub: st.bolehTulis
-          ? 'ON: Claude dapat mencatat transaksi, menambah/mengubah anggota, mengimpor Data Awal (Excel), dan mengoreksi transaksi (jurnal pembalik) — SELALU lewat pratinjau dan persetujuan Anda di Claude. Backup otomatis sebelum perubahan.'
+          ? 'ON: AI dapat mencatat transaksi, menambah/mengubah anggota, mengimpor Data Awal (Excel), dan mengoreksi transaksi (jurnal pembalik) — SELALU lewat pratinjau dan persetujuan Anda. ChatGPT butuh izin tambahan di tab ChatGPT. Backup otomatis sebelum perubahan.'
           : 'MATI: Claude hanya membaca. Nyalakan agar Claude dapat membantu input transaksi, import data, dan koreksi.',
         ikon: 'create-outline',
         nilai: !!st.bolehTulis,
@@ -596,7 +609,7 @@ function AsistenAiScreen() {
     h(View, { style: [s.blok, s.privasi] },
       h(Ionicons, { name: 'shield-checkmark-outline', size: 18, color: C.primary }),
       h(Text, { style: [s.redup, { flex: 1 }] },
-        'Tidak pernah dikirim: NIK, alamat, nomor HP, tempat/tanggal lahir, nomor rekening, password. Koneksi hanya di komputer ini (127.0.0.1 + token acak). Data yang dibaca alat dikirim ke Claude (Anthropic) sebagai bagian percakapan Anda. KOPKU Desktop harus tetap terbuka saat bertanya.')
+        'Tidak pernah dikirim: NIK, alamat, nomor HP, tempat/tanggal lahir, nomor rekening, password, maupun struktur internal aplikasi. Claude: koneksi hanya di komputer ini (127.0.0.1 + token acak). Data yang dibaca alat dikirim ke penyedia AI (Anthropic/OpenAI) sebagai bagian percakapan Anda. KOPKU Desktop harus tetap terbuka saat bertanya.')
     )
   );
 
@@ -624,7 +637,7 @@ function AsistenAiScreen() {
         h(Text, { style: s.redup }, 'Aplikasi resmi Claude untuk Windows/macOS. Masuk dengan akun Claude Anda, lalu buka sekali agar foldernya dibuat.'),
         !cl.claudeTerdeteksi ? h(View, { style: s.aksi }, h(Tombol, { label: 'Unduh Claude Desktop', ikon: 'download-outline', onPress: () => jalankan('unduh', () => A.unduhClaude()) })) : null
       ),
-      h(Langkah, { no: 2, judul: 'Nyalakan "Hubungkan ke Claude" di atas', selesai: aktif && st.berjalan },
+      h(Langkah, { no: 2, judul: 'Nyalakan "Aktifkan Asisten AI" di atas', selesai: aktif && st.berjalan },
         h(Text, { style: s.redup }, 'Konektor "kopku" otomatis didaftarkan ke Claude Desktop saat dinyalakan. Gunakan tombol di bawah bila perlu mendaftarkan ulang.'),
         h(View, { style: s.aksi },
           h(Tombol, { label: cl.terpasang && !caraEkstensi ? 'Pasang ulang ke Claude Desktop' : 'Pasang ke Claude Desktop', ikon: 'link-outline', utama: !cl.cocok || caraEkstensi, onPress: pasang, sibuk: sibuk === 'pasang', disabled: !bolehUbah || !pid, testID: 'tombol-pasang-claude' }),
@@ -743,21 +756,127 @@ function AsistenAiScreen() {
     )
   );
 
+  // ---------------- kartu ChatGPT (1.0.29)
+  const g = st.chatgpt || {};
+  const aturGpt = (o, pesan) => jalankan('gpt', () => A.aturChatGPT(Object.assign({ penggunaId: pid }, o)), pesan);
+  const ubahGpt = (v) => {
+    if (!v) return aturGpt({ aktif: false }, 'Server ChatGPT dimatikan. ChatGPT tidak dapat lagi mengakses KOPKU.');
+    notify(
+      'Nyalakan akses ChatGPT?',
+      'ChatGPT hanya dapat terhubung lewat alamat INTERNET (HTTPS). KOPKU menyalakan server khusus ChatGPT di komputer ini (127.0.0.1); agar ChatGPT dapat menjangkaunya, ANDA sendiri yang menjalankan terowongan HTTPS (mis. Cloudflare Tunnel) — KOPKU tidak membuka akses internet.\n\nSelama terowongan berjalan, siapa pun yang mengetahui URL rahasia dapat memakai alat KOPKU atas nama ' +
+        ((st.pengguna && (st.pengguna.nama || st.pengguna.username)) || 'pengguna ini') +
+        '. Jangan bagikan URL itu; ganti kunci bila ragu; matikan bila tidak dipakai. Data yang dibaca dikirim ke OpenAI sebagai bagian percakapan.',
+      [{ text: 'Batal', style: 'cancel' }, { text: 'Nyalakan', style: 'destructive', onPress: () => aturGpt({ aktif: true }, 'Server ChatGPT menyala di komputer ini. Lanjutkan langkah 1–3.') }],
+      'warning'
+    );
+  };
+  const ubahGptTulis = (v) => {
+    if (!v) return aturGpt({ bolehTulis: false }, 'ChatGPT kembali hanya dapat membaca data.');
+    notify('Izinkan ChatGPT MENGUBAH data?', 'ChatGPT akan dapat memakai alat ubah data yang sama dengan Claude (selalu pratinjau + kode konfirmasi sekali pakai, backup otomatis, batas 10 perubahan/menit). Karena ChatGPT terhubung lewat internet, nyalakan hanya bila benar-benar perlu.', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Izinkan', style: 'destructive', onPress: () => aturGpt({ bolehTulis: true }, 'ChatGPT kini dapat mengubah data (selalu lewat pratinjau + persetujuan Anda). Muat ulang konektor di ChatGPT bila daftar alat belum berubah.') },
+    ], 'warning');
+  };
+  const nilaiAlamat = alamatPublik === null ? g.alamatPublik || '' : alamatPublik;
+  const simpanAlamat = async () => {
+    const x = await aturGpt({ alamatPublik: nilaiAlamat || null }, nilaiAlamat ? 'Alamat publik disimpan. Salin URL konektor di langkah 3.' : 'Alamat publik dihapus.');
+    if (x) setAlamatPublik(null);
+  };
+  const gantiKunci = () =>
+    notify('Ganti kunci URL?', 'URL konektor lama langsung tidak berlaku. Anda perlu memperbarui URL di pengaturan konektor ChatGPT.', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Ganti kunci', style: 'destructive', onPress: () => aturGpt({ gantiKunci: true }, 'Kunci baru dibuat. Perbarui URL konektor di ChatGPT.') },
+    ], 'warning');
+  const kodeBaris = (teks, testID) => h(View, { style: s.kode }, h(Text, { style: s.kodeTeks, selectable: true, testID }, teks));
+  const kartuChatGPT = h(
+    Kartu,
+    { testID: 'kartu-chatgpt' },
+    h(Saklar, {
+      judul: 'Nyalakan akses ChatGPT',
+      sub: g.aktif ? `Server ChatGPT menyala di ${g.alamatLokal} (hanya komputer ini).` : 'MATI: ChatGPT tidak dapat mengakses KOPKU. Tidak menyala otomatis saat KOPKU dibuka.',
+      ikon: 'chatbubbles-outline',
+      nilai: !!g.aktif,
+      onUbah: ubahGpt,
+      disabled: !bolehUbah || !pid || (!aktif && !g.aktif),
+      sibuk: sibuk === 'gpt',
+      lencana: g.aktif ? (g.urlChatGPT ? h(Lencana, { warna: 'hijau', teks: 'Siap disambungkan', ikon: 'checkmark-circle' }) : h(Lencana, { warna: 'kuning', teks: 'Isi alamat publik', ikon: 'time-outline' })) : h(Lencana, { warna: 'abu', teks: 'Mati', ikon: 'power' }),
+      testID: 'saklar-chatgpt',
+    }),
+    !aktif ? h(Text, { style: s.catatan }, 'Nyalakan "Aktifkan Asisten AI" di atas lebih dulu.') : null,
+    g.galat ? h(View, { style: [s.galat, { marginTop: 8 }] }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, g.galat)) : null,
+    h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginTop: 10 }] },
+      h(Ionicons, { name: 'globe-outline', size: 16, color: C.warning }),
+      h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'ChatGPT berjalan di server OpenAI, jadi hanya dapat terhubung lewat alamat internet HTTPS. KOPKU TIDAK membuka akses internet sendiri: Anda yang menjalankan terowongan (mis. Cloudflare Tunnel) dan bertanggung jawab atasnya. URL konektor berisi kunci rahasia 256-bit — perlakukan seperti password.')
+    ),
+    h(View, { style: s.blok },
+      h(Saklar, {
+        judul: 'Izinkan ChatGPT mengubah data',
+        sub: !st.bolehTulis ? 'Butuh "Izinkan AI mengubah data" di atas.' : g.bolehTulis ? 'ON: ChatGPT dapat memakai alat ubah data (selalu pratinjau + persetujuan).' : 'MATI: ChatGPT hanya membaca (disarankan).',
+        ikon: 'create-outline',
+        nilai: !!(g.bolehTulis && st.bolehTulis),
+        onUbah: ubahGptTulis,
+        disabled: !bolehUbah || !pid || !st.bolehTulis,
+        sibuk: sibuk === 'gpt',
+        testID: 'saklar-chatgpt-ubah',
+      })
+    ),
+    h(View, { style: s.blok },
+      h(Subjudul, { teks: 'Menyambungkan ke ChatGPT' }),
+      h(Langkah, { no: 1, judul: 'Jalankan terowongan HTTPS Anda ke alamat lokal KOPKU', selesai: !!g.alamatPublik },
+        h(Text, { style: s.redup }, 'Contoh dengan Cloudflare Tunnel (pasang cloudflared dari situs resmi Cloudflare), jalankan di Command Prompt komputer ini dan biarkan terbuka:'),
+        g.perintahTerowongan ? kodeBaris(g.perintahTerowongan, 'perintah-terowongan') : h(Text, { style: s.catatan }, 'Nyalakan akses ChatGPT untuk melihat alamat lokal.'),
+        g.perintahTerowongan ? h(View, { style: s.aksi }, h(Tombol, { label: 'Salin perintah', ikon: 'copy-outline', kecil: true, onPress: () => salin(g.perintahTerowongan, 'Perintah disalin.') })) : null
+      ),
+      h(Langkah, { no: 2, judul: 'Tempel alamat publik HTTPS dari terowongan', selesai: !!g.alamatPublik },
+        h(View, { style: s.aksi },
+          h(TextInput, { value: nilaiAlamat, onChangeText: setAlamatPublik, placeholder: 'https://nama-anda.trycloudflare.com', placeholderTextColor: C.textFaint, autoCapitalize: 'none', autoCorrect: false, style: s.input, editable: bolehUbah, testID: 'input-alamat-publik' }),
+          h(Tombol, { label: 'Simpan', ikon: 'save-outline', onPress: simpanAlamat, disabled: !bolehUbah || !pid, sibuk: sibuk === 'gpt', testID: 'tombol-simpan-alamat' })
+        )
+      ),
+      h(Langkah, { no: 3, judul: 'Tambahkan konektor di ChatGPT', selesai: !!(g.urlChatGPT && g.pemakaian && g.pemakaian.total > 0) },
+        h(Text, { style: s.redup }, 'ChatGPT › Settings › Apps & Connectors › Advanced settings › nyalakan Developer mode › Create. Isi Name "KOPKU", MCP Server URL di bawah, Authentication "No authentication", centang "I trust this application", lalu Create. Di percakapan, pilih Developer mode › KOPKU.'),
+        g.urlChatGPT ? kodeBaris(g.urlChatGPT, 'url-chatgpt') : h(Text, { style: s.catatan }, 'URL muncul setelah alamat publik disimpan.'),
+        h(View, { style: s.aksi },
+          g.urlChatGPT ? h(Tombol, { label: 'Salin URL konektor', ikon: 'copy-outline', utama: true, onPress: () => salin(g.urlChatGPT, 'URL konektor disalin. Tempel di ChatGPT — jangan dibagikan.'), testID: 'tombol-salin-url-chatgpt' }) : null,
+          h(Tombol, { label: 'Ganti kunci', ikon: 'key-outline', onPress: gantiKunci, disabled: !bolehUbah || !pid, testID: 'tombol-ganti-kunci' })
+        )
+      ),
+      h(Text, { style: s.catatan }, `Permintaan diterima: ${(g.pemakaian && g.pemakaian.total) || 0} · ditolak (alamat/kunci salah, terlalu sering): ${(g.pemakaian && g.pemakaian.ditolak) || 0}`)
+    )
+  );
+
+  const tabBar = h(View, { style: s.tabBar },
+    [['claude', 'Claude', 'sparkles-outline'], ['chatgpt', 'ChatGPT', 'chatbubbles-outline']].map(([k, label, ikon]) =>
+      h(Touchable, { key: k, accessibilityRole: 'tab', onPress: () => setTab(k), style: [s.tab, tab === k && s.tabAktif], testID: 'tab-' + k },
+        h(Ionicons, { name: ikon, size: 16, color: tab === k ? C.primary : C.textMuted }),
+        h(Text, { style: [s.tabTeks, tab === k && s.tabTeksAktif] }, label),
+        k === 'chatgpt' && g.aktif ? h(View, { style: s.tabTitik }) : null
+      )
+    )
+  );
+
   const banner = h(Touchable, { accessibilityRole: 'button', onPress: () => setPanduan(true), style: s.banner, testID: 'tombol-panduan' },
     h(View, { style: s.bannerIkon }, h(Ionicons, { name: 'easel-outline', size: 22, color: C.white })),
-    h(View, { style: { flex: 1, minWidth: 0 } }, h(Text, { style: s.bannerJudul }, 'Baru di sini? Lihat panduan bergambar (10 slide)'), h(Text, { style: s.redup }, 'Animasi langkah demi langkah: pasang Claude, menyalakan konektor, bertanya, mengubah data dengan aman, dan ekstensi .mcpb.')),
+    h(View, { style: { flex: 1, minWidth: 0 } }, h(Text, { style: s.bannerJudul }, `Baru di sini? Lihat panduan bergambar (${SLIDE.length} slide)`), h(Text, { style: s.redup }, 'Animasi langkah demi langkah: pasang Claude, menyalakan konektor, bertanya, mengubah data dengan aman, ekstensi .mcpb, dan ChatGPT.')),
     h(Ionicons, { name: 'play-circle', size: 30, color: C.primary })
   );
   return h(View, { style: { flex: 1 } }, h(
     ScrollView,
     { style: s.layar, contentContainerStyle: UI.screenContent, testID: 'layar-asisten-ai' },
-    h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari aplikasi Claude Desktop, dan (bila diizinkan) membantu mencatat transaksi, mengimpor data, serta mengoreksi transaksi. Mati secara bawaan.'),
+    h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) atau ChatGPT (OpenAI) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari Claude Desktop atau ChatGPT, dan (bila diizinkan) membantu mencatat transaksi, mengimpor data, serta mengoreksi transaksi. Mati secara bawaan.'),
     !bolehUbah ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginBottom: 12 }] }, h(Ionicons, { name: 'lock-closed-outline', size: 16, color: C.warning }), h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'Hanya pengguna dengan izin ubah Pengaturan (Admin) yang dapat menyalakan/mematikan Asisten AI.')) : null,
-    h(View, { style: s.kolom }, banner, kartuSaklar, kartuPasang, kartuContoh, kartuAktivitas)
+    h(View, { style: s.kolom }, banner, kartuSaklar, tabBar, ...(tab === 'chatgpt' ? [kartuChatGPT] : [kartuPasang]), kartuContoh, kartuAktivitas)
   ), panduan ? h(PanduanSlide, { onTutup: tutupPanduan }) : null);
 }
 
 const s = StyleSheet.create({
+  tabBar: { flexDirection: 'row', gap: 6, padding: 4, backgroundColor: '#EEF1F4', borderRadius: T.radius.md, alignSelf: 'flex-start' },
+  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: T.radius.md },
+  tabAktif: Object.assign({ backgroundColor: C.surface }, T.elevation.card),
+  tabTeks: { fontSize: 13.5, fontWeight: '600', color: C.textMuted },
+  tabTeksAktif: { color: C.primary },
+  tabTitik: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.success || '#16A34A' },
+  input: { flex: 1, minWidth: 260, borderWidth: 1, borderColor: C.border, borderRadius: T.radius.md, paddingHorizontal: 10, paddingVertical: 8, fontSize: 13.5, color: C.text, backgroundColor: C.surface, outlineStyle: 'none' },
   layar: { flex: 1, backgroundColor: C.background },
   kolom: { gap: 14, maxWidth: 980 },
   kartu: Object.assign({ backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: T.radius.lg, padding: 18 }, T.elevation.card),
