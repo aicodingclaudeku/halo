@@ -52357,12 +52357,12 @@ const SLIDE = [
   },
   {
     judul: '8. ChatGPT (opsional)',
-    teks: 'Tab ChatGPT: nyalakan server ChatGPT, jalankan terowongan HTTPS Anda sendiri (mis. Cloudflare Tunnel), tempel alamat publiknya, lalu salin URL konektor ke ChatGPT › Settings › Apps & Connectors › Developer mode. Rahasiakan URL itu.',
-    gambar: () => h(Jendela, { judul: 'ChatGPT › Konektor baru' },
-      h(View, { style: [sp.dialogBaris, an('kanan', 300, 400)] }, h(Ionicons, { name: 'server-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'KOPKU: 127.0.0.1 (hanya komputer ini)')),
-      h(View, { style: [sp.dialogBaris, an('kanan', 800, 400)] }, h(Ionicons, { name: 'globe-outline', size: 18, color: C.warning }), h(Text, { style: sp.jurnalTeks }, 'Terowongan HTTPS milik Anda')),
-      h(View, { style: [sp.dialogBaris, an('kanan', 1300, 400)] }, h(Ionicons, { name: 'link-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'https://…/mcp/•••••• (rahasia)')),
-      h(View, { style: [sp.barisPil, { marginTop: 12 }] }, h(Pil, { teks: 'Ubah data: izin terpisah', ikon: 'create-outline', warna: 'kuning', tunda: 1800 }), h(Pil, { teks: 'Ganti kunci kapan saja', ikon: 'key-outline', tunda: 2200 }))
+    teks: 'Tab ChatGPT memakai cara resmi OpenAI (Secure MCP Tunnel). Sekali saja: tempel Tunnel ID + Runtime API key dari OpenAI Platform. Lalu klik "Hubungkan ke ChatGPT" dan tambahkan konektor (Connection: Tunnel) di ChatGPT. Tanpa URL publik, tanpa Command Prompt.',
+    gambar: () => h(Jendela, { judul: 'KOPKU › Asisten AI › ChatGPT' },
+      h(View, { style: [sp.dialogBaris, an('kanan', 300, 400)] }, h(Ionicons, { name: 'key-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, '1  Tunnel ID + API key (sekali)')),
+      h(View, { style: [sp.dialogBaris, an('kanan', 800, 400)] }, h(Ionicons, { name: 'link-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, '2  Hubungkan ke ChatGPT')),
+      h(View, { style: [sp.dialogBaris, an('kanan', 1300, 400)] }, h(Ionicons, { name: 'chatbubbles-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, '3  ChatGPT › Connector › Tunnel')),
+      h(View, { style: [sp.barisPil, { marginTop: 12 }] }, h(Pil, { teks: 'Terhubung', ikon: 'checkmark-circle', tunda: 1800 }), h(Pil, { teks: 'Ubah data: izin terpisah', ikon: 'create-outline', warna: 'kuning', tunda: 2200 }))
     ),
   },
   {
@@ -52505,7 +52505,8 @@ function AsistenAiScreen() {
   const hidup = useRef(true);
   const [panduan, setPanduan] = useState(false);
   const [tab, setTab] = useState('claude');
-  const [alamatPublik, setAlamatPublik] = useState(null);
+  const [tunnelInput, setTunnelInput] = useState(null);
+  const [kunciInput, setKunciInput] = useState('');
   const tutupPanduan = useCallback(() => setPanduan(false), []);
 
   const muat = useCallback(async () => {
@@ -52833,62 +52834,102 @@ function AsistenAiScreen() {
     )
   );
 
-  // ---------------- kartu ChatGPT (1.0.29)
-  const g = st.chatgpt || {};
+  // ---------------- kartu ChatGPT (1.0.31 — OpenAI Secure MCP Tunnel)
+  const g = st.chatgpt || { prasyarat: [], apiKey: {}, tautan: {} };
   const aturGpt = (o, pesan) => jalankan('gpt', () => A.aturChatGPT(Object.assign({ penggunaId: pid }, o)), pesan);
-  const ubahGpt = (v) => {
-    if (!v) return aturGpt({ aktif: false }, 'Server ChatGPT dimatikan. ChatGPT tidak dapat lagi mengakses KOPKU.');
+  const buka = (nama) => jalankan('tautan', () => A.bukaTautanChatGPT(nama), null);
+  const nilaiTunnel = tunnelInput === null ? g.tunnelId || '' : tunnelInput;
+  const simpanKredensial = async () => {
+    const x = await aturGpt({ aksi: 'simpan', tunnelId: nilaiTunnel, apiKey: kunciInput || undefined }, 'Tunnel ID & API key disimpan (API key terenkripsi di komputer ini). Lanjutkan ke langkah 2.');
+    if (x) {
+      setTunnelInput(null);
+      setKunciInput('');
+    }
+  };
+  const prasyaratOk = (g.prasyarat || []).every((x) => x.ok);
+  const hubungkanGpt = () =>
     notify(
-      'Nyalakan akses ChatGPT?',
-      'ChatGPT hanya dapat terhubung lewat alamat INTERNET (HTTPS). KOPKU menyalakan server khusus ChatGPT di komputer ini (127.0.0.1); agar ChatGPT dapat menjangkaunya, ANDA sendiri yang menjalankan terowongan HTTPS (mis. Cloudflare Tunnel) — KOPKU tidak membuka akses internet.\n\nSelama terowongan berjalan, siapa pun yang mengetahui URL rahasia dapat memakai alat KOPKU atas nama ' +
+      'Hubungkan KOPKU ke ChatGPT?',
+      'KOPKU menjalankan penghubung resmi OpenAI (Secure MCP Tunnel): koneksi KELUAR terenkripsi dari komputer ini ke OpenAI — tanpa URL publik dan tanpa membuka port.\n\nChatGPT akan dapat MEMBACA data koperasi atas nama ' +
         ((st.pengguna && (st.pengguna.nama || st.pengguna.username)) || 'pengguna ini') +
-        '. Jangan bagikan URL itu; ganti kunci bila ragu; matikan bila tidak dipakai. Data yang dibaca dikirim ke OpenAI sebagai bagian percakapan.',
-      [{ text: 'Batal', style: 'cancel' }, { text: 'Nyalakan', style: 'destructive', onPress: () => aturGpt({ aktif: true }, 'Server ChatGPT menyala di komputer ini. Lanjutkan langkah 1–3.') }],
-      'warning'
+        ' sesuai izinnya; data pribadi (NIK, alamat, HP, rekening) tidak pernah dikirim. Mengubah data tetap MATI kecuali Anda izinkan terpisah. Data yang dibaca dikirim ke OpenAI sebagai bagian percakapan. KOPKU Desktop harus tetap terbuka.',
+      [{ text: 'Batal', style: 'cancel' }, { text: 'Hubungkan', onPress: () => aturGpt({ aksi: 'hubungkan' }, null) }],
+      'info'
     );
-  };
+  const putuskanGpt = () => aturGpt({ aksi: 'putuskan' }, 'Koneksi ChatGPT diputus. ChatGPT tidak dapat lagi mengakses KOPKU.');
+  const hapusGpt = () =>
+    notify('Hapus Tunnel ID & API key?', 'Koneksi diputus dan kredensial OpenAI dihapus dari komputer ini. Anda juga dapat mencabut API key di OpenAI Platform.', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Hapus', style: 'destructive', onPress: () => aturGpt({ aksi: 'hapus' }, 'Kredensial ChatGPT dihapus.') },
+    ], 'warning');
   const ubahGptTulis = (v) => {
-    if (!v) return aturGpt({ bolehTulis: false }, 'ChatGPT kembali hanya dapat membaca data.');
-    notify('Izinkan ChatGPT MENGUBAH data?', 'ChatGPT akan dapat memakai alat ubah data yang sama dengan Claude (selalu pratinjau + kode konfirmasi sekali pakai, backup otomatis, batas 10 perubahan/menit). Karena ChatGPT terhubung lewat internet, nyalakan hanya bila benar-benar perlu.', [
+    if (!v) return aturGpt({ aksi: 'izin', bolehTulis: false }, 'ChatGPT kembali hanya dapat membaca data.');
+    notify('Izinkan ChatGPT MENGUBAH data?', 'ChatGPT akan dapat memakai alat ubah data yang sama dengan Claude: selalu pratinjau + kode konfirmasi sekali pakai, backup otomatis, batas 10 perubahan/menit, izin Permission Matrix tetap berlaku. Nyalakan hanya bila benar-benar perlu.', [
       { text: 'Batal', style: 'cancel' },
-      { text: 'Izinkan', style: 'destructive', onPress: () => aturGpt({ bolehTulis: true }, 'ChatGPT kini dapat mengubah data (selalu lewat pratinjau + persetujuan Anda). Muat ulang konektor di ChatGPT bila daftar alat belum berubah.') },
+      { text: 'Izinkan', style: 'destructive', onPress: () => aturGpt({ aksi: 'izin', bolehTulis: true }, 'ChatGPT kini dapat mengubah data (selalu lewat pratinjau + persetujuan Anda). Di ChatGPT, buka ulang konektor KOPKU bila daftar alat belum berubah.') },
     ], 'warning');
   };
-  const nilaiAlamat = alamatPublik === null ? g.alamatPublik || '' : alamatPublik;
-  const simpanAlamat = async () => {
-    const x = await aturGpt({ alamatPublik: nilaiAlamat || null }, nilaiAlamat ? 'Alamat publik disimpan. Salin URL konektor di langkah 3.' : 'Alamat publik dihapus.');
-    if (x) setAlamatPublik(null);
-  };
-  const gantiKunci = () =>
-    notify('Ganti kunci URL?', 'URL konektor lama langsung tidak berlaku. Anda perlu memperbarui URL di pengaturan konektor ChatGPT.', [
-      { text: 'Batal', style: 'cancel' },
-      { text: 'Ganti kunci', style: 'destructive', onPress: () => aturGpt({ gantiKunci: true }, 'Kunci baru dibuat. Perbarui URL konektor di ChatGPT.') },
-    ], 'warning');
-  const kodeBaris = (teks, testID) => h(View, { style: s.kode }, h(Text, { style: s.kodeTeks, selectable: true, testID }, teks));
+  const lencanaGpt = {
+    TERHUBUNG: h(Lencana, { warna: 'hijau', teks: 'Terhubung', ikon: 'checkmark-circle' }),
+    MENYAMBUNG: h(Lencana, { warna: 'kuning', teks: 'Menyambungkan…', ikon: 'sync-outline' }),
+    GAGAL: h(Lencana, { warna: 'merah', teks: 'Gagal', ikon: 'alert-circle' }),
+    MATI: h(Lencana, { warna: 'abu', teks: 'Belum terhubung', ikon: 'power' }),
+  }[g.keadaan || 'MATI'];
   const kartuChatGPT = h(
     Kartu,
     { testID: 'kartu-chatgpt' },
-    h(Saklar, {
-      judul: 'Nyalakan akses ChatGPT',
-      sub: g.aktif ? `Server ChatGPT menyala di ${g.alamatLokal} (hanya komputer ini).` : 'MATI: ChatGPT tidak dapat mengakses KOPKU. Tidak menyala otomatis saat KOPKU dibuka.',
-      ikon: 'chatbubbles-outline',
-      nilai: !!g.aktif,
-      onUbah: ubahGpt,
-      disabled: !bolehUbah || !pid || (!aktif && !g.aktif),
-      sibuk: sibuk === 'gpt',
-      lencana: g.aktif ? (g.urlChatGPT ? h(Lencana, { warna: 'hijau', teks: 'Siap disambungkan', ikon: 'checkmark-circle' }) : h(Lencana, { warna: 'kuning', teks: 'Isi alamat publik', ikon: 'time-outline' })) : h(Lencana, { warna: 'abu', teks: 'Mati', ikon: 'power' }),
-      testID: 'saklar-chatgpt',
-    }),
-    !aktif ? h(Text, { style: s.catatan }, 'Nyalakan "Aktifkan Asisten AI" di atas lebih dulu.') : null,
-    g.galat ? h(View, { style: [s.galat, { marginTop: 8 }] }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, g.galat)) : null,
-    h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginTop: 10 }] },
-      h(Ionicons, { name: 'globe-outline', size: 16, color: C.warning }),
-      h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'ChatGPT berjalan di server OpenAI, jadi hanya dapat terhubung lewat alamat internet HTTPS. KOPKU TIDAK membuka akses internet sendiri: Anda yang menjalankan terowongan (mis. Cloudflare Tunnel) dan bertanggung jawab atasnya. URL konektor berisi kunci rahasia 256-bit — perlakukan seperti password.')
+    h(View, { style: s.judulBaris },
+      h(Ionicons, { name: 'chatbubbles-outline', size: 20, color: C.primary }),
+      h(Text, { style: s.kartuJudul }, 'Hubungkan ke ChatGPT'),
+      lencanaGpt
+    ),
+    h(Text, { style: [s.redup, { marginTop: 6 }], testID: 'status-chatgpt' }, g.pesan || ''),
+    g.keadaan === 'GAGAL' ? h(View, { style: [s.galat, { marginTop: 8 }] }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, g.pesan)) : null,
+    h(View, { style: [s.galat, { backgroundColor: '#EEF4FF', borderColor: '#C9DAF8', marginTop: 10 }] },
+      h(Ionicons, { name: 'shield-checkmark-outline', size: 16, color: '#2F5DB3' }),
+      h(Text, { style: [s.galatTeks, { color: '#244A8F' }] }, 'Memakai cara resmi OpenAI: Secure MCP Tunnel. Koneksi keluar terenkripsi dari komputer ini ke OpenAI — tanpa URL publik, port, domain, maupun Command Prompt. Butuh akun ChatGPT yang dapat menambah konektor (Developer mode; tergantung paket/workspace) dan akses OpenAI Platform › Tunnels.')
+    ),
+    h(View, { style: s.blok },
+      h(Subjudul, { teks: 'Pemeriksaan otomatis' }),
+      (g.prasyarat || []).map((x) =>
+        h(View, { key: x.kode, style: s.infoBaris, testID: 'prasyarat-' + x.kode },
+          h(Ionicons, { name: x.ok ? 'checkmark-circle' : 'ellipse-outline', size: 16, color: x.ok ? C.primary : C.textFaint }),
+          h(Text, { style: [s.redup, x.ok && { color: C.text }] }, x.teks)
+        )
+      )
+    ),
+    h(View, { style: s.blok },
+      h(Subjudul, { teks: 'Langkah' }),
+      h(Langkah, { no: 1, judul: 'Siapkan di OpenAI (sekali saja)', selesai: !!(g.tunnelId && g.apiKey && g.apiKey.ada) },
+        h(Text, { style: s.redup }, 'a) Halaman Tunnels › Create tunnel (pilih workspace ChatGPT Anda) › salin Tunnel ID.  b) Halaman API keys › Create › Restricted › Tunnels: Read + Use › salin key.'),
+        h(View, { style: s.aksi },
+          h(Tombol, { label: 'Buka halaman Tunnels', ikon: 'open-outline', kecil: true, onPress: () => buka('tunnels'), testID: 'tombol-buka-tunnels' }),
+          h(Tombol, { label: 'Buka halaman API keys', ikon: 'open-outline', kecil: true, onPress: () => buka('apiKeys'), testID: 'tombol-buka-apikeys' })
+        ),
+        h(View, { style: [s.aksi, { marginTop: 8 }] },
+          h(TextInput, { value: nilaiTunnel, onChangeText: setTunnelInput, placeholder: 'tunnel_…', placeholderTextColor: C.textFaint, autoCapitalize: 'none', autoCorrect: false, style: s.input, editable: bolehUbah, testID: 'input-tunnel-id' }),
+          h(TextInput, { value: kunciInput, onChangeText: setKunciInput, placeholder: g.apiKey && g.apiKey.ada ? `API key tersimpan (…${g.apiKey.akhir}) — isi untuk mengganti` : 'sk-… (Runtime API key)', placeholderTextColor: C.textFaint, autoCapitalize: 'none', autoCorrect: false, secureTextEntry: true, style: s.input, editable: bolehUbah, testID: 'input-api-key' }),
+          h(Tombol, { label: 'Simpan', ikon: 'save-outline', onPress: simpanKredensial, disabled: !bolehUbah || !pid || !nilaiTunnel, sibuk: sibuk === 'gpt', testID: 'tombol-simpan-kredensial' })
+        )
+      ),
+      h(Langkah, { no: 2, judul: 'Hubungkan', selesai: g.keadaan === 'TERHUBUNG' },
+        h(View, { style: s.aksi },
+          !g.aktif
+            ? h(Tombol, { label: 'Hubungkan ke ChatGPT', ikon: 'link-outline', utama: true, onPress: hubungkanGpt, disabled: !bolehUbah || !pid || !prasyaratOk, sibuk: sibuk === 'gpt', testID: 'tombol-hubungkan-chatgpt' })
+            : h(Tombol, { label: 'Hubungkan ulang', ikon: 'refresh-outline', onPress: () => aturGpt({ aksi: 'hubungkan' }, null), disabled: !bolehUbah || !pid, sibuk: sibuk === 'gpt', testID: 'tombol-hubungkan-ulang' }),
+          g.aktif ? h(Tombol, { label: 'Putuskan', ikon: 'close-circle-outline', bahaya: true, onPress: putuskanGpt, disabled: !bolehUbah || !pid, testID: 'tombol-putuskan-chatgpt' }) : null
+        ),
+        !prasyaratOk && !g.aktif ? h(Text, { style: s.catatan }, 'Tombol aktif setelah semua pemeriksaan di atas tercentang.') : null
+      ),
+      h(Langkah, { no: 3, judul: 'Tambahkan KOPKU di ChatGPT (sekali saja)', selesai: !!(g.pemakaian && g.pemakaian.total > 0) },
+        h(Text, { style: s.redup }, `ChatGPT › Settings › Apps & Connectors › Create (aktifkan Developer mode bila diminta) › Connection: Tunnel › pilih tunnel ${g.tunnelId || 'Anda'} › nama "KOPKU" › Create. Lalu di percakapan baru pilih KOPKU dan bertanya, mis. "Ringkas kondisi koperasi hari ini".`),
+        h(View, { style: s.aksi }, h(Tombol, { label: 'Buka pengaturan konektor ChatGPT', ikon: 'open-outline', utama: g.keadaan === 'TERHUBUNG', onPress: () => buka('konektor'), testID: 'tombol-buka-konektor' }))
+      )
     ),
     h(View, { style: s.blok },
       h(Saklar, {
         judul: 'Izinkan ChatGPT mengubah data',
-        sub: !st.bolehTulis ? 'Butuh "Izinkan AI mengubah data" di atas.' : g.bolehTulis ? 'ON: ChatGPT dapat memakai alat ubah data (selalu pratinjau + persetujuan).' : 'MATI: ChatGPT hanya membaca (disarankan).',
+        sub: !st.bolehTulis ? 'MATI (hanya membaca). Butuh "Izinkan AI mengubah data" di atas.' : g.bolehTulis ? 'ON: ChatGPT dapat memakai alat ubah data (selalu pratinjau + persetujuan).' : 'MATI: ChatGPT hanya membaca (disarankan).',
         ikon: 'create-outline',
         nilai: !!(g.bolehTulis && st.bolehTulis),
         onUbah: ubahGptTulis,
@@ -52897,28 +52938,9 @@ function AsistenAiScreen() {
         testID: 'saklar-chatgpt-ubah',
       })
     ),
-    h(View, { style: s.blok },
-      h(Subjudul, { teks: 'Menyambungkan ke ChatGPT' }),
-      h(Langkah, { no: 1, judul: 'Jalankan terowongan HTTPS Anda ke alamat lokal KOPKU', selesai: !!g.alamatPublik },
-        h(Text, { style: s.redup }, 'Contoh dengan Cloudflare Tunnel (pasang cloudflared dari situs resmi Cloudflare), jalankan di Command Prompt komputer ini dan biarkan terbuka:'),
-        g.perintahTerowongan ? kodeBaris(g.perintahTerowongan, 'perintah-terowongan') : h(Text, { style: s.catatan }, 'Nyalakan akses ChatGPT untuk melihat alamat lokal.'),
-        g.perintahTerowongan ? h(View, { style: s.aksi }, h(Tombol, { label: 'Salin perintah', ikon: 'copy-outline', kecil: true, onPress: () => salin(g.perintahTerowongan, 'Perintah disalin.') })) : null
-      ),
-      h(Langkah, { no: 2, judul: 'Tempel alamat publik HTTPS dari terowongan', selesai: !!g.alamatPublik },
-        h(View, { style: s.aksi },
-          h(TextInput, { value: nilaiAlamat, onChangeText: setAlamatPublik, placeholder: 'https://nama-anda.trycloudflare.com', placeholderTextColor: C.textFaint, autoCapitalize: 'none', autoCorrect: false, style: s.input, editable: bolehUbah, testID: 'input-alamat-publik' }),
-          h(Tombol, { label: 'Simpan', ikon: 'save-outline', onPress: simpanAlamat, disabled: !bolehUbah || !pid, sibuk: sibuk === 'gpt', testID: 'tombol-simpan-alamat' })
-        )
-      ),
-      h(Langkah, { no: 3, judul: 'Tambahkan konektor di ChatGPT', selesai: !!(g.urlChatGPT && g.pemakaian && g.pemakaian.total > 0) },
-        h(Text, { style: s.redup }, 'ChatGPT › Settings › Apps & Connectors › Advanced settings › nyalakan Developer mode › Create. Isi Name "KOPKU", MCP Server URL di bawah, Authentication "No authentication", centang "I trust this application", lalu Create. Di percakapan, pilih Developer mode › KOPKU.'),
-        g.urlChatGPT ? kodeBaris(g.urlChatGPT, 'url-chatgpt') : h(Text, { style: s.catatan }, 'URL muncul setelah alamat publik disimpan.'),
-        h(View, { style: s.aksi },
-          g.urlChatGPT ? h(Tombol, { label: 'Salin URL konektor', ikon: 'copy-outline', utama: true, onPress: () => salin(g.urlChatGPT, 'URL konektor disalin. Tempel di ChatGPT — jangan dibagikan.'), testID: 'tombol-salin-url-chatgpt' }) : null,
-          h(Tombol, { label: 'Ganti kunci', ikon: 'key-outline', onPress: gantiKunci, disabled: !bolehUbah || !pid, testID: 'tombol-ganti-kunci' })
-        )
-      ),
-      h(Text, { style: s.catatan }, `Permintaan diterima: ${(g.pemakaian && g.pemakaian.total) || 0} · ditolak (alamat/kunci salah, terlalu sering): ${(g.pemakaian && g.pemakaian.ditolak) || 0}`)
+    h(View, { style: [s.aksi, { marginTop: 10, alignItems: 'center' }] },
+      h(Text, { style: [s.catatan, { flex: 1 }] }, `Permintaan dari ChatGPT: ${(g.pemakaian && g.pemakaian.total) || 0} · ditolak: ${(g.pemakaian && g.pemakaian.ditolak) || 0}`),
+      g.tunnelId || (g.apiKey && g.apiKey.ada) ? h(Tombol, { label: 'Hapus kredensial', ikon: 'trash-outline', kecil: true, bahaya: true, onPress: hapusGpt, disabled: !bolehUbah || !pid, testID: 'tombol-hapus-chatgpt' }) : null
     )
   );
 
@@ -52927,7 +52949,7 @@ function AsistenAiScreen() {
       h(Touchable, { key: k, accessibilityRole: 'tab', onPress: () => setTab(k), style: [s.tab, tab === k && s.tabAktif], testID: 'tab-' + k },
         h(Ionicons, { name: ikon, size: 16, color: tab === k ? C.primary : C.textMuted }),
         h(Text, { style: [s.tabTeks, tab === k && s.tabTeksAktif] }, label),
-        k === 'chatgpt' && g.aktif ? h(View, { style: s.tabTitik }) : null
+        k === 'chatgpt' && g.keadaan === 'TERHUBUNG' ? h(View, { style: s.tabTitik }) : null
       )
     )
   );

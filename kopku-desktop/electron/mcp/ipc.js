@@ -11,7 +11,7 @@ const path = require('node:path');
 const claudeConfig = require('./claudeConfig');
 const { buatMcpb } = require('./mcpb');
 const { siapkanServerLokal, cariNode } = require('./serverLokal');
-const { AksesChatGPT } = require('./chatgpt');
+const { AksesChatGPT, TAUTAN } = require('./chatgpt');
 
 /**
  * @param {object} o
@@ -30,12 +30,14 @@ const { AksesChatGPT } = require('./chatgpt');
  * @param {{ showSaveDialog: Function }} [o.dialog] dialog Electron (pilih folder simpan .mcpb)
  * @param {() => any} [o.jendela] jendela induk dialog
  * @param {string} [o.folderDokumen] folder Dokumen pengguna (lokasi bawaan .mcpb)
- * @param {import('./chatgpt').AksesChatGPT} [o.chatgpt] akses ChatGPT (1.0.29; bawaan dibuat di sini)
+ * @param {import('./chatgpt').AksesChatGPT} [o.chatgpt] akses ChatGPT (bawaan dibuat di sini)
+ * @param {{get:Function,set:Function,remove:Function}} [o.rahasia] penyimpanan terenkripsi API key OpenAI (1.0.31)
+ * @param {() => string|null} [o.jalurRuntimeTunnel] lokasi tunnel-client-runtime resmi OpenAI (1.0.31)
  */
 function daftarkanIpcAsistenAi(o) {
   const { h, host, dataDir, lingkungan } = o;
-  // 1.0.29 — ChatGPT: server MCP HTTP terpisah di 127.0.0.1 (terowongan internet disediakan pengguna sendiri).
-  const chatgpt = o.chatgpt || new AksesChatGPT({ host, dataDir });
+  // 1.0.31 — ChatGPT lewat OpenAI Secure MCP Tunnel (koneksi keluar resmi; tanpa URL publik).
+  const chatgpt = o.chatgpt || new AksesChatGPT({ host, dataDir, rahasia: o.rahasia, jalurRuntime: o.jalurRuntimeTunnel, baseUrl: o.baseUrlTunnel });
   const platform = o.platform || process.platform;
   // 1.0.26 — Node.js terpasang dipakai lebih dulu: stdin `KOPKU Desktop.exe` (aplikasi GUI Electron)
   // tertutup seketika di Windows sehingga Claude melapor "Server disconnected" (lihat serverLokal.js).
@@ -141,6 +143,7 @@ function daftarkanIpcAsistenAi(o) {
         /* ditampilkan di layar sebagai "belum terpasang" */
       }
     }
+    if (i.aktif === true) await chatgpt.mulaiBilaAktif().catch(() => undefined);
     return Object.assign(statusLengkap(), ekstensi ? { ekstensi } : {});
   });
   h('asistenAi:pasangClaude', async (penggunaId) => {
@@ -163,13 +166,19 @@ function daftarkanIpcAsistenAi(o) {
   h('asistenAi:aturChatGPT', async (input) => {
     const i = input && typeof input === 'object' ? input : {};
     await chatgpt.atur({
-      aktif: i.aktif === undefined ? undefined : i.aktif === true,
-      bolehTulis: i.bolehTulis === undefined ? undefined : i.bolehTulis === true,
-      gantiKunci: i.gantiKunci === true,
-      alamatPublik: i.alamatPublik === undefined ? undefined : i.alamatPublik === null ? null : String(i.alamatPublik).slice(0, 300),
+      aksi: String(i.aksi || ''),
+      tunnelId: i.tunnelId === undefined ? undefined : String(i.tunnelId).slice(0, 100),
+      apiKey: i.apiKey === undefined ? undefined : String(i.apiKey).slice(0, 400),
+      bolehTulis: i.bolehTulis === true,
       penggunaId: i.penggunaId,
     });
     return statusLengkap();
+  });
+  h('asistenAi:bukaTautanChatGPT', async (nama) => {
+    const url = Object.prototype.hasOwnProperty.call(TAUTAN, nama) ? TAUTAN[nama] : null;
+    if (!url) throw new Error('Tautan tidak dikenal.');
+    await o.shell.openExternal(url);
+    return true;
   });
   h('asistenAi:bukaFolderEkstensi', async () => {
     const f = folderEkstensi();
@@ -201,6 +210,7 @@ function daftarkanIpcAsistenAi(o) {
   } catch {
     /* abaikan */
   }
+  return { chatgpt };
 }
 
 module.exports = { daftarkanIpcAsistenAi };

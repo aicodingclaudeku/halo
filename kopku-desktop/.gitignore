@@ -5,3 +5,6 @@ dist/
 *.env
 !.env.example
 kopku-server.env
+
+# Penghubung resmi OpenAI (dibangun/diunduh oleh scripts/siapkan-tunnel-openai.sh)
+vendor/openai-tunnel/

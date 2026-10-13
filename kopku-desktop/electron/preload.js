@@ -168,8 +168,9 @@ contextBridge.exposeInMainWorld('kopkuDesktop', {
     bukaFolder: () => call('asistenAi:bukaFolder'),
     unduhClaude: () => call('asistenAi:unduhClaude'),
     bukaFolderEkstensi: () => call('asistenAi:bukaFolderEkstensi'),
-    // 1.0.29 — ChatGPT (server MCP HTTP di 127.0.0.1; alamat publik HTTPS milik pengguna).
+    // 1.0.31 — ChatGPT lewat OpenAI Secure MCP Tunnel. API key hanya DIKIRIM (tidak pernah dibaca balik).
     aturChatGPT: (o) => call('asistenAi:aturChatGPT', o),
+    bukaTautanChatGPT: (nama) => call('asistenAi:bukaTautanChatGPT', String(nama)),
   },
 
   app: {

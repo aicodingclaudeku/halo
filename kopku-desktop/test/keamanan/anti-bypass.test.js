@@ -150,7 +150,9 @@ test('package.json: Electron Fuses anti-bypass & titik masuk', () => {
   assert.equal(p.build.asarUnpack, undefined, 'tidak ada kode proses utama di luar app.asar');
   // DIPERBARUI 1.0.14: extraResources kopku-mcp (cadangan konektor Claude) DIHAPUS.
   // 1.0.25: tetap tidak perlu — Asisten AI memakai exe (--kopku-mcp-stdio, di dalam app.asar) atau paket .mcpb.
-  assert.equal(p.build.extraResources, undefined);
+  // 1.0.31: SATU-SATUNYA pengecualian = penghubung resmi OpenAI Secure MCP Tunnel (biner Go terpisah, Apache-2.0,
+  // dibangun dari commit yang dipatok — scripts/siapkan-tunnel-openai.sh). Bukan kode proses utama KOPKU (tetap di app.asar).
+  assert.deepEqual(p.build.extraResources, [{ from: 'vendor/openai-tunnel/${platform}-${arch}', to: 'openai-tunnel', filter: ['**/*'] }]);
   assert.match(p.scripts['postdist:win'], /verifikasi-fuse\.js/);
 });
 

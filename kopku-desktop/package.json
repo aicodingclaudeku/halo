@@ -1,7 +1,7 @@
 {
   "name": "kopku-desktop",
   "productName": "KOPKU Desktop",
-  "version": "1.0.30",
+  "version": "1.0.31",
   "description": "KOPKU Desktop untuk Windows — source Electron + UI yang sudah di-build (renderer/). UI berasal dari source aplikasi KOPKU (src/, app/).",
   "author": "KOPKU",
   "private": true,
@@ -24,7 +24,8 @@
     "test:keamanan": "node --test --test-concurrency=1 \"test/keamanan/*.test.js\"",
     "pasang:menu-lan-wa": "node scripts/pasang-menu-lan-wa.js",
     "pasang:menu-asisten-ai": "node scripts/pasang-menu-asisten-ai.js",
-    "test:asisten-ai-ui": "node test/smoke-asisten-ai-chromium.js"
+    "test:asisten-ai-ui": "node test/smoke-asisten-ai-chromium.js",
+    "siapkan:tunnel-openai": "sh scripts/siapkan-tunnel-openai.sh"
   },
   "dependencies": {
     "qrcode": "^1.5.4"
@@ -116,6 +117,15 @@
       "enableNodeCliInspectArguments": false,
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true
-    }
+    },
+    "extraResources": [
+      {
+        "from": "vendor/openai-tunnel/${platform}-${arch}",
+        "to": "openai-tunnel",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }

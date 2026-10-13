@@ -28,6 +28,9 @@ const ROOT = path.resolve(__dirname, '..');
 const OUT = path.resolve(process.argv[2] || fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-asisten-ui-')));
 fs.mkdirSync(OUT, { recursive: true });
 const { SqliteHost } = require(path.join(ROOT, 'electron/hosts/sqliteHost.js'));
+const { AksesChatGPT } = require(path.join(ROOT, 'electron/mcp/chatgpt.js'));
+const { RuntimeTunnel } = require(path.join(ROOT, 'electron/mcp/tunnelOpenAI.js'));
+const { buatTiruanOpenAI } = require(path.join(ROOT, 'test/mcp/tiruanOpenAI.js'));
 const { bangunIndeks, cariBerkasBundle } = require(path.join(ROOT, 'electron/server/bundleIndex.js'));
 const { pasangAdapter } = require(path.join(ROOT, 'electron/server/rendererAdapter.js'));
 const { McpHost } = require(path.join(ROOT, 'electron/mcp/host.js'));
@@ -154,7 +157,23 @@ function klienStdio(perintah, args) {
   const dibuka = [];
   const disalin = [];
   const judulDialog = [];
+  // 1.0.31 — ChatGPT: runtime RESMI tunnel-client + tiruan control plane OpenAI (server OpenAI asli butuh akun).
+  const GPT_TID = 'tunnel_0123456789abcdef0123456789abcdef';
+  const GPT_KEY = 'sk-proj-ujiUI0123456789abcdefABCDEFGH';
+  const openai = buatTiruanOpenAI({ apiKey: GPT_KEY, tunnelId: GPT_TID });
+  const openaiUrl = await openai.mulai();
+  const binTunnel = path.join(ROOT, 'vendor', 'openai-tunnel', `${process.platform}-${process.arch}`, 'tunnel-client-runtime');
+  const adaBin = () => (fs.existsSync(binTunnel) ? binTunnel : null);
+  const rahasiaGpt = new Map();
+  const chatgpt = new AksesChatGPT({
+    host: mcp,
+    dataDir,
+    jalurRuntime: adaBin,
+    rahasia: { get: (x) => (rahasiaGpt.has(x) ? rahasiaGpt.get(x) : null), set: (x, v) => rahasiaGpt.set(x, v), remove: (x) => rahasiaGpt.delete(x) },
+    runtime: new RuntimeTunnel({ jalurRuntime: adaBin, dirLog: path.join(dataDir, 'mcp'), baseUrl: openaiUrl, intervalMs: 300, tenggangGagalMs: 1500 }),
+  });
   daftarkanIpcAsistenAi({
+    chatgpt,
     h: (ch, fn) => handler.set(ch, fn),
     host: mcp,
     dataDir,
@@ -225,6 +244,7 @@ function klienStdio(perintah, args) {
         unduhClaude: () => ai('asistenAi:unduhClaude'),
         bukaFolderEkstensi: () => ai('asistenAi:bukaFolderEkstensi'),
         aturChatGPT: (o) => ai('asistenAi:aturChatGPT', o),
+        bukaTautanChatGPT: (n) => ai('asistenAi:bukaTautanChatGPT', n),
       },
       app: { openDataFolder: nol, onMenu() { return () => {}; }, setTitle() {} },
     };
@@ -411,50 +431,58 @@ function klienStdio(perintah, args) {
   ok('layar: sakelar ubah data ON, alat ubah data aktif, aktivitas "Diubah"', /Ubah data aktif/.test(teks) && /Alat ubah data \(16\)/i.test(teks) && /Diubah/.test(teks) && /UBAH: Setor simpanan wajib/.test(teks));
   await pg.evaluate(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; });
 
-  // ---- 1.0.29: tab ChatGPT
+  // ---- 1.0.31: tab ChatGPT — OpenAI Secure MCP Tunnel
   const klikTombol = (re) => pg.evaluate((src) => { const r = new RegExp(src); const b = [...document.querySelectorAll('[role=button]')].find((x) => r.test((x.innerText || '').trim())); if (b) b.click(); return !!b; }, re.source);
   await pg.locator('[data-testid=tab-chatgpt]').click();
   await pg.waitForTimeout(800);
-  await pg.screenshot({ path: path.join(OUT, '50-chatgpt-mati.png'), fullPage: true });
+  await pg.screenshot({ path: path.join(OUT, '50-chatgpt-awal.png'), fullPage: true });
   teks = await pg.evaluate(() => document.body.innerText);
-  ok('tab ChatGPT di menu Asisten AI (bawaan mati, kartu Claude disembunyikan)', /Nyalakan akses ChatGPT/.test(teks) && !/Pasang di Claude Desktop/.test(teks) && /KOPKU TIDAK membuka akses internet sendiri/.test(teks));
-  await pg.locator('[data-testid=saklar-chatgpt]').click();
+  ok('tab ChatGPT: alur resmi Secure MCP Tunnel, belum terhubung, kartu Claude disembunyikan', /Hubungkan ke ChatGPT/.test(teks) && /Secure MCP Tunnel/.test(teks) && /Belum terhubung/.test(teks) && !/Pasang di Claude Desktop/.test(teks));
+  const tombolHub = pg.locator('[data-testid=tombol-hubungkan-chatgpt]');
+  ok('tombol "Hubungkan ke ChatGPT" nonaktif sebelum prasyarat lengkap', (await tombolHub.getAttribute('aria-disabled')) === 'true');
+  await pg.locator('[data-testid=tombol-buka-tunnels]').click();
+  await pg.waitForTimeout(500);
+  ok('tombol membuka halaman resmi OpenAI Tunnels', dibuka.includes('https://platform.openai.com/settings/organization/tunnels'));
+  await pg.locator('[data-testid=input-tunnel-id]').fill(GPT_TID);
+  await pg.locator('[data-testid=input-api-key]').fill(GPT_KEY);
+  ok('kolom API key tersamar (password)', (await pg.locator('[data-testid=input-api-key]').getAttribute('type')) === 'password');
+  await pg.locator('[data-testid=tombol-simpan-kredensial]').click();
+  await pg.waitForTimeout(1500);
+  await pg.keyboard.press('Enter');
+  await pg.waitForTimeout(800);
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('API key disimpan & TIDAK ditampilkan kembali (hanya 4 karakter terakhir)', rahasiaGpt.size === 1 && !teks.includes(GPT_KEY) && (await pg.locator('[data-testid=input-api-key]').getAttribute('placeholder')).includes('…' + GPT_KEY.slice(-4)));
+  ok('pemeriksaan prasyarat otomatis semua tercentang', (await handler.get('asistenAi:status')()).chatgpt.prasyarat.every((x) => x.ok));
+  await tombolHub.click();
   await pg.waitForTimeout(700);
   await pg.screenshot({ path: path.join(OUT, '51-konfirmasi-chatgpt.png') });
   teks = await pg.evaluate(() => document.body.innerText);
-  ok('dialog ChatGPT menjelaskan risiko internet & URL rahasia', /Nyalakan akses ChatGPT\?/.test(teks) && /ANDA sendiri yang menjalankan terowongan/.test(teks) && /Jangan bagikan URL/.test(teks));
-  await klikTombol(/^Nyalakan$/);
+  ok('dialog Hubungkan menjelaskan koneksi keluar & read-only', /Hubungkan KOPKU ke ChatGPT\?/.test(teks) && /tanpa URL publik/.test(teks) && /Mengubah data tetap MATI/.test(teks));
+  await klikTombol(/^Hubungkan$/);
+  let gst = null;
+  for (let i = 0; i < 60; i++) {
+    await pg.waitForTimeout(500);
+    gst = (await handler.get('asistenAi:status')()).chatgpt;
+    if (gst.keadaan === 'TERHUBUNG' || gst.keadaan === 'GAGAL') break;
+  }
+  await pg.waitForTimeout(5500); // layar memuat status tiap 5 detik
+  teks = await pg.evaluate(() => document.body.innerText);
+  await pg.screenshot({ path: path.join(OUT, '52-chatgpt-terhubung.png'), fullPage: true });
+  ok('status TERHUBUNG (runtime resmi ⇄ tiruan OpenAI) tampil di layar', gst.keadaan === 'TERHUBUNG' && /Terhubung ke OpenAI/.test(teks), gst.pesan);
+  const lewat = await openai.kirim({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ringkasan_koperasi', arguments: {} } });
+  ok('permintaan "ChatGPT" lewat tunnel menjawab data koperasi', !lewat.resp_json.result.isError && /anggotaAktif/.test(lewat.resp_json.result.content[0].text), lewat.resp_json.result.content[0].text.slice(0, 80));
+  const daftarGpt = (await openai.kirim({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).resp_json.result.tools.map((t) => t.name);
+  ok('ChatGPT bawaan hanya-baca (alat ubah data tidak ditawarkan)', daftarGpt.length === 14 && !daftarGpt.includes('kas_masuk'), String(daftarGpt.length));
+  await pg.locator('[data-testid=tombol-buka-konektor]').click();
+  await pg.waitForTimeout(500);
+  ok('tombol membuka pengaturan konektor ChatGPT', dibuka.includes('https://chatgpt.com/#settings/Connectors'));
+  await pg.locator('[data-testid=tombol-putuskan-chatgpt]').click();
   await pg.waitForTimeout(2500);
   await pg.keyboard.press('Enter');
-  let gst = (await handler.get('asistenAi:status')()).chatgpt;
-  ok('server ChatGPT menyala di 127.0.0.1', gst.aktif === true && /^http:\/\/127\.0\.0\.1:\d+$/.test(gst.alamatLokal), gst.alamatLokal);
-  await pg.waitForTimeout(500);
-  await pg.locator('[data-testid=input-alamat-publik]').fill('https://kopku-uji.trycloudflare.com');
-  await pg.locator('[data-testid=tombol-simpan-alamat]').click();
-  await pg.waitForTimeout(2000);
-  await pg.keyboard.press('Enter');
-  await pg.waitForTimeout(600);
-  gst = (await handler.get('asistenAi:status')()).chatgpt;
-  teks = await pg.evaluate(() => document.body.innerText);
-  ok('layar menampilkan perintah terowongan & URL konektor rahasia', teks.includes(gst.perintahTerowongan) && /https:\/\/kopku-uji\.trycloudflare\.com\/mcp\/[0-9a-f]{64}/.test(teks), gst.urlChatGPT && gst.urlChatGPT.replace(/[0-9a-f]{64}/, '…'));
-  await pg.locator('[data-testid=tombol-salin-url-chatgpt]').click();
   await pg.waitForTimeout(800);
-  await pg.keyboard.press('Enter');
-  ok('tombol Salin URL konektor', disalin.includes(gst.urlChatGPT));
-  const rpcGpt = (method, params) => fetch(gst.alamatLokal + new URL(gst.urlChatGPT).pathname, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }).then((r) => r.json());
-  const rg = await rpcGpt('tools/call', { name: 'ringkasan_koperasi', arguments: {} });
-  ok('ChatGPT (HTTP) membaca ringkasan koperasi lewat URL konektor', !rg.result.isError && /anggotaAktif/.test(rg.result.content[0].text), rg.result.content[0].text.slice(0, 100));
-  ok('ChatGPT: alat ubah data TIDAK ditawarkan sebelum izin ChatGPT', !(await rpcGpt('tools/list', {})).result.tools.some((t) => t.name === 'kas_masuk'));
-  await pg.locator('[data-testid=saklar-chatgpt-ubah]').click();
-  await pg.waitForTimeout(700);
-  teks = await pg.evaluate(() => document.body.innerText);
-  ok('dialog "Izinkan ChatGPT MENGUBAH data"', /Izinkan ChatGPT MENGUBAH data\?/.test(teks));
-  await klikTombol(/^Izinkan$/);
-  await pg.waitForTimeout(2000);
-  await pg.keyboard.press('Enter');
-  await pg.waitForTimeout(600);
-  ok('izin ubah data ChatGPT → alat ubah data ditawarkan ke ChatGPT', (await rpcGpt('tools/list', {})).result.tools.some((t) => t.name === 'kas_masuk'));
-  await pg.screenshot({ path: path.join(OUT, '52-chatgpt-menyala.png'), fullPage: true });
+  gst = (await handler.get('asistenAi:status')()).chatgpt;
+  ok('Putuskan → MATI, tunnel tidak dilayani', gst.keadaan === 'MATI' && !chatgpt.berjalan);
+  await pg.screenshot({ path: path.join(OUT, '53-chatgpt-diputus.png'), fullPage: true });
   await pg.locator('[data-testid=tab-claude]').click();
   await pg.waitForTimeout(800);
 
@@ -524,6 +552,7 @@ function klienStdio(perintah, args) {
   ok('tanpa galat halaman', logs.length === 0, logs.slice(0, 3).join(' | '));
   fs.writeFileSync(path.join(OUT, 'hasil.json'), JSON.stringify(cek, null, 1));
   await mcp.henti();
+  await openai.tutup();
   await b.close();
   srv.close();
   const lulus = Object.values(cek).filter((x) => x.ok).length;

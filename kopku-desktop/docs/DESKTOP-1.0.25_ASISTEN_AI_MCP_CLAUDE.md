@@ -268,3 +268,39 @@ memakai `server/index.js`. Status `ekstensiUsang` (versi pembuat ekstensi di `mc
 → layar meminta membuat ulang ekstensi. Uji: `test/mcp/asisten-ai.test.js` memuat server paket lewat pembungkus
 (`node -e "require(...)"`): `index.js` menjawab, `stdio.js` saja tidak (bukti penyebab).
 
+## §N 1.0.31 — ChatGPT lewat OpenAI Secure MCP Tunnel (menggantikan §L)
+
+**Verifikasi metode (13 Okt 2026):** ChatGPT tidak memasang `.mcpb` dan tidak dapat menjangkau `localhost`. Untuk server
+lokal/pribadi, OpenAI menyediakan **Secure MCP Tunnel**: klien resmi `github.com/openai/tunnel-client` (Apache-2.0)
+long-poll keluar ke `https://api.openai.com/v1/tunnels/{tunnel_id}/poll`, meneruskan perintah MCP ke server lokal, dan
+mengirim jawaban ke `/response` (docs/protocol.md). ChatGPT: Settings › Connectors › **Connection: Tunnel** › pilih tunnel.
+Prasyarat dari OpenAI: `tunnel_id` (Platform › Tunnels, dibuat dengan workspace ChatGPT yang benar) + Runtime API key
+(Restricted · Tunnels Read + Use). Admin key hanya untuk CRUD tunnel lewat CLI — tidak dipakai KOPKU.
+
+```
+ChatGPT ⇄ OpenAI control plane ⇄ (keluar HTTPS) resources/openai-tunnel/tunnel-client-runtime.exe
+   ⇄ http://127.0.0.1:<port acak>/mcp  [Authorization: Bearer <kunci lokal>]  electron/mcp/chatgpt.js
+      ⇄ McpHost.panggil(..., { sumber: 'chatgpt' }) ⇄ service KOPKU (validasi, izin, audit SAMA)
+```
+
+- **Runtime** (`electron/mcp/tunnelOpenAI.js`): `run --control-plane.tunnel-id … --control-plane.api-key env:CONTROL_PLANE_API_KEY
+  --mcp.server-url http://127.0.0.1:<port>/mcp --mcp.extra-headers "Authorization: env:KOPKU_MCP_AUTH"
+  --mcp.discovery-extra-headers … --health.listen-addr 127.0.0.1:0 --health.url-file …`; lingkungan minimal (tidak mewarisi
+  OPENAI_API_KEY lain); keluaran disaring ke `<data>/mcp/chatgpt-tunnel.log`.
+- **Status:** dari `/health?details=true` — TERHUBUNG ⇔ `control-plane.status=ok` + `consecutive_failures=0` + probe MCP
+  `succeeded`. Diuji: `/readyz` tetap 200 walau API key salah, jadi tidak dipakai. 401/403/404/429/5xx/jaringan → kode & pesan.
+  Runtime keluar tak terduga → coba lagi 5 s, 15 s, 60 s, lalu tiap 2 menit.
+- **Server lokal:** GET `/.well-known/*` → 404 (OAuth tidak dipakai; tanpa ini `/readyz` 503), POST kosong (probe) → 400.
+- **Penyimpanan:** `<data>/mcp/chatgpt.json` (aktif, tunnelId, kunci lokal, izin ubah data; mode 0600) dan
+  `<data>/mcp/chatgpt-rahasia.json` (API key, safeStorage/DPAPI; ditolak bila enkripsi OS tidak tersedia). Kanal:
+  `asistenAi:aturChatGPT` (aksi simpan|hubungkan|putuskan|hapus|izin), `asistenAi:bukaTautanChatGPT` (daftar putih 4 tautan resmi).
+- **Biner:** `scripts/siapkan-tunnel-openai.sh` — bawaan membangun dari commit `459013c6fc38…` dengan bendera build Makefile
+  resmi (flavor=runtime, `-trimpath -buildvcs=false`; SHA256 Windows `e139bbc9…a07b`, dapat diulang); `CARA=rilis` untuk
+  arsip rilis resmi + SHA256SUMS. Uji keamanan mengunci extraResources hanya ke folder ini.
+
+**Hasil uji:** `test/mcp/asisten-ai-chatgpt.test.js` 10/10 — runtime RESMI (Linux) ⇄ tiruan control plane (protokol resmi)
+⇄ KOPKU asli: terhubung, alat baca, ubah data dgn izin terpisah, kunci salah/tunnel tidak ada, runtime dibunuh → sambung
+ulang, putuskan, restart aplikasi, server lokal menolak akses tanpa kunci. Chromium 48/48; Electron nyata 27/27.
+**Belum diuji:** server OpenAI & ChatGPT asli (butuh akun/API key pengguna) dan exe Windows hasil build dijalankan di
+Windows (lingkungan build Linux, tanpa Windows/Wine).
+

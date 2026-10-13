@@ -58,6 +58,7 @@ let win = null;
 let hosts = null;
 let lanMulti = null;
 let asistenAi = null;
+let chatgptAi = null;
 
 function dirs() {
   const data = app.getPath('userData');
@@ -304,7 +305,7 @@ function registerAsistenAi(d, bridge, h) {
   hosts.asistenAi = asistenAi;
   // Uji dari source saja: lokasi konfigurasi Claude Desktop tiruan (aplikasi terpasang memakai lokasi asli).
   const rumahUji = MODE_UJI && process.env.KOPKU_CLAUDE_HOME ? process.env.KOPKU_CLAUDE_HOME : null;
-  daftarkanIpcAsistenAi({
+  ({ chatgpt: chatgptAi } = daftarkanIpcAsistenAi({
     h,
     host: asistenAi,
     dataDir: d.data,
@@ -318,8 +319,44 @@ function registerAsistenAi(d, bridge, h) {
     dialog,
     jendela: () => win,
     folderDokumen: app.getPath('documents'),
+    // 1.0.31 — ChatGPT (OpenAI Secure MCP Tunnel): API key OpenAI di penyimpanan terenkripsi TERPISAH
+    // (tidak terjangkau kanal secure:* layar); runtime resmi tunnel-client di resources/openai-tunnel.
+    rahasia: penyimpanRahasiaChatGPT(path.join(d.data, 'mcp', 'chatgpt-rahasia.json')),
+    jalurRuntimeTunnel: jalurRuntimeTunnel,
+    // Uji dari source saja: tiruan control plane OpenAI (aplikasi terpasang selalu ke https://api.openai.com).
+    baseUrlTunnel: MODE_UJI && process.env.KOPKU_OPENAI_BASE ? process.env.KOPKU_OPENAI_BASE : undefined,
     lingkungan: rumahUji ? { platform: 'win32', env: { APPDATA: path.join(rumahUji, 'Roaming'), LOCALAPPDATA: path.join(rumahUji, 'Local') }, home: rumahUji } : undefined,
-  });
+  }));
+}
+
+/**
+ * Penyimpanan API key OpenAI: WAJIB terenkripsi (DPAPI Windows / Keychain macOS lewat safeStorage). Bila enkripsi
+ * tidak tersedia, KOPKU menolak menyimpan (tidak jatuh ke base64 polos) — kecuali mode uji dari source.
+ */
+function penyimpanRahasiaChatGPT(berkas) {
+  const s = new SecureHost(berkas);
+  const { safeStorage } = require('electron');
+  return {
+    get: (k) => s.get(k),
+    remove: (k) => s.remove(k),
+    set: (k, v) => {
+      if (!safeStorage.isEncryptionAvailable() && !MODE_UJI) throw new Error('Penyimpanan terenkripsi sistem operasi tidak tersedia, jadi API key tidak disimpan. Masuk ke Windows dengan akun pengguna biasa lalu coba lagi.');
+      s.set(k, v);
+    },
+  };
+}
+
+/** Lokasi tunnel-client-runtime resmi OpenAI: terpasang → resources/openai-tunnel; dari source → vendor/openai-tunnel. */
+function jalurRuntimeTunnel() {
+  const nama = process.platform === 'win32' ? 'tunnel-client-runtime.exe' : 'tunnel-client-runtime';
+  try {
+    const kandidat = app.isPackaged
+      ? [process.resourcesPath && path.join(process.resourcesPath, 'openai-tunnel', nama)]
+      : [path.join(__dirname, '..', 'vendor', 'openai-tunnel', `${process.platform}-${process.arch}`, nama)];
+    return kandidat.find((f) => f && fs.existsSync(f)) || null;
+  } catch {
+    return null;
+  }
 }
 
 let idsTulisAi = null;
@@ -443,7 +480,10 @@ function createWindow() {
     // Asisten AI tersimpan ON: host lokal menyala; adapter dipasang saat pertama dipakai
     // (atau sekarang bila sudah pernah dipasang sebelum halaman dimuat ulang).
     if (asistenAi && asistenAi.baca().aktif) {
-      asistenAi.mulaiBilaAktif().catch(() => undefined);
+      asistenAi
+        .mulaiBilaAktif()
+        .then(() => chatgptAi && chatgptAi.mulaiBilaAktif())
+        .catch(() => undefined);
       if (lanMulti.ids && !hosts.lanBridge.siap) hosts.lanBridge.pasang(lanMulti.ids).catch(() => undefined);
     }
   });

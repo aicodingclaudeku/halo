@@ -189,6 +189,54 @@ module.exports = (win, app) => {
           t = await teks();
           cek('layar menampilkan aktivitas pemakaian (termasuk perubahan)', /Ringkasan koperasi/.test(t) && /Daftar tunggakan/.test(t) && /UBAH: Setor simpanan wajib/.test(t));
           await c.tutup();
+
+          // ---- 1.0.31: ChatGPT lewat OpenAI Secure MCP Tunnel — main.js ASLI (SecureHost/safeStorage, jalur runtime,
+          // IPC dari jendela) + tunnel-client-runtime RESMI + tiruan control plane OpenAI (KOPKU_OPENAI_BASE).
+          if (process.env.KOPKU_OPENAI_BASE) {
+            const { buatTiruanOpenAI } = require(path.join(__dirname, 'mcp', 'tiruanOpenAI.js'));
+            const TID = 'tunnel_0123456789abcdef0123456789abcdef';
+            const KEY = 'sk-proj-ujiElectron0123456789abcdefABCD';
+            const openai = buatTiruanOpenAI({ apiKey: KEY, tunnelId: TID });
+            await openai.mulai(Number(new URL(process.env.KOPKU_OPENAI_BASE).port));
+            const isiTestId = (id, nilai) =>
+              js(`(() => { const i = document.querySelector('[data-testid="${id}"]'); if (!i) return false;
+                const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(nilai)});
+                i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+            const stGpt = () => js('window.kopkuDesktop.asistenAi.status().then((x) => x.chatgpt)');
+            await js(`(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; return true; })()`);
+            await klikTestId('tab-chatgpt');
+            await tunggu(800);
+            await isiTestId('input-tunnel-id', TID);
+            await isiTestId('input-api-key', KEY);
+            await tunggu(300);
+            await klikTestId('tombol-simpan-kredensial');
+            await tunggu(2000);
+            await klikTombol(/^OK$/);
+            let g = await stGpt();
+            cek('ChatGPT: prasyarat otomatis lengkap (runtime resmi ditemukan main.js)', g.prasyarat.every((x) => x.ok), JSON.stringify(g.prasyarat.map((x) => x.kode + ':' + x.ok)));
+            const berkasRahasia = path.join(app.getPath('userData'), 'mcp', 'chatgpt-rahasia.json');
+            const isiRahasia = fs.existsSync(berkasRahasia) ? fs.readFileSync(berkasRahasia, 'utf8') : '';
+            const { safeStorage } = require('electron');
+            cek('ChatGPT: API key di penyimpanan rahasia terpisah (bukan teks polos) & tidak di chatgpt.json', isiRahasia.length > 0 && !isiRahasia.includes(KEY) && (safeStorage.isEncryptionAvailable() ? /"enc:/.test(isiRahasia) : true) && !fs.readFileSync(path.join(app.getPath('userData'), 'mcp', 'chatgpt.json'), 'utf8').includes('sk-'), `enkripsi tersedia: ${safeStorage.isEncryptionAvailable()} · format: ${(isiRahasia.match(/"(enc|raw):/) || [])[1]}`);
+            await klikTestId('tombol-hubungkan-chatgpt');
+            await tunggu(800);
+            await klikTombol(/^Hubungkan$/);
+            for (let i = 0; i < 60 && !['TERHUBUNG', 'GAGAL'].includes((g = await stGpt()).keadaan); i++) await tunggu(500);
+            cek('ChatGPT: TERHUBUNG (runtime resmi ⇄ tiruan OpenAI)', g.keadaan === 'TERHUBUNG', g.pesan);
+            const r1 = await openai.kirim({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ringkasan_koperasi', arguments: {} } });
+            cek('ChatGPT: data koperasi lewat tunnel (aplikasi Electron asli)', !r1.resp_json.result.isError && /anggotaAktif/.test(r1.resp_json.result.content[0].text), r1.resp_json.result.content[0].text.slice(0, 120));
+            const daftar = (await openai.kirim({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} })).resp_json.result.tools.map((x) => x.name);
+            cek('ChatGPT: hanya-baca walau ubah data Claude ON (izin terpisah)', daftar.length === 14 && !daftar.includes('simpanan_setor'), String(daftar.length));
+            const logT = fs.readFileSync(path.join(app.getPath('userData'), 'mcp', 'chatgpt-tunnel.log'), 'utf8');
+            cek('ChatGPT: log runtime tanpa API key', logT.length > 0 && !logT.includes(KEY));
+            await tunggu(5500);
+            await shot('54-chatgpt-terhubung');
+            await klikTestId('tombol-putuskan-chatgpt');
+            await tunggu(2500);
+            g = await stGpt();
+            cek('ChatGPT: Putuskan → MATI', g.keadaan === 'MATI');
+            await openai.tutup();
+          }
         } catch (e) {
           console.log('ASISTEN-SMOKE-ERR', e && e.stack);
           hasil.galat = false;

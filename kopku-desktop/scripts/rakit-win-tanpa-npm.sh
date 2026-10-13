@@ -27,6 +27,10 @@ OUT=dist/win-unpacked
 rm -rf "$OUT" && mkdir -p "$OUT"
 unzip -q "$ELECTRON_ZIP" -d "$OUT"
 rm -f "$OUT/resources/default_app.asar"
+# 1.0.31 — penghubung resmi OpenAI Secure MCP Tunnel (ChatGPT) di luar app.asar agar dapat dijalankan.
+if [ ! -f vendor/openai-tunnel/win32-x64/tunnel-client-runtime.exe ]; then sh scripts/siapkan-tunnel-openai.sh; fi
+mkdir -p "$OUT/resources/openai-tunnel"
+cp vendor/openai-tunnel/win32-x64/tunnel-client-runtime.exe vendor/openai-tunnel/win32-x64/LICENSE vendor/openai-tunnel/win32-x64/NOTICE vendor/openai-tunnel/win32-x64/SUMBER.txt "$OUT/resources/openai-tunnel/"
 APP="dist/app-staging"
 rm -rf "$APP" && mkdir -p "$APP"
 mkdir -p "$APP/build" "$APP/node_modules"
