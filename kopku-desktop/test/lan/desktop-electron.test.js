@@ -272,8 +272,8 @@ test('menu Berkas › Asisten AI… membuka layar Pengaturan', () => {
   assert.deepEqual(win.webContents.menuTerkirim.slice(-1), ['asistenai']);
 });
 
-function klienStdio(dataDir) {
-  const p = spawn(process.execPath, [path.join(ROOT, 'electron', 'mcp', 'stdio.js'), '--data', dataDir], { stdio: ['pipe', 'pipe', 'ignore'] });
+function klienStdio(dataDir, entri) {
+  const p = entri ? spawn(entri.command, entri.args, { stdio: ['pipe', 'pipe', 'ignore'] }) : spawn(process.execPath, [path.join(ROOT, 'electron', 'mcp', 'stdio.js'), '--data', dataDir], { stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   const tunggu = new Map();
   p.stdout.on('data', (c) => {
@@ -322,11 +322,13 @@ test('Asisten AI ON (main.js ASLI): Claude Desktop (stdio) → host → preload 
   assert.equal(r.value.pengguna.username, 'admin');
   assert.equal(r.value.claude.cocok, true, 'entri "kopku" otomatis dipasang ke Claude Desktop');
   const conf = JSON.parse(fs.readFileSync(path.join(folderClaude, 'claude_desktop_config.json'), 'utf8'));
-  assert.equal(conf.mcpServers.kopku.command, process.execPath);
-  assert.deepEqual(conf.mcpServers.kopku.args, [path.join(ROOT), '--kopku-mcp-stdio', '--data', m.userData], 'dari source: folder aplikasi sebagai argumen pertama');
+  // 1.0.26: Node.js terpasang dipakai (stdin KOPKU Desktop.exe tertutup seketika di Windows).
+  assert.equal(r.value.runtime.jenis, 'node');
+  assert.equal(conf.mcpServers.kopku.command, r.value.runtime.path);
+  assert.deepEqual(conf.mcpServers.kopku.args, [path.join(m.userData, 'mcp', 'server', 'stdio.js'), '--data', m.userData]);
 
   const sebelum = await hitungSemuaTabel();
-  const c = klienStdio(m.userData);
+  const c = klienStdio(m.userData, conf.mcpServers.kopku); // persis seperti Claude Desktop
   try {
     await c.kirim('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
     const daftar = await c.kirim('tools/list', {});

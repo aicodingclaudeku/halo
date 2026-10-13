@@ -52284,9 +52284,12 @@ function AsistenAiScreen() {
   // ---------------- aksi
   const ubahAktif = (v) => {
     const terapkan = () =>
-      jalankan('aktif', () => A.atur({ aktif: v, penggunaId: pid }), v
-        ? 'Asisten AI menyala. Tutup Claude Desktop sepenuhnya lalu buka lagi agar konektor "kopku" terbaca.'
-        : 'Asisten AI dimatikan. Claude tidak dapat membaca data KOPKU lagi.');
+      jalankan('aktif', () => A.atur({ aktif: v, penggunaId: pid }), (x) =>
+        !v
+          ? 'Asisten AI dimatikan. Claude tidak dapat membaca data KOPKU lagi.'
+          : x && x.ekstensi
+            ? 'Asisten AI menyala. Node.js tidak ditemukan, jadi konektor dibuat sebagai ekstensi Claude: klik "Install" di Claude Desktop, lalu aktifkan "KOPKU — Asisten AI Koperasi".'
+            : 'Asisten AI menyala. Tutup Claude Desktop sepenuhnya lalu buka lagi agar konektor "kopku" terbaca.');
     if (!v) return terapkan();
     notify(
       'Hubungkan KOPKU ke Claude?',
@@ -52309,6 +52312,7 @@ function AsistenAiScreen() {
   };
   const pasang = () =>
     jalankan('pasang', () => A.pasangClaude(pid), (x) => {
+      if (x && x.ekstensi) return 'Node.js tidak ditemukan, jadi konektor dibuat sebagai ekstensi Claude (.mcpb). Klik "Install" di Claude Desktop.';
       const n = x && x.hasilPasang ? x.hasilPasang.diubah.length + x.hasilPasang.tetap.length : 0;
       return 'Konektor "kopku" terdaftar di Claude Desktop' + (n > 1 ? ` (${n} lokasi)` : '') + '. Tutup Claude Desktop sepenuhnya (ikon di tray › Quit) lalu buka lagi.';
     });
@@ -52403,6 +52407,13 @@ function AsistenAiScreen() {
           cl.terpasang ? h(Tombol, { label: 'Lepas', ikon: 'unlink-outline', bahaya: true, onPress: lepas, sibuk: sibuk === 'lepas', disabled: !bolehUbah || !pid }) : null
         ),
         lokasiTerpasang.length ? h(Text, { style: s.catatan }, 'Terdaftar di: ' + lokasiTerpasang.map((l) => l.berkas).join(' · ')) : null,
+        st.runtime && st.runtime.jenis === 'node'
+          ? h(View, { style: s.infoBaris }, h(Ionicons, { name: 'checkmark-circle', size: 15, color: C.success }), h(Text, { style: s.catatan }, 'Claude menjalankan konektor dengan Node.js ' + (st.runtime.versi || '') + ' (' + st.runtime.path + ').'))
+          : st.runtime && st.runtime.perluEkstensi
+            ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder }] },
+                h(Ionicons, { name: 'information-circle-outline', size: 16, color: C.warning }),
+                h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'Node.js tidak ditemukan di komputer ini. Konektor dipasang sebagai ekstensi Claude (.mcpb) yang memakai Node.js bawaan Claude Desktop — klik "Install" saat Claude Desktop menampilkannya. Alternatif: pasang Node.js LTS (nodejs.org), lalu klik "Pasang ulang ke Claude Desktop".'))
+            : null,
         lokasiRusak.length ? h(View, { style: s.galat }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, 'Berkas konfigurasi Claude rusak (bukan JSON sah), tidak diubah: ' + lokasiRusak.map((l) => l.berkas).join(', ') + '. Perbaiki berkas itu atau pakai Pasang manual.')) : null,
         lokasiLain.length ? h(View, { style: s.galat }, h(Ionicons, { name: 'alert-circle', size: 16, color: C.danger }), h(Text, { style: s.galatTeks }, 'Sudah ada server bernama "kopku" milik program lain di ' + lokasiLain.map((l) => l.berkas).join(', ') + ' — tidak ditimpa.')) : null
       ),

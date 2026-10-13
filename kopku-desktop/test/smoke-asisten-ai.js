@@ -36,7 +36,7 @@ module.exports = (win, app) => {
     // Lingkungan seperti Claude Desktop: tanpa variabel uji/Electron milik proses KOPKU ini.
     const env = Object.fromEntries(Object.entries(process.env).filter(([k2]) => !/^(KOPKU_|ELECTRON_|CHROME_)/.test(k2)));
     // Linux sebagai root (container uji): Chromium mewajibkan --no-sandbox sebelum JS berjalan. Tidak berlaku di Windows/macOS.
-    const args = process.platform === 'linux' && process.getuid && process.getuid() === 0 ? ['--no-sandbox', ...entri.args] : entri.args;
+    const args = process.platform === 'linux' && process.getuid && process.getuid() === 0 && entri.args.includes('--kopku-mcp-stdio') ? ['--no-sandbox', ...entri.args] : entri.args;
     const p = spawn(entri.command, args, { stdio: ['pipe', 'pipe', 'pipe'], env });
     let galat = '';
     let buf = '';
@@ -135,12 +135,13 @@ module.exports = (win, app) => {
           cek('entri "kopku" terpasang & cocok di Claude Desktop', st.claude.terpasang && st.claude.cocok, st.claude.lokasi.map((l) => l.berkas).join(','));
           const berkasConf = st.claude.lokasi.find((l) => l.terpasang).berkas;
           const entri = JSON.parse(fs.readFileSync(berkasConf, 'utf8')).mcpServers.kopku;
-          cek('entri menjalankan exe KOPKU (tanpa Node.js, tanpa ELECTRON_RUN_AS_NODE)', entri.command === process.execPath && entri.args.includes('--kopku-mcp-stdio') && !entri.env, JSON.stringify(entri));
+          // 1.0.26: Node.js terpasang → node + salinan server di folder data (exe: stdin tertutup di Windows).
+          cek('entri menjalankan Node.js + server lokal (tanpa ELECTRON_RUN_AS_NODE)', st.runtime.jenis === 'node' && entri.command === st.runtime.path && /mcp[\\/]server[\\/]stdio\.js$/.test(entri.args[0]) && !entri.env, JSON.stringify(entri));
 
           // ---- jalankan entri persis seperti Claude Desktop
           const c = klienDariConfig(entri);
           const init = await c.kirim('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '0.1.0' } });
-          cek('Electron --kopku-mcp-stdio: initialize', init.result && init.result.serverInfo.name === 'kopku');
+          cek('entri Claude: initialize', init.result && init.result.serverInfo.name === 'kopku');
           const daftar = await c.kirim('tools/list', {});
           cek('tools/list (per anggota OFF → 7 alat)', daftar.result.tools.length === 7, String(daftar.result.tools.length));
           const r = await c.kirim('tools/call', { name: 'ringkasan_koperasi', arguments: {} });

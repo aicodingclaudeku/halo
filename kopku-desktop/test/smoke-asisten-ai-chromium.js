@@ -292,7 +292,7 @@ function klienStdio(perintah, args) {
   await pg.keyboard.press('Enter'); // tutup notifikasi "Berhasil"
   await pg.waitForTimeout(500);
   const conf1 = JSON.parse(fs.readFileSync(path.join(folderClaude, 'claude_desktop_config.json'), 'utf8'));
-  ok('entri "kopku" ditulis ke claude_desktop_config.json', conf1.mcpServers.kopku && conf1.mcpServers.kopku.args.includes('--kopku-mcp-stdio') && conf1.mcpServers.kopku.args.includes(dataDir), JSON.stringify(conf1.mcpServers.kopku));
+  ok('entri "kopku" ditulis ke claude_desktop_config.json (Node.js + server lokal)', conf1.mcpServers.kopku && /mcp[\\/]server[\\/]stdio\.js$/.test(conf1.mcpServers.kopku.args[0]) && conf1.mcpServers.kopku.args.includes(dataDir), JSON.stringify(conf1.mcpServers.kopku));
   ok('server MCP lain & preferensi Claude tidak disentuh', JSON.stringify(conf1.mcpServers.Blender) === JSON.stringify(BLENDER) && conf1.preferences.tema === 'gelap');
   ok('cadangan konfigurasi Claude dibuat', fs.readdirSync(folderClaude).some((f) => /kopku-cadangan-\d+\.json$/.test(f)));
   ok('host MCP menyala di 127.0.0.1 (endpoint.json)', mcp.berjalan && fs.existsSync(path.join(dataDir, 'mcp', 'endpoint.json')));
@@ -305,7 +305,7 @@ function klienStdio(perintah, args) {
   ok('data per anggota diizinkan', mcp.baca().perAnggota === true);
 
   // ---- klien MCP stdio sungguhan (seperti Claude Desktop)
-  const k = klienStdio(process.execPath, [path.join(ROOT, 'electron', 'mcp', 'stdio.js'), '--data', dataDir]);
+  const k = klienStdio(conf1.mcpServers.kopku.command, conf1.mcpServers.kopku.args); // persis seperti Claude Desktop
   const init = await k.kirim('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '0.1' } });
   ok('initialize MCP', init.result && init.result.serverInfo.name === 'kopku');
   const daftar = await k.kirim('tools/list', {});
@@ -333,7 +333,7 @@ function klienStdio(perintah, args) {
   await pg.evaluate(() => { const b = [...document.querySelectorAll('[role=button]')].find((x) => /Tampilkan konfigurasi/.test(x.innerText || '')); b && b.click(); });
   await pg.waitForTimeout(500);
   teks = await pg.evaluate(() => document.body.innerText);
-  ok('pasang manual menampilkan potongan JSON', /"mcpServers"/.test(teks) && /--kopku-mcp-stdio/.test(teks));
+  ok('pasang manual menampilkan potongan JSON', /"mcpServers"/.test(teks) && /stdio\.js/.test(teks) && /Node\.js v\d+/.test(teks));
   await pg.screenshot({ path: path.join(OUT, '44-pasang-manual.png'), fullPage: true });
   await pg.evaluate(() => { const b = [...document.querySelectorAll('[role=button]')].filter((x) => /Salin$/.test((x.innerText || '').trim())); b[1] && b[1].click(); });
   await pg.waitForTimeout(800);

@@ -1,6 +1,12 @@
-# KOPKU Desktop 1.0.25 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.26 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.26 — perbaikan Asisten AI di Windows ("kopku — Gagal: Server disconnected")
+- **Penyebab:** Claude Desktop menjalankan `KOPKU Desktop.exe --kopku-mcp-stdio`; di Windows stdin proses Electron (aplikasi GUI) langsung tertutup, sehingga server keluar ±0,3 detik setelah start (log Claude: "Server transport closed unexpectedly"). Di Linux tidak terjadi, sehingga uji 1.0.25 tidak menangkapnya.
+- **Perbaikan:** konektor kini dijalankan dengan **Node.js** yang terpasang (`node.exe <folder data>\mcp\server\stdio.js --data <folder data>`; salinan server ditulis otomatis). **Tanpa Node.js** di Windows → menyalakan Asisten AI otomatis membuat & membuka **ekstensi Claude `.mcpb`** (Node.js bawaan Claude Desktop). Exe hanya cadangan terakhir.
+- **Entri lama 1.0.25 diperbaiki otomatis** saat KOPKU 1.0.26 dibuka (bila Asisten AI menyala). Layar menampilkan Node.js yang dipakai, atau peringatan bila Node.js tidak ada.
+- Uji: `test:mcp` 17/17 (baru: pencarian Node, server lokal dijalankan Node persis seperti entri Claude, Windows tanpa Node → ekstensi, migrasi entri 1.0.25), `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 25/25, Electron nyata 14/14.
 
 ## Yang baru di 1.0.25 — Pengaturan › Asisten AI (MCP untuk Claude; skema database TETAP v82)
 Tanpa migrasi database; perhitungan tidak berubah. Rincian & bukti: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md`.

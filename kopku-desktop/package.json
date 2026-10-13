@@ -1,7 +1,7 @@
 {
   "name": "kopku-desktop",
   "productName": "KOPKU Desktop",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "KOPKU Desktop untuk Windows — source Electron + UI yang sudah di-build (renderer/). UI berasal dari source aplikasi KOPKU (src/, app/).",
   "author": "KOPKU",
   "private": true,

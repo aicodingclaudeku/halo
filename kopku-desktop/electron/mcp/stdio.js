@@ -161,11 +161,14 @@ function jalankanStdio(opsi = {}) {
   const o = { dataDir: opsi.dataDir || argData(process.argv) || folderDataBawaan(), host: opsi.host };
   let sisa = '';
   let antre = Promise.resolve();
+  let jumlahPesan = 0;
+  let ditutup = false;
   const tulis = (obj) => {
     if (obj) stdout.write(JSON.stringify(obj) + '\n');
   };
   const proses = (baris) => {
     if (!baris.trim()) return;
+    jumlahPesan++;
     let msg;
     try {
       msg = JSON.parse(baris);
@@ -204,8 +207,14 @@ function jalankanStdio(opsi = {}) {
       }
     });
     const selesai = () => {
+      if (ditutup) return;
+      ditutup = true;
       if (sisa.trim()) proses(sisa);
       sisa = '';
+      stderr.write(`[kopku-mcp] stdin ditutup setelah ${jumlahPesan} pesan\n`);
+      if (jumlahPesan === 0 && process.versions.electron) {
+        stderr.write('[kopku-mcp] stdin proses KOPKU Desktop.exe tidak dapat dibaca (Windows). Buka KOPKU › Pengaturan › Asisten AI › "Pasang ulang ke Claude Desktop" (memakai Node.js) atau "Buat & buka ekstensi".\n');
+      }
       antre.then(resolve, resolve);
     };
     stdin.on('end', selesai);

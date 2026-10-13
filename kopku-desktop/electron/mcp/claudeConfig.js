@@ -50,12 +50,22 @@ function entriKopku({ execPath, dataDir, appPath = null }) {
   return { command: execPath, args: [...(appPath ? [appPath] : []), SAKLAR, '--data', dataDir] };
 }
 
+/**
+ * Entri MCP yang menjalankan server stdio dengan Node.js terpasang (cara utama sejak 1.0.26;
+ * stdin proses Electron GUI di Windows tertutup seketika — lihat serverLokal.js).
+ * @param {{ nodePath:string, serverPath:string, dataDir:string }} o
+ */
+function entriNode({ nodePath, serverPath, dataDir }) {
+  return { command: nodePath, args: [serverPath, '--data', dataDir] };
+}
+
 /** Apakah entri MCP ini dibuat oleh KOPKU Desktop (versi mana pun). */
 function entriMilikKopku(e) {
   if (!e || typeof e !== 'object') return false;
   const args = Array.isArray(e.args) ? e.args.map(String) : [];
   if (args.includes(SAKLAR)) return true;
   if (args.some((a) => /kopku-mcp[\\/]+stdio\.js$/i.test(a) || /[\\/]electron[\\/]+mcp[\\/]+stdio\.js$/i.test(a))) return true;
+  if (args.includes('--data') && args.some((a) => /[\\/]mcp[\\/]+server[\\/]+stdio\.js$/i.test(a))) return true;
   const cmd = String(e.command || '');
   return /KOPKU Desktop(\.exe)?$/i.test(cmd) && !!(e.env && e.env.ELECTRON_RUN_AS_NODE);
 }
@@ -206,4 +216,4 @@ function potonganManual(entri) {
   return JSON.stringify({ mcpServers: { [NAMA_ENTRI]: entri } }, null, 2);
 }
 
-module.exports = { folderClaude, entriKopku, entriMilikKopku, statusClaude, pasangKeClaude, lepasDariClaude, perbaruiBilaBerubah, potonganManual, NAMA_ENTRI, SAKLAR };
+module.exports = { folderClaude, entriKopku, entriNode, entriMilikKopku, statusClaude, pasangKeClaude, lepasDariClaude, perbaruiBilaBerubah, potonganManual, NAMA_ENTRI, SAKLAR };

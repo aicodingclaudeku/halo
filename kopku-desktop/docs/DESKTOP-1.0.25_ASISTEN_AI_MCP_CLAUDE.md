@@ -136,3 +136,26 @@ Menjalankan uji Electron nyata:
 ```bash
 KOPKU_USERDATA=/tmp/ud KOPKU_CLAUDE_HOME=/tmp/claude KOPKU_SMOKE=$PWD/test/smoke-asisten-ai.js KOPKU_SMOKE_OUT=/tmp/hasil npx electron .
 ```
+
+## §I 1.0.26 — perbaikan Windows: "kopku — Gagal / Server disconnected"
+
+**Temuan (log Claude Desktop pengguna, Windows 11):** `Server started and connected successfully` →
+`[kopku-mcp] siap · data: C:\Users\…\KOPKU Desktop` → ±0,3 detik kemudian `Server transport closed
+unexpectedly`. Proses `KOPKU Desktop.exe --kopku-mcp-stdio` keluar sebelum menjawab `initialize`: stdin
+proses Electron (subsistem GUI) di Windows tertutup seketika. Pola yang sama terlihat pada log versi 1.0.13
+(9–11 Okt). Di Linux (lingkungan uji) stdin Electron berfungsi, sehingga uji 1.0.25 lulus.
+
+**Perbaikan (`electron/mcp/serverLokal.js`, `ipc.js`, `claudeConfig.js`):**
+1. Node.js ≥ 18 dicari (PATH, `Program Files\nodejs`, nvm, Homebrew, Volta) dan diuji `node -v`.
+   Ada → entri `{ command: "<node.exe>", args: ["<userData>\mcp\server\stdio.js", "--data", "<userData>"] }`;
+   `stdio.js` + `katalog.js` disalin dari app.asar ke folder data (ditulis ulang hanya bila berbeda).
+2. Windows tanpa Node.js → menyalakan Asisten AI / "Pasang ke Claude Desktop" membuat & membuka paket
+   `.mcpb` (Node.js bawaan Claude Desktop); tidak ada entri exe yang pasti gagal.
+3. Saat KOPKU dibuka dan Asisten AI menyala, entri `kopku` milik KOPKU (termasuk entri exe 1.0.25)
+   diperbarui otomatis ke cara 1 (cadangan konfigurasi dibuat; server lain tidak disentuh).
+4. Server stdio menulis ke stderr (tampil di log Claude) "stdin ditutup setelah N pesan" dan petunjuk
+   bila N = 0 di dalam exe.
+
+**Langkah pengguna setelah memasang 1.0.26:** buka KOPKU Desktop (entri diperbarui otomatis), lalu tutup
+Claude Desktop sepenuhnya (tray › Quit) dan buka lagi. Di Claude › Settings › Developer, "kopku" harus
+berstatus *running*; Perintah = `C:\Program Files\nodejs\node.exe`.

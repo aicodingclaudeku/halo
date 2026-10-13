@@ -313,3 +313,121 @@ test('pemasang menu: idempoten, dapat dilepas, bundle kembali byte-identik', () 
   assert.throws(() => ai.pasang(lan.lepas(tanpa), sumber), /LAN & WhatsApp belum terpasang/);
   for (const k of ["AsistenAi:n('pengaturan')", "'AsistenAi','Asisten AI','sparkles-outline'", "route:'AsistenAi'", "'asistenai'===e", 'name:"AsistenAi",component:']) assert.equal(teks.split(k).length - 1, 1, k);
 });
+
+// ---------------------------------------------------------------- 1.0.26: Node.js / ekstensi (temuan Windows)
+const { siapkanServerLokal, cariNode, kandidatNode } = require(path.join(ROOT, 'electron/mcp/serverLokal'));
+const { daftarkanIpcAsistenAi } = require(path.join(ROOT, 'electron/mcp/ipc'));
+const claudeConfig = require(path.join(ROOT, 'electron/mcp/claudeConfig'));
+
+test('1.0.26: cariNode — PATH & lokasi umum Windows, hanya Node ≥ 18 yang dapat dijalankan', () => {
+  const rumah = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-node-'));
+  const pf = path.join(rumah, 'Program Files');
+  fs.mkdirSync(path.join(pf, 'nodejs'), { recursive: true });
+  fs.writeFileSync(path.join(pf, 'nodejs', 'node.exe'), '');
+  const lama = path.join(rumah, 'lama');
+  fs.mkdirSync(lama);
+  fs.writeFileSync(path.join(lama, 'node.exe'), '');
+  const env = { PATH: `${lama};C:\\tidak-ada`, ProgramFiles: pf };
+  const versi = { [path.join(lama, 'node.exe')]: 'v16.20.0', [path.join(pf, 'nodejs', 'node.exe')]: 'v22.11.0' };
+  const n = cariNode({ platform: 'win32', env, home: rumah, jalankan: (f) => versi[f] });
+  assert.deepEqual(n, { path: path.join(pf, 'nodejs', 'node.exe'), versi: 'v22.11.0' }, 'Node 16 di PATH dilewati');
+  assert.equal(cariNode({ platform: 'win32', env: { PATH: '' , ProgramFiles: path.join(rumah, 'kosong') }, home: rumah, jalankan: () => 'v22.0.0' }), null);
+  assert.ok(kandidatNode({ platform: 'darwin', env: { PATH: '' }, home: '/Users/u' }).includes('/opt/homebrew/bin/node'));
+  // Node asli di komputer uji ditemukan dan dapat dijalankan
+  const asli = cariNode();
+  assert.ok(asli && /^v\d+/.test(asli.versi));
+});
+
+test('1.0.26: server lokal disalin ke folder data & dijalankan Node.js persis seperti entri Claude', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-srv-'));
+  const f = siapkanServerLokal(dir);
+  assert.equal(f, path.join(dir, 'mcp', 'server', 'stdio.js'));
+  const mtime = fs.statSync(f).mtimeMs;
+  siapkanServerLokal(dir);
+  assert.equal(fs.statSync(f).mtimeMs, mtime, 'tidak ditulis ulang bila sama');
+  const entri = claudeConfig.entriNode({ nodePath: process.execPath, serverPath: f, dataDir: dataDir });
+  assert.equal(claudeConfig.entriMilikKopku(entri), true);
+  const p = spawn(entri.command, entri.args, { stdio: ['pipe', 'pipe', 'pipe'] });
+  let out = '';
+  let err = '';
+  p.stdout.on('data', (c) => (out += c));
+  p.stderr.on('data', (c) => (err += c));
+  p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+  p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
+  p.stdin.end();
+  await new Promise((r) => p.on('exit', r));
+  const b = out.trim().split('\n').map((l) => JSON.parse(l));
+  assert.equal(b[0].result.serverInfo.name, 'kopku');
+  assert.equal(b[1].result.tools.length, 14);
+  assert.match(err, /stdin ditutup setelah 2 pesan/);
+});
+
+function ipcUji({ platform, node, rumah, dir }) {
+  const handler = new Map();
+  const dibuka = [];
+  const h2 = new McpHost({ dataDir: dir, bridge, versi: '1.0.26', pastikanAdapter: async () => undefined });
+  const lingkungan = { platform: 'win32', env: { APPDATA: path.join(rumah, 'Roaming'), LOCALAPPDATA: path.join(rumah, 'Local') }, home: rumah };
+  daftarkanIpcAsistenAi({
+    h: (ch, fn) => handler.set(ch, fn),
+    host: h2,
+    dataDir: dir,
+    execPath: 'C:\\K\\KOPKU Desktop.exe',
+    appPath: null,
+    versi: '1.0.26',
+    ikon: path.join(ROOT, 'build', 'icon.png'),
+    shell: { openPath: async (p) => (dibuka.push(p), ''), showItemInFolder() {}, openExternal: async () => undefined },
+    clipboard: { writeText() {} },
+    lingkungan,
+    platform,
+    cariNode: () => node,
+  });
+  const config = () => JSON.parse(fs.readFileSync(path.join(rumah, 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
+  return { ipc: (ch, ...a) => handler.get(ch)(...a), dibuka, host: h2, config };
+}
+
+test('1.0.26: Windows + Node.js → entri "kopku" memakai node.exe (bukan KOPKU Desktop.exe)', async () => {
+  const rumah = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-rumah-'));
+  fs.mkdirSync(path.join(rumah, 'Roaming', 'Claude'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-data-'));
+  const u = ipcUji({ platform: 'win32', node: { path: 'C:\\Program Files\\nodejs\\node.exe', versi: 'v22.11.0' }, rumah, dir });
+  const st = await u.ipc('asistenAi:atur', { aktif: true, penggunaId: s.users.admin });
+  assert.equal(st.runtime.jenis, 'node');
+  assert.equal(st.claude.cocok, true);
+  assert.deepEqual(u.config().mcpServers.kopku, { command: 'C:\\Program Files\\nodejs\\node.exe', args: [path.join(dir, 'mcp', 'server', 'stdio.js'), '--data', dir] });
+  assert.ok(fs.existsSync(path.join(dir, 'mcp', 'server', 'katalog.js')));
+  assert.equal(u.dibuka.length, 0, 'tidak membuka ekstensi');
+  await u.host.henti();
+});
+
+test('1.0.26: Windows TANPA Node.js → menyalakan membuat & membuka ekstensi .mcpb (exe tidak dipakai)', async () => {
+  const rumah = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-rumah-'));
+  fs.mkdirSync(path.join(rumah, 'Roaming', 'Claude'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-data-'));
+  const u = ipcUji({ platform: 'win32', node: null, rumah, dir });
+  const st = await u.ipc('asistenAi:atur', { aktif: true, penggunaId: s.users.admin });
+  assert.equal(st.runtime.jenis, 'exe');
+  assert.equal(st.runtime.perluEkstensi, true);
+  assert.equal(st.cara, 'ekstensi');
+  assert.equal(st.ekstensi.dibuka, true);
+  assert.deepEqual(u.dibuka, [path.join(dir, 'mcp', 'KOPKU-Asisten-AI.mcpb')]);
+  assert.equal(fs.existsSync(path.join(rumah, 'Roaming', 'Claude', 'claude_desktop_config.json')), false, 'tidak ada entri exe yang gagal');
+  const p = await u.ipc('asistenAi:pasangClaude', s.users.admin);
+  assert.ok(p.ekstensi, 'Pasang ke Claude Desktop juga memakai ekstensi');
+  await u.host.henti();
+});
+
+test('1.0.26: entri lama 1.0.25 (KOPKU Desktop.exe --kopku-mcp-stdio) otomatis diganti ke Node.js saat KOPKU dibuka', async () => {
+  const rumah = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-rumah-'));
+  const folder = path.join(rumah, 'Roaming', 'Claude');
+  fs.mkdirSync(folder, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-data-'));
+  fs.mkdirSync(path.join(dir, 'mcp'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'mcp', 'pengaturan.json'), JSON.stringify({ aktif: true, perAnggota: false, cara: 'config', pengguna: { id: s.users.admin, nama: 'A', username: 'admin' } }));
+  const blender = { command: 'uvx', args: ['blender-mcp'] };
+  fs.writeFileSync(path.join(folder, 'claude_desktop_config.json'), JSON.stringify({ mcpServers: { Blender: blender, kopku: { command: 'D:\\kopku\\KOPKU Desktop\\KOPKU Desktop.exe', args: ['--kopku-mcp-stdio', '--data', dir] } } }));
+  const u = ipcUji({ platform: 'win32', node: { path: 'C:\\Program Files\\nodejs\\node.exe', versi: 'v22.11.0' }, rumah, dir });
+  const c = u.config();
+  assert.equal(c.mcpServers.kopku.command, 'C:\\Program Files\\nodejs\\node.exe');
+  assert.deepEqual(c.mcpServers.Blender, blender);
+  assert.ok(fs.readdirSync(folder).some((f) => /kopku-cadangan/.test(f)));
+});

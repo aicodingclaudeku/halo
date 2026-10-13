@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const claudeConfig = require('./claudeConfig');
 const { buatMcpb } = require('./mcpb');
+const { siapkanServerLokal, cariNode } = require('./serverLokal');
 
 /**
  * @param {object} o
@@ -23,16 +24,54 @@ const { buatMcpb } = require('./mcpb');
  * @param {{ openPath:Function, showItemInFolder:Function, openExternal:Function }} o.shell
  * @param {{ writeText:Function }} o.clipboard
  * @param {object} [o.lingkungan] lokasi Claude Desktop tiruan (uji)
+ * @param {string} [o.platform] process.platform (uji)
+ * @param {Function} [o.cariNode] pencari Node.js (uji)
  */
 function daftarkanIpcAsistenAi(o) {
   const { h, host, dataDir, lingkungan } = o;
-  const entri = () => claudeConfig.entriKopku({ execPath: o.execPath, dataDir, appPath: o.appPath || null });
+  const platform = o.platform || process.platform;
+  // 1.0.26 — Node.js terpasang dipakai lebih dulu: stdin `KOPKU Desktop.exe` (aplikasi GUI Electron)
+  // tertutup seketika di Windows sehingga Claude melapor "Server disconnected" (lihat serverLokal.js).
+  let node;
+  const deteksiNode = (ulang) => {
+    if (ulang || node === undefined) {
+      try {
+        node = (o.cariNode || cariNode)();
+      } catch {
+        node = null;
+      }
+    }
+    return node;
+  };
+  const entri = () => {
+    const n = deteksiNode();
+    if (n) return claudeConfig.entriNode({ nodePath: n.path, serverPath: siapkanServerLokal(dataDir), dataDir });
+    return claudeConfig.entriKopku({ execPath: o.execPath, dataDir, appPath: o.appPath || null });
+  };
+  /** Tanpa Node.js di Windows, exe tidak dapat dipakai Claude → ekstensi .mcpb (Node.js bawaan Claude). */
+  const perluEkstensi = () => !deteksiNode() && platform === 'win32';
+  const runtime = () => {
+    const n = deteksiNode();
+    return n ? { jenis: 'node', path: n.path, versi: n.versi } : { jenis: 'exe', path: o.execPath, perluEkstensi: platform === 'win32' };
+  };
   const statusLengkap = () =>
     Object.assign(host.status(), {
       claude: claudeConfig.statusClaude({ entri: entri(), lingkungan }),
+      runtime: runtime(),
       riwayat: host.riwayat(15),
       potonganManual: claudeConfig.potonganManual(entri()),
     });
+  const buatEkstensi = async (penggunaId) => {
+    const tujuan = path.join(dataDir, 'mcp', 'KOPKU-Asisten-AI.mcpb');
+    buatMcpb({ tujuan, versi: o.versi, dataDir, ikon: o.ikon });
+    // Satu cara saja: entri konfigurasi dilepas agar "kopku" tidak muncul dua kali di Claude Desktop.
+    claudeConfig.lepasDariClaude({ lingkungan });
+    await host.atur({ cara: 'ekstensi', penggunaId });
+    // Dibuka dengan aplikasi yang terdaftar untuk .mcpb (Claude Desktop) → dialog "Install".
+    const galatBuka = await o.shell.openPath(tujuan);
+    if (galatBuka) o.shell.showItemInFolder(tujuan);
+    return { berkas: tujuan, dibuka: !galatBuka };
+  };
 
   h('asistenAi:status', () => statusLengkap());
   h('asistenAi:atur', async (input) => {
@@ -43,17 +82,22 @@ function daftarkanIpcAsistenAi(o) {
       penggunaId: i.penggunaId,
     });
     // Dinyalakan dengan cara bawaan (konfigurasi Claude Desktop) → pastikan entri "kopku" terpasang.
+    let ekstensi = null;
     if (i.aktif === true && st.cara === 'config') {
       try {
-        claudeConfig.pasangKeClaude({ entri: entri(), lingkungan });
+        deteksiNode(true);
+        if (perluEkstensi()) ekstensi = await buatEkstensi(i.penggunaId);
+        else claudeConfig.pasangKeClaude({ entri: entri(), lingkungan });
       } catch {
         /* ditampilkan di layar sebagai "belum terpasang" */
       }
     }
-    return statusLengkap();
+    return Object.assign(statusLengkap(), ekstensi ? { ekstensi } : {});
   });
   h('asistenAi:pasangClaude', async (penggunaId) => {
     await host._cekPengubah(penggunaId);
+    deteksiNode(true);
+    if (perluEkstensi()) return Object.assign({}, statusLengkap(), { ekstensi: await buatEkstensi(penggunaId) }, { cara: 'ekstensi' });
     const hasil = claudeConfig.pasangKeClaude({ entri: entri(), lingkungan });
     await host.atur({ cara: 'config', penggunaId });
     return Object.assign(statusLengkap(), { hasilPasang: hasil });
@@ -65,15 +109,7 @@ function daftarkanIpcAsistenAi(o) {
   });
   h('asistenAi:buatEkstensi', async (penggunaId) => {
     await host._cekPengubah(penggunaId);
-    const tujuan = path.join(dataDir, 'mcp', 'KOPKU-Asisten-AI.mcpb');
-    buatMcpb({ tujuan, versi: o.versi, dataDir, ikon: o.ikon });
-    // Satu cara saja: entri konfigurasi dilepas agar "kopku" tidak muncul dua kali di Claude Desktop.
-    claudeConfig.lepasDariClaude({ lingkungan });
-    await host.atur({ cara: 'ekstensi', penggunaId });
-    // Dibuka dengan aplikasi yang terdaftar untuk .mcpb (Claude Desktop) → dialog "Install".
-    const galatBuka = await o.shell.openPath(tujuan);
-    if (galatBuka) o.shell.showItemInFolder(tujuan);
-    return { berkas: tujuan, dibuka: !galatBuka };
+    return buatEkstensi(penggunaId);
   });
   h('asistenAi:salin', async (teks) => {
     o.clipboard.writeText(String(teks || '').slice(0, 20000));
@@ -90,7 +126,8 @@ function daftarkanIpcAsistenAi(o) {
     return true;
   });
 
-  // KOPKU dipindah/diperbarui ke folder lain → entri "kopku" lama diarahkan ke exe ini.
+  // KOPKU dipindah/diperbarui, atau entri lama 1.0.25 (`KOPKU Desktop.exe --kopku-mcp-stdio`, gagal di
+  // Windows) → entri "kopku" milik KOPKU diperbarui ke cara yang berfungsi (Node.js) saat KOPKU dibuka.
   try {
     const p = host.baca();
     if (p.aktif && p.cara === 'config') claudeConfig.perbaruiBilaBerubah({ entri: entri(), lingkungan });
