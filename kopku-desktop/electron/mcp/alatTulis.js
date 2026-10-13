@@ -19,6 +19,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const V = require('../server/validasi');
 const { ALAT_TULIS } = require('./katalog');
+const { saring, samarkanTeks } = require('./privasi');
 
 class GalatTulis extends Error {
   constructor(pesan) {
@@ -205,7 +206,8 @@ const SIAPKAN = {
       ringkasan: { aksi: 'Ajukan pinjaman (belum dicairkan)', anggota: `${ag.nomorAnggota} — ${ag.namaLengkap}`, jumlah: rp(data.jumlahPinjaman), tenor: `${data.tenor} ${data.satuanTenor.toLowerCase()}`, jasa: `${data.persentaseJasa}% per periode (${data.metodeJasa})`, biayaAdmin: data.biayaAdminTipe === 'TIDAK_ADA' ? 'tidak ada' : `${data.biayaAdminTipe} ${data.biayaAdminNilai}`, denda: data.dendaAktif ? `${rp(data.dendaNilai)}/hari` : 'tidak ada', tanggal: data.tanggal, simulasi },
       eksekusi: async () => {
         const h = await k.panggil('pinjaman.ajukan', { data });
-        return { pinjamanId: h.id, nomorPinjaman: h.nomorPinjaman || null };
+        const det = await k.panggil('pinjaman.detail', { id: h.id }).catch(() => null);
+        return { nomorPinjaman: (det && det.pinjaman && det.pinjaman.nomorPinjaman) || h.nomorPinjaman || null, status: (det && det.pinjaman && det.pinjaman.status) || 'DIAJUKAN' };
       },
     };
   },
@@ -383,7 +385,8 @@ const PETA = new Map(ALAT_TULIS.map((a) => [a.name, a]));
  */
 async function jalankanAlatTulis(nama, args, k, toko, now = Date.now()) {
   const def = PETA.get(nama);
-  const teks = (obj, isError = false) => ({ content: [{ type: 'text', text: typeof obj === 'string' ? obj : JSON.stringify(obj) }], isError });
+  // 1.0.28 — semua keluaran disaring (data pribadi, ID teknis, jalur berkas, pesan internal).
+  const teks = (obj, isError = false) => ({ content: [{ type: 'text', text: typeof obj === 'string' ? samarkanTeks(obj) : JSON.stringify(saring(obj)) }], isError });
   if (!def) return teks(`Alat tidak dikenal: ${nama}`, true);
   if (!(await k.bolehAksi(def.resource, def.aksi))) return teks(`Pengguna KOPKU "${k.info.pengguna}" tidak punya izin ${def.aksi} pada ${def.resource} (Permission Matrix).`, true);
   const a = Object.assign({}, args && typeof args === 'object' ? args : {});

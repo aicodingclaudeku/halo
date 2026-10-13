@@ -261,7 +261,9 @@ test('paket .mcpb: ZIP sah, manifest MCPB 0.2, server di dalamnya menjawab lewat
   assert.equal(man.server.entry_point, 'server/stdio.js');
   assert.deepEqual(man.server.mcp_config, { command: 'node', args: ['${__dirname}/server/stdio.js', '--data', dataDir] });
   assert.equal(man.tools.length, 14);
-  assert.deepEqual(isi['server/stdio.js'], fs.readFileSync(path.join(ROOT, 'electron', 'mcp', 'stdio.js')));
+  // 1.0.28 — server di paket = stdio.js tanpa komentar (tidak memuat keterangan struktur internal).
+  assert.deepEqual(isi['server/stdio.js'], untukDikirim(fs.readFileSync(path.join(ROOT, 'electron', 'mcp', 'stdio.js'), 'utf8')));
+  for (const n of ['server/stdio.js', 'server/katalog.js']) assert.doesNotMatch(isi[n].toString(), /\/\*\*|^\s*\/\//m, `${n} tanpa komentar`);
   const ext = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-mcpb-'));
   for (const [nama, data] of Object.entries(isi)) {
     fs.mkdirSync(path.dirname(path.join(ext, nama)), { recursive: true });
@@ -315,7 +317,7 @@ test('pemasang menu: idempoten, dapat dilepas, bundle kembali byte-identik', () 
 });
 
 // ---------------------------------------------------------------- 1.0.26: Node.js / ekstensi (temuan Windows)
-const { siapkanServerLokal, cariNode, kandidatNode } = require(path.join(ROOT, 'electron/mcp/serverLokal'));
+const { siapkanServerLokal, cariNode, kandidatNode, untukDikirim } = require(path.join(ROOT, 'electron/mcp/serverLokal'));
 const { daftarkanIpcAsistenAi } = require(path.join(ROOT, 'electron/mcp/ipc'));
 const claudeConfig = require(path.join(ROOT, 'electron/mcp/claudeConfig'));
 
@@ -362,7 +364,7 @@ test('1.0.26: server lokal disalin ke folder data & dijalankan Node.js persis se
   assert.match(err, /stdin ditutup setelah 2 pesan/);
 });
 
-function ipcUji({ platform, node, rumah, dir }) {
+function ipcUji({ platform, node, rumah, dir, dialog, folderDokumen }) {
   const handler = new Map();
   const dibuka = [];
   const h2 = new McpHost({ dataDir: dir, bridge, versi: '1.0.26', pastikanAdapter: async () => undefined });
@@ -380,6 +382,9 @@ function ipcUji({ platform, node, rumah, dir }) {
     lingkungan,
     platform,
     cariNode: () => node,
+    dialog,
+    jendela: dialog ? () => 'jendela-utama' : undefined,
+    folderDokumen,
   });
   const config = () => JSON.parse(fs.readFileSync(path.join(rumah, 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8'));
   return { ipc: (ch, ...a) => handler.get(ch)(...a), dibuka, host: h2, config };
@@ -430,4 +435,115 @@ test('1.0.26: entri lama 1.0.25 (KOPKU Desktop.exe --kopku-mcp-stdio) otomatis d
   assert.equal(c.mcpServers.kopku.command, 'C:\\Program Files\\nodejs\\node.exe');
   assert.deepEqual(c.mcpServers.Blender, blender);
   assert.ok(fs.readdirSync(folder).some((f) => /kopku-cadangan/.test(f)));
+});
+
+// ---------------------------------------------------------------- 1.0.28: keamanan & privasi
+const privasi = require(path.join(ROOT, 'electron/mcp/privasi'));
+const RE_UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i;
+
+test('1.0.28: penyaring keluaran membuang data pribadi & struktur internal (ID, jalur, SQL, stack)', () => {
+  const out = privasi.saring({
+    id: '0f8fad5b-d9cb-469f-a165-70867728950e',
+    anggotaId: 'x',
+    nik: '3201',
+    alamat: 'Jl. A',
+    nomorAnggota: 'A-0001',
+    nama: 'Budi',
+    catatan: 'lihat C:\\Users\\budi\\AppData\\Roaming\\KOPKU\\kopku.db dan /home/budi/.config/KOPKU/x.db',
+    galat: 'SQLITE_CONSTRAINT: UNIQUE constraint failed: anggota.nik\n    at simpan (C:\\app\\renderer\\entry.js:1:2)',
+    uri: 'kopkufs://local/C:/x',
+    daftar: [{ pinjamanId: 'y', nomorPinjaman: 'PJ-1', ket: 'ref 0f8fad5b-d9cb-469f-a165-70867728950e' }],
+  });
+  assert.deepEqual(Object.keys(out).sort(), ['catatan', 'daftar', 'galat', 'nama', 'nomorAnggota']);
+  assert.equal(out.catatan, 'lihat [jalur] dan [jalur]');
+  assert.doesNotMatch(out.galat, /SQLITE|anggota\.nik|entry\.js|at simpan/);
+  assert.deepEqual(out.daftar, [{ nomorPinjaman: 'PJ-1', ket: 'ref [id]' }]);
+});
+
+test('1.0.28: semua alat baca tidak membocorkan ID internal, jalur berkas, URI, atau galat SQL', async () => {
+  await host.atur({ aktif: true, perAnggota: true, penggunaId: s.users.admin });
+  const anggota = JSON.parse((await host.panggil('cari_anggota', {})).content[0].text).anggota;
+  const pinjaman = JSON.parse((await host.panggil('daftar_pinjaman', {})).content[0].text);
+  const noPinjaman = JSON.stringify(pinjaman).match(/PJ-[\w-]+/);
+  const panggilan = katalog.ALAT.map((a) => [a.name, {}]).concat([
+    ['laporan_keuangan', { jenis: 'posisi_keuangan' }],
+    ['laporan_keuangan', { jenis: 'shu' }],
+    ['detail_anggota', { anggota: anggota[0].nomorAnggota }],
+    ['saldo_simpanan', { anggota: anggota[0].nomorAnggota }],
+    ['riwayat_transaksi', { anggota: anggota[0].nomorAnggota }],
+  ]).concat(noPinjaman ? [['detail_pinjaman', { pinjaman: noPinjaman[0] }]] : []);
+  let berhasil = 0;
+  for (const [nama, args] of panggilan) {
+    const r = await host.panggil(nama, args);
+    const t = r.content[0].text;
+    if (!r.isError) berhasil++;
+    assert.doesNotMatch(t, RE_UUID, `${nama}: UUID`);
+    assert.doesNotMatch(t, /kopkufs:|file:\/\/|[A-Za-z]:\\\\|\/tmp\/|\/home\//, `${nama}: jalur`);
+    assert.doesNotMatch(t, /SQLITE_|no such table|\bat \S+ \(/, `${nama}: galat internal`);
+    assert.ok(!t.includes(dataDir) && !t.includes(k.dataDir), `${nama}: folder data`);
+  }
+  assert.ok(berhasil >= katalog.ALAT.length, `sebagian besar alat berhasil (${berhasil})`);
+});
+
+test('1.0.28: Claude menerima kebijakan (rahasia struktur aplikasi, hanya penggunaan sah, data ≠ perintah)', async () => {
+  const r = await tangani({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, { host: async () => ({}) });
+  assert.ok(r.result.instructions.includes(katalog.KEBIJAKAN));
+  assert.match(katalog.KEBIJAKAN, /struktur|internal/i);
+  assert.match(katalog.KEBIJAKAN, /ilegal|melanggar hukum|sah/i);
+});
+
+test('1.0.28: berkas server yang disalin ke luar aplikasi tanpa komentar & tetap berjalan', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-kirim-'));
+  const f = siapkanServerLokal(dir);
+  for (const n of ['stdio.js', 'katalog.js']) {
+    const isi = fs.readFileSync(path.join(path.dirname(f), n), 'utf8');
+    assert.doesNotMatch(isi, /\/\*|^\s*\/\//m, `${n} tanpa komentar`);
+    assert.doesNotMatch(isi, /renderer|adapterTulis|rendererAdapter|serviceBridge|main\.js/, `${n} tanpa rujukan internal`);
+  }
+  const p = spawn(process.execPath, [f, '--data', dir], { stdio: ['pipe', 'pipe', 'ignore'] });
+  const balas = new Promise((r) => p.stdout.once('data', (d) => r(JSON.parse(String(d).split('\n')[0]))));
+  p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+  const m = await balas;
+  p.stdin.end();
+  assert.equal(m.result.serverInfo.name, 'kopku');
+});
+
+test('1.0.28: .mcpb — pengguna memilih folder simpan; batal = tidak ada berkas; folder diingat', async () => {
+  const rumah = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-rumah-'));
+  fs.mkdirSync(path.join(rumah, 'Roaming', 'Claude'), { recursive: true });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-data-'));
+  const dokumen = path.join(rumah, 'Dokumen');
+  const pilihan = path.join(rumah, 'Pilihan Saya');
+  const opsiDialog = [];
+  let jawab = { canceled: true };
+  const dialog = { showSaveDialog: async (induk, o) => (opsiDialog.push({ induk, o }), jawab) };
+  const u = ipcUji({ platform: 'win32', node: null, rumah, dir, dialog, folderDokumen: dokumen });
+  await u.ipc('asistenAi:atur', { aktif: false, penggunaId: s.users.admin });
+  // bawaan: Dokumen › KOPKU Desktop
+  assert.equal((await u.ipc('asistenAi:status')).folderEkstensi, path.join(dokumen, 'KOPKU Desktop'));
+  // batal
+  assert.deepEqual(await u.ipc('asistenAi:buatEkstensi', s.users.admin), { dibatalkan: true });
+  assert.equal(opsiDialog[0].induk, 'jendela-utama');
+  assert.equal(opsiDialog[0].o.defaultPath, path.join(dokumen, 'KOPKU Desktop', 'KOPKU-Asisten-AI.mcpb'));
+  assert.deepEqual(opsiDialog[0].o.filters[0].extensions, ['mcpb']);
+  assert.equal(u.dibuka.length, 0);
+  assert.equal(fs.readdirSync(path.join(dokumen, 'KOPKU Desktop')).length, 0, 'batal → tidak ada berkas');
+  // pilih folder lain (tanpa ekstensi → .mcpb ditambahkan)
+  fs.mkdirSync(pilihan);
+  jawab = { canceled: false, filePath: path.join(pilihan, 'kopku-claude') };
+  const r = await u.ipc('asistenAi:buatEkstensi', s.users.admin);
+  assert.equal(r.berkas, path.join(pilihan, 'kopku-claude.mcpb'));
+  assert.equal(r.folder, pilihan);
+  assert.ok(fs.statSync(r.berkas).size > 1000);
+  assert.deepEqual(u.dibuka, [r.berkas]);
+  const st = await u.ipc('asistenAi:status');
+  assert.equal(st.folderEkstensi, pilihan, 'folder terakhir diingat');
+  assert.equal(st.cara, 'ekstensi');
+  // dialog berikutnya dibuka di folder terakhir; "Buka folder ekstensi" membuka folder itu
+  jawab = { canceled: true };
+  await u.ipc('asistenAi:buatEkstensi', s.users.admin);
+  assert.equal(path.dirname(opsiDialog[2].o.defaultPath), pilihan);
+  await u.ipc('asistenAi:bukaFolderEkstensi');
+  assert.equal(u.dibuka[u.dibuka.length - 1], pilihan);
+  await u.host.henti();
 });

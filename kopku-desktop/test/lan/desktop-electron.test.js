@@ -76,7 +76,7 @@ test('Desktop Mode: kanal IPC lama utuh, webPreferences aman tidak berubah, menu
   // DIPERBARUI 1.0.12: kanal konektor AI lokal 'mcp:*' ditambahkan.
   // DIPERBARUI 1.0.14: fitur Claude DIHAPUS (permintaan pengguna) → kanal 'mcp:*' tidak ada lagi.
   // DIPERBARUI 1.0.25: Pengaturan › Asisten AI (permintaan pengguna) → kanal 'asistenAi:*'.
-  assert.deepEqual(tambahan, ['asistenAi:atur', 'asistenAi:buatEkstensi', 'asistenAi:bukaFolder', 'asistenAi:lepasClaude', 'asistenAi:pasangClaude', 'asistenAi:salin', 'asistenAi:status', 'asistenAi:unduhClaude', 'lanmu:akses', 'lanmu:aksesSimpan', 'lanmu:atur', 'lanmu:aturWa', 'lanmu:audit', 'lanmu:bukaAdmin', 'lanmu:firewall', 'lanmu:perintahFirewall', 'lanmu:qr', 'lanmu:sesi', 'lanmu:sesiCabut', 'lanmu:status', 'lanmu:waHapusToken', 'lanmu:waInfo', 'lanmu:waJalankan', 'lanmu:waKredensial', 'lanmu:waLog', 'lanmu:waSimpan', 'lanmu:waTestKoneksi', 'lanmu:waTestPesan', 'lanmu:waToken']);
+  assert.deepEqual(tambahan, ['asistenAi:atur', 'asistenAi:buatEkstensi', 'asistenAi:bukaFolder', 'asistenAi:bukaFolderEkstensi', 'asistenAi:lepasClaude', 'asistenAi:pasangClaude', 'asistenAi:salin', 'asistenAi:status', 'asistenAi:unduhClaude', 'lanmu:akses', 'lanmu:aksesSimpan', 'lanmu:atur', 'lanmu:aturWa', 'lanmu:audit', 'lanmu:bukaAdmin', 'lanmu:firewall', 'lanmu:perintahFirewall', 'lanmu:qr', 'lanmu:sesi', 'lanmu:sesiCabut', 'lanmu:status', 'lanmu:waHapusToken', 'lanmu:waInfo', 'lanmu:waJalankan', 'lanmu:waKredensial', 'lanmu:waLog', 'lanmu:waSimpan', 'lanmu:waTestKoneksi', 'lanmu:waTestPesan', 'lanmu:waToken']);
   assert.ok(![...m.log.handle.keys()].some((c) => c.startsWith('mcp:')), 'tidak ada kanal konektor Claude');
   assert.deepEqual([...m.log.on.keys()].filter((c) => !KANAL_ON_ASLI.includes(c)), ['srv:reply']);
   const wp = win.opts.webPreferences;
@@ -406,8 +406,17 @@ test('Asisten AI ON (main.js ASLI): Claude Desktop (stdio) → host → preload 
 
 test('Asisten AI: ekstensi .mcpb & lepas dari Claude Desktop', async () => {
   const folderClaude = path.join(RUMAH_CLAUDE, 'Roaming', 'Claude');
+  // 1.0.28 — dialog "Simpan sebagai": batal = tidak ada berkas; lokasi pilihan pengguna dipakai.
+  const batal = await ipc('asistenAi:buatEkstensi', s.users.admin);
+  assert.deepEqual(batal.value, { dibatalkan: true });
+  const pilihan = path.join(RUMAH_CLAUDE, 'Pilihan', 'kopku.mcpb');
+  const asli = m.electron.dialog.showSaveDialog;
+  m.electron.dialog.showSaveDialog = async () => ({ canceled: false, filePath: pilihan });
   const e = await ipc('asistenAi:buatEkstensi', s.users.admin);
+  m.electron.dialog.showSaveDialog = asli;
   assert.equal(e.ok, true, JSON.stringify(e));
+  assert.equal(e.value.berkas, pilihan);
+  assert.equal((await ipc('asistenAi:status')).value.folderEkstensi, path.dirname(pilihan));
   assert.ok(fs.statSync(e.value.berkas).size > 1000);
   assert.equal(JSON.parse(fs.readFileSync(path.join(folderClaude, 'claude_desktop_config.json'), 'utf8')).mcpServers.kopku, undefined, 'tidak ganda');
   assert.equal((await ipc('asistenAi:status')).value.cara, 'ekstensi');

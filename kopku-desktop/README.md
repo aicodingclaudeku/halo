@@ -157,3 +157,6 @@ Menu: **Pengaturan › Asisten AI** (sidebar, *Semua Pengaturan*, `Ctrl+K` "ai"/
 
 ### Mengubah data lewat Claude (1.0.27, opsional)
 Sakelar **Izinkan Claude mengubah data** (bawaan mati, hanya Admin): Claude dapat mencatat transaksi, menambah/mengubah anggota, mengimpor Data Awal dari Excel, dan mengoreksi transaksi (jurnal pembalik). Setiap perubahan: pratinjau → persetujuan pengguna → simpan (kode konfirmasi sekali pakai), backup otomatis sebelumnya, aturan & izin KOPKU tetap berlaku. Rincian: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md` §J.
+### Keamanan, folder ekstensi & panduan (1.0.28)
+Keluaran alat disaring (tanpa ID teknis, jalur berkas, URI internal, galat SQL/stack; data pribadi tetap tidak dikirim); berkas server yang keluar dari aplikasi tanpa komentar; AI diberi kebijakan kerahasiaan & penggunaan sah; perubahan dibatasi 10/menit dan 120/jam. Ekstensi `.mcpb` disimpan di folder pilihan pengguna (bawaan Dokumen › KOPKU Desktop). Panduan animasi 10 slide di layar Asisten AI. Rincian: §K.
+

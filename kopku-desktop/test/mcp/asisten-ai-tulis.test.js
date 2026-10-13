@@ -102,7 +102,8 @@ before(async () => {
   const tulis = pasangAdapterTulis(indeksTulis(path.join(ROOT, 'renderer')));
   const fsh = new FsHost({ data: k.dataDir, documents: path.join(k.dataDir, 'documents'), cache: path.join(k.dataDir, 'cache') });
   dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-mcp-tulis-'));
-  host = new McpHost({ dataDir, bridge, versi: '1.0.27', pastikanAdapter: async () => undefined, tulis, salinKeCache: (p) => fsh.copyIntoCache(p) });
+  // Batas laju diuji tersendiri (lihat uji "batas laju"); di sini dilonggarkan agar alur lengkap dapat berjalan.
+  host = new McpHost({ dataDir, bridge, versi: '1.0.28', pastikanAdapter: async () => undefined, tulis, salinKeCache: (p) => fsh.copyIntoCache(p), batasUbah: [{ ms: 60000, maks: 1000, label: 'uji' }] });
   await host.atur({ aktif: true, penggunaId: s.users.admin });
   c = klienStdio(dataDir);
   await c.kirim('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
@@ -313,6 +314,25 @@ test('izin Permission Matrix per aksi & log perubahan', async () => {
   assert.match(log, /koreksi_transaksi\tBERHASIL\t\d+ms\tUBAH: Koreksi/);
   assert.doesNotMatch(log, /3201010101990002|081200001111|Jl\. Melati/, 'log tanpa data pribadi');
   assert.ok(host.status().pemakaian.perubahan >= 15);
+});
+
+test('1.0.28: batas laju perubahan — melewati batas ditolak dengan pesan jelas, pratinjau tetap boleh', async () => {
+  const lama = host.o.batasUbah;
+  host.o.batasUbah = [{ ms: 60000, maks: 1, label: '1 perubahan per menit' }];
+  host.waktuUbah = [];
+  try {
+    await pratinjauLaluSimpan('kas_masuk', { akun_pendapatan: '4-1500', nominal: 1000, tanggal: '2026-10-06', keterangan: 'uji batas 1' });
+    const args = { akun_pendapatan: '4-1500', nominal: 2000, tanggal: '2026-10-06', keterangan: 'uji batas 2' };
+    const p = await c.alat('kas_masuk', args);
+    assert.equal(p.j.status, 'MENUNGGU_KONFIRMASI', 'pratinjau tidak dibatasi');
+    const sebelum = await hitungSemuaTabel();
+    const h = await c.alat('kas_masuk', Object.assign({}, args, { konfirmasi: p.j.konfirmasi }));
+    assert.equal(h.isError, true);
+    assert.match(h.t, /Batas keamanan tercapai \(1 perubahan per menit\)/);
+    assert.deepEqual(await hitungSemuaTabel(), sebelum, 'tidak ada yang tersimpan');
+  } finally {
+    host.o.batasUbah = lama;
+  }
 });
 
 test('mematikan per anggota ikut mematikan ubah data; kode konfirmasi lama tidak berlaku', async () => {

@@ -25,9 +25,15 @@ const crypto = require('node:crypto');
 const { jalankanAlat, alatTersedia, hariIniLokal } = require('./alat');
 const { untukMcp, ALAT, ALAT_TULIS } = require('./katalog');
 const { jalankanAlatTulis } = require('./alatTulis');
+const { samarkanTeks } = require('./privasi');
 
 const NAMA_TULIS = new Set(ALAT_TULIS.map((a) => a.name));
 const JEDA_BACKUP_MS = 30 * 60 * 1000;
+// 1.0.28 — batas laju perubahan data (cegah AI "kebablasan" mengubah banyak data sekaligus; import Excel = 1 perubahan).
+const BATAS_UBAH = [
+  { ms: 60 * 1000, maks: 10, label: '10 perubahan per menit' },
+  { ms: 60 * 60 * 1000, maks: 120, label: '120 perubahan per jam' },
+];
 
 const BATAS_BADAN = 256 * 1024;
 const BATAS_LOG = 512 * 1024;
@@ -67,6 +73,7 @@ class McpHost {
     this.statistik = { total: 0, gagal: 0, terakhir: null, perubahan: 0 };
     this.kodeKonfirmasi = new Map(); // kode → { nama, sidik, kedaluwarsa } (sekali pakai)
     this.backupTerakhir = 0;
+    this.waktuUbah = []; // waktu setiap perubahan yang tersimpan (batas laju)
     this._antrean = Promise.resolve();
   }
 
@@ -284,12 +291,7 @@ class McpHost {
     const url = String(req.url || '').split('?')[0];
     if (req.method === 'GET' && url === '/alat') {
       return this._konteks()
-        .then(async (k) => {
-          const baca = await alatTersedia({ perAnggota: k.perAnggota, boleh: k.boleh });
-          const tulis = [];
-          if (k.bolehTulis) for (const a of ALAT_TULIS) if (await k.bolehAksi(a.resource, a.aksi)) tulis.push(a);
-          this._kirim(res, { tools: untukMcp(baca.concat(tulis)) });
-        })
+        .then(async (k) => this._kirim(res, { tools: await this._daftarDariKonteks(k) }))
         // Konteks gagal (mis. lisensi kedaluwarsa): tetap kirim katalog agar Claude memanggil alat dan menerima penjelasannya.
         .catch((e) => this._kirim(res, { tools: untukMcp(ALAT.filter((a) => this.baca().perAnggota || !a.perAnggota)), pesan: e.message }));
     }
@@ -316,6 +318,14 @@ class McpHost {
       return undefined;
     }
     return this._tolak(res, 404, 'Tidak ditemukan.');
+  }
+
+  /** Alat yang boleh dipakai pada pengaturan & izin saat ini. */
+  async _daftarDariKonteks(k) {
+    const baca = await alatTersedia({ perAnggota: k.perAnggota, boleh: k.boleh });
+    const tulis = [];
+    if (k.bolehTulis) for (const a of ALAT_TULIS) if (await k.bolehAksi(a.resource, a.aksi)) tulis.push(a);
+    return untukMcp(baca.concat(tulis));
   }
 
   /** Konteks pemanggilan: memeriksa ulang status, lisensi, dan pengguna SETIAP kali. */
@@ -377,6 +387,17 @@ class McpHost {
     };
   }
 
+  /** Batas laju perubahan: null bila boleh, atau pesan penolakan. */
+  _cekBatasUbah() {
+    const kini = this._now();
+    const batas = this.o.batasUbah || BATAS_UBAH;
+    this.waktuUbah = this.waktuUbah.filter((t) => kini - t < Math.max(0, ...batas.map((b) => b.ms)));
+    for (const b of batas) {
+      if (this.waktuUbah.filter((t) => kini - t < b.ms).length >= b.maks) return `Batas keamanan tercapai (${b.label}). Tunggu sebentar, atau lakukan input massal lewat Import Data Awal (Excel).`;
+    }
+    return null;
+  }
+
   /** Jalankan satu alat (dipakai HTTP & uji). */
   async panggil(nama, args) {
     const mulai = this._now();
@@ -385,11 +406,15 @@ class McpHost {
       const k = await this._konteks();
       const n = String(nama || '');
       if (NAMA_TULIS.has(n)) {
-        if (!k.bolehTulis) hasil = { content: [{ type: 'text', text: 'Perubahan data oleh Claude TIDAK diizinkan di KOPKU Desktop (Pengaturan › Asisten AI › "Izinkan Claude mengubah data"). Minta admin KOPKU menyalakannya, atau lakukan perubahan di aplikasi.' }], isError: true };
+        const adaKonfirmasi = args && typeof args === 'object' && typeof args.konfirmasi === 'string' && args.konfirmasi.trim();
+        const batas = adaKonfirmasi ? this._cekBatasUbah() : null;
+        if (!k.bolehTulis) {
+          hasil = { content: [{ type: 'text', text: 'Perubahan data oleh Claude TIDAK diizinkan di KOPKU Desktop (Pengaturan › Asisten AI › "Izinkan Claude mengubah data"). Minta admin KOPKU menyalakannya, atau lakukan perubahan di aplikasi.' }], isError: true };
+        } else if (batas) hasil = { content: [{ type: 'text', text: batas }], isError: true };
         else hasil = await jalankanAlatTulis(n, args, k, this.kodeKonfirmasi, this._now());
       } else hasil = await jalankanAlat(n, args, k);
     } catch (e) {
-      hasil = { content: [{ type: 'text', text: e && e.kode ? e.message : 'KOPKU Desktop belum siap. Pastikan aplikasi terbuka dan sudah masuk, lalu coba lagi.' }], isError: true };
+      hasil = { content: [{ type: 'text', text: e && e.kode ? samarkanTeks(String(e.message)) : 'KOPKU Desktop belum siap. Pastikan aplikasi terbuka dan sudah masuk, lalu coba lagi.' }], isError: true };
     }
     this.statistik.total++;
     if (hasil.isError) this.statistik.gagal++;
@@ -397,6 +422,7 @@ class McpHost {
     let ket = hasil.isError ? String(hasil.content[0].text).slice(0, 160) : '';
     if (!hasil.isError && hasil._ringkasLog) {
       this.statistik.perubahan++;
+      this.waktuUbah.push(this._now());
       ket = 'UBAH: ' + hasil._ringkasLog;
     } else if (!hasil.isError && NAMA_TULIS.has(String(nama)) && /MENUNGGU_KONFIRMASI|PRATINJAU_BERUBAH/.test(hasil.content[0].text)) ket = 'pratinjau (belum disimpan)';
     delete hasil._ringkasLog;

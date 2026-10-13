@@ -36,7 +36,7 @@ function pasangAdapterTulis(ids) {
   }
   function R(k) {
     const id = ids[k];
-    if (typeof id !== 'number' || typeof g.__r !== 'function') throw galat('LAYANAN_TIDAK_TERSEDIA', `Layanan ${k} tidak tersedia pada versi KOPKU ini.`);
+    if (typeof id !== 'number' || typeof g.__r !== 'function') throw galat('LAYANAN_TIDAK_TERSEDIA', 'Fitur ini tidak tersedia pada versi KOPKU ini.');
     return g.__r(id);
   }
   const db = () => R('db').getDb();

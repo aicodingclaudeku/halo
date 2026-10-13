@@ -167,6 +167,7 @@ contextBridge.exposeInMainWorld('kopkuDesktop', {
     salin: (teks) => call('asistenAi:salin', teks),
     bukaFolder: () => call('asistenAi:bukaFolder'),
     unduhClaude: () => call('asistenAi:unduhClaude'),
+    bukaFolderEkstensi: () => call('asistenAi:bukaFolderEkstensi'),
   },
 
   app: {

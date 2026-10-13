@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const { ALAT } = require('./katalog');
+const { untukDikirim } = require('./serverLokal');
 
 const TABEL_CRC = (() => {
   const t = new Uint32Array(256);
@@ -140,8 +141,9 @@ function manifest({ versi, dataDir }) {
 function buatMcpb({ tujuan, versi, dataDir, ikon = null, sumberDir = __dirname }) {
   const berkas = [
     { nama: 'manifest.json', isi: JSON.stringify(manifest({ versi, dataDir }), null, 2) },
-    { nama: 'server/stdio.js', isi: fs.readFileSync(path.join(sumberDir, 'stdio.js')) },
-    { nama: 'server/katalog.js', isi: fs.readFileSync(path.join(sumberDir, 'katalog.js')) },
+    // 1.0.28 — tanpa komentar (tidak memuat keterangan struktur internal KOPKU).
+    { nama: 'server/stdio.js', isi: untukDikirim(fs.readFileSync(path.join(sumberDir, 'stdio.js'), 'utf8')) },
+    { nama: 'server/katalog.js', isi: untukDikirim(fs.readFileSync(path.join(sumberDir, 'katalog.js'), 'utf8')) },
   ];
   if (ikon && fs.existsSync(ikon)) berkas.push({ nama: 'icon.png', isi: fs.readFileSync(ikon) });
   else berkas[0].isi = JSON.stringify(Object.assign(manifest({ versi, dataDir }), { icon: undefined }), null, 2);

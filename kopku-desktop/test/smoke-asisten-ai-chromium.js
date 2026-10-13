@@ -153,6 +153,7 @@ function klienStdio(perintah, args) {
   const handler = new Map();
   const dibuka = [];
   const disalin = [];
+  const judulDialog = [];
   daftarkanIpcAsistenAi({
     h: (ch, fn) => handler.set(ch, fn),
     host: mcp,
@@ -164,6 +165,8 @@ function klienStdio(perintah, args) {
     shell: { openPath: async (p) => (dibuka.push(p), ''), showItemInFolder() {}, openExternal: async (u) => dibuka.push(u) },
     clipboard: { writeText: (t) => disalin.push(t) },
     lingkungan: { platform: 'win32', env: { APPDATA: path.join(rumahClaude, 'Roaming'), LOCALAPPDATA: path.join(rumahClaude, 'Local') }, home: rumahClaude },
+    // 1.0.28 — dialog "Simpan sebagai" tiruan: pengguna menekan Simpan di lokasi yang diusulkan.
+    dialog: { showSaveDialog: async (_induk, o) => (judulDialog.push(o.title), { canceled: false, filePath: o.defaultPath }) },
   });
   await pg.exposeFunction('__asistenAi', async (ch, args) => {
     try {
@@ -220,6 +223,7 @@ function klienStdio(perintah, args) {
         salin: (t) => ai('asistenAi:salin', t),
         bukaFolder: () => ai('asistenAi:bukaFolder'),
         unduhClaude: () => ai('asistenAi:unduhClaude'),
+        bukaFolderEkstensi: () => ai('asistenAi:bukaFolderEkstensi'),
       },
       app: { openDataFolder: nol, onMenu() { return () => {}; }, setTitle() {} },
     };
@@ -292,6 +296,32 @@ function klienStdio(perintah, args) {
   ok('layar Asisten AI terbuka (bawaan mati)', /Hubungkan ke Claude/.test(teks) && /\bOFF\b/.test(teks) && /Belum terpasang/.test(teks), teks.slice(0, 120).replace(/\n/g, ' | '));
   ok('Claude Desktop terdeteksi dari folder konfigurasi', /Claude Desktop terdeteksi/.test(teks));
   ok('menu "Asisten AI" ada di sidebar Pengaturan (setelah LAN & WhatsApp)', /LAN & WhatsApp\s*\n\s*Asisten AI/.test(teks));
+
+  // ---- 1.0.28: panduan animasi slide
+  await pg.locator('[data-testid=tombol-panduan]').click();
+  await pg.waitForTimeout(1200);
+  const judulSlide = [];
+  const slideTeks = async () => pg.evaluate(() => { const el = document.querySelector('[data-testid=panduan-asisten-ai]'); return el ? el.innerText : ''; });
+  for (let i = 1; i <= 10; i++) {
+    const t = await slideTeks();
+    judulSlide.push(t.split('\n').find((l) => /^\d+\. /.test(l.trim())) || t.slice(0, 40));
+    await pg.screenshot({ path: path.join(OUT, `39-panduan-${String(i).padStart(2, '0')}.png`) });
+    if (i < 10) {
+      if (i % 2) await pg.locator('[data-testid=panduan-maju]').click();
+      else await pg.keyboard.press('ArrowRight');
+      await pg.waitForTimeout(1300);
+    }
+  }
+  const akhirTeks = await slideTeks();
+  ok('panduan slide: 10 slide berbeda, dapat dimaju (tombol & panah)', new Set(judulSlide).size === 10 && /10\s*\/\s*10/.test(akhirTeks), judulSlide.join(' | '));
+  const animasi = await pg.evaluate(() => [...document.querySelectorAll('[data-testid=panduan-asisten-ai] *')].filter((el) => getComputedStyle(el).animationName !== 'none').length);
+  ok('panduan slide memakai animasi CSS', animasi > 0, `elemen beranimasi: ${animasi}`);
+  await pg.keyboard.press('ArrowLeft');
+  await pg.waitForTimeout(800);
+  ok('panah kiri kembali ke slide sebelumnya', /9\s*\/\s*10/.test(await slideTeks()));
+  await pg.keyboard.press('Escape');
+  await pg.waitForTimeout(600);
+  ok('Esc menutup panduan', (await slideTeks()) === '');
 
   // ---- nyalakan → konfirmasi
   await pg.locator('[data-testid=saklar-asisten-ai]').click();
@@ -408,6 +438,9 @@ function klienStdio(perintah, args) {
   }
   ok('paket .mcpb sah (manifest, server, ikon) & servernya menjawab', zipOk, info);
   ok('paket dibuka dengan Claude Desktop (shell.openPath)', dibuka.includes(berkasMcpb));
+  ok('pengguna memilih lokasi simpan .mcpb (dialog "Simpan sebagai")', judulDialog.includes('Simpan ekstensi Claude (KOPKU Asisten AI)'));
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('layar menampilkan folder ekstensi + tombol "Buka folder ekstensi"', teks.includes(path.join(dataDir, 'mcp')) && /Buka folder ekstensi/i.test(teks));
   const conf2 = JSON.parse(fs.readFileSync(path.join(folderClaude, 'claude_desktop_config.json'), 'utf8'));
   ok('cara ekstensi: entri konfigurasi dilepas (tidak ganda), Blender tetap', !conf2.mcpServers.kopku && !!conf2.mcpServers.Blender);
 

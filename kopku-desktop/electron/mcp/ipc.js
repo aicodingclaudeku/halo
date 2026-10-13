@@ -26,6 +26,9 @@ const { siapkanServerLokal, cariNode } = require('./serverLokal');
  * @param {object} [o.lingkungan] lokasi Claude Desktop tiruan (uji)
  * @param {string} [o.platform] process.platform (uji)
  * @param {Function} [o.cariNode] pencari Node.js (uji)
+ * @param {{ showSaveDialog: Function }} [o.dialog] dialog Electron (pilih folder simpan .mcpb)
+ * @param {() => any} [o.jendela] jendela induk dialog
+ * @param {string} [o.folderDokumen] folder Dokumen pengguna (lokasi bawaan .mcpb)
  */
 function daftarkanIpcAsistenAi(o) {
   const { h, host, dataDir, lingkungan } = o;
@@ -54,15 +57,45 @@ function daftarkanIpcAsistenAi(o) {
     const n = deteksiNode();
     return n ? { jenis: 'node', path: n.path, versi: n.versi } : { jenis: 'exe', path: o.execPath, perluEkstensi: platform === 'win32' };
   };
+  // 1.0.28 — lokasi simpan .mcpb dipilih pengguna (dialog "Simpan sebagai"); folder terakhir diingat.
+  const berkasLokasi = path.join(dataDir, 'mcp', 'lokasi-ekstensi.json');
+  const folderEkstensi = () => {
+    try {
+      const f = JSON.parse(fs.readFileSync(berkasLokasi, 'utf8')).folder;
+      if (typeof f === 'string' && fs.existsSync(f)) return f;
+    } catch {
+      /* belum pernah dipilih */
+    }
+    return o.folderDokumen ? path.join(o.folderDokumen, 'KOPKU Desktop') : path.join(dataDir, 'mcp');
+  };
   const statusLengkap = () =>
     Object.assign(host.status(), {
       claude: claudeConfig.statusClaude({ entri: entri(), lingkungan }),
+      folderEkstensi: folderEkstensi(),
       runtime: runtime(),
       riwayat: host.riwayat(15),
       potonganManual: claudeConfig.potonganManual(entri()),
     });
   const buatEkstensi = async (penggunaId) => {
-    const tujuan = path.join(dataDir, 'mcp', 'KOPKU-Asisten-AI.mcpb');
+    let tujuan = path.join(folderEkstensi(), 'KOPKU-Asisten-AI.mcpb');
+    if (o.dialog) {
+      fs.mkdirSync(path.dirname(tujuan), { recursive: true });
+      const r = await o.dialog.showSaveDialog(o.jendela ? o.jendela() : undefined, {
+        title: 'Simpan ekstensi Claude (KOPKU Asisten AI)',
+        defaultPath: tujuan,
+        buttonLabel: 'Simpan',
+        filters: [{ name: 'Ekstensi Claude (.mcpb)', extensions: ['mcpb'] }],
+        properties: ['createDirectory', 'showOverwriteConfirmation'],
+      });
+      if (!r || r.canceled || !r.filePath) return { dibatalkan: true };
+      tujuan = /\.mcpb$/i.test(r.filePath) ? r.filePath : r.filePath + '.mcpb';
+    }
+    fs.mkdirSync(path.dirname(tujuan), { recursive: true });
+    try {
+      fs.writeFileSync(berkasLokasi, JSON.stringify({ folder: path.dirname(tujuan) }));
+    } catch {
+      /* abaikan */
+    }
     buatMcpb({ tujuan, versi: o.versi, dataDir, ikon: o.ikon });
     // Satu cara saja: entri konfigurasi dilepas agar "kopku" tidak muncul dua kali di Claude Desktop.
     claudeConfig.lepasDariClaude({ lingkungan });
@@ -70,7 +103,7 @@ function daftarkanIpcAsistenAi(o) {
     // Dibuka dengan aplikasi yang terdaftar untuk .mcpb (Claude Desktop) → dialog "Install".
     const galatBuka = await o.shell.openPath(tujuan);
     if (galatBuka) o.shell.showItemInFolder(tujuan);
-    return { berkas: tujuan, dibuka: !galatBuka };
+    return { berkas: tujuan, folder: path.dirname(tujuan), dibuka: !galatBuka };
   };
 
   h('asistenAi:status', () => statusLengkap());
@@ -111,6 +144,13 @@ function daftarkanIpcAsistenAi(o) {
   h('asistenAi:buatEkstensi', async (penggunaId) => {
     await host._cekPengubah(penggunaId);
     return buatEkstensi(penggunaId);
+  });
+  h('asistenAi:bukaFolderEkstensi', async () => {
+    const f = folderEkstensi();
+    fs.mkdirSync(f, { recursive: true });
+    const m = await o.shell.openPath(f);
+    if (m) throw new Error(m);
+    return true;
   });
   h('asistenAi:salin', async (teks) => {
     o.clipboard.writeText(String(teks || '').slice(0, 20000));

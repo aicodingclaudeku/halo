@@ -11,6 +11,7 @@
  * di bawah adalah satu-satunya operasi adapter yang boleh dipanggil.
  */
 const { ALAT } = require('./katalog');
+const { saring, samarkanTeks } = require('./privasi');
 
 /** Satu-satunya operasi adapter yang boleh dipakai Asisten AI (semuanya BACA). */
 const OPERASI_BACA = new Set([
@@ -407,11 +408,12 @@ async function jalankanAlat(nama, args, k) {
   };
   try {
     const data = await JALANKAN[nama](args && typeof args === 'object' ? args : {}, Object.assign({}, k, { panggil: panggilAman }));
-    let t = JSON.stringify(bersihkan(data));
+    // 1.0.28 — penyaring terpusat: data pribadi + ID teknis, jalur, URI, jejak stack (privasi.js).
+    let t = JSON.stringify(saring(bersihkan(data)));
     if (t.length > BATAS_TEKS) t = t.slice(0, BATAS_TEKS) + '… [dipotong: hasil terlalu besar, persempit filter atau kecilkan batas]';
     return { content: [{ type: 'text', text: t }], isError: false };
   } catch (e) {
-    const pesan = e && (e.galatAlat || e.kode) ? String(e.message) : 'Terjadi kesalahan saat membaca data KOPKU.';
+    const pesan = e && (e.galatAlat || e.kode) ? samarkanTeks(String(e.message)) : 'Terjadi kesalahan saat membaca data KOPKU.';
     return { content: [{ type: 'text', text: pesan }], isError: true, _galat: e };
   }
 }

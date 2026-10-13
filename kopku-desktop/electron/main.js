@@ -315,6 +315,9 @@ function registerAsistenAi(d, bridge, h) {
     ikon: path.join(__dirname, '..', 'build', 'icon.png'),
     shell,
     clipboard,
+    dialog,
+    jendela: () => win,
+    folderDokumen: app.getPath('documents'),
     lingkungan: rumahUji ? { platform: 'win32', env: { APPDATA: path.join(rumahUji, 'Roaming'), LOCALAPPDATA: path.join(rumahUji, 'Local') }, home: rumahUji } : undefined,
   });
 }

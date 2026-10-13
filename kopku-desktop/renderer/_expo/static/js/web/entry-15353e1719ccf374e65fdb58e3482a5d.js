@@ -52214,6 +52214,272 @@ function waktuLokal(iso) {
   return `${p(t.getDate())}/${p(t.getMonth() + 1)} ${p(t.getHours())}:${p(t.getMinutes())}`;
 }
 
+// ============================================================ PANDUAN SLIDE BERANIMASI (1.0.28)
+// Animasi memakai gaya CSS react-native-web (animationKeyframes) — tanpa pustaka tambahan.
+const KF = {
+  naik: [{ '0%': { opacity: 0, transform: [{ translateY: 18 }] }, '100%': { opacity: 1, transform: [{ translateY: 0 }] } }],
+  muncul: [{ '0%': { opacity: 0 }, '100%': { opacity: 1 } }],
+  pop: [{ '0%': { opacity: 0, transform: [{ scale: 0.6 }] }, '70%': { opacity: 1, transform: [{ scale: 1.08 }] }, '100%': { opacity: 1, transform: [{ scale: 1 }] } }],
+  kanan: [{ '0%': { opacity: 0, transform: [{ translateX: -22 }] }, '100%': { opacity: 1, transform: [{ translateX: 0 }] } }],
+  denyut: [{ '0%': { transform: [{ scale: 1 }] }, '50%': { transform: [{ scale: 1.06 }] }, '100%': { transform: [{ scale: 1 }] } }],
+  lompat: [{ '0%': { transform: [{ translateY: 0 }] }, '50%': { transform: [{ translateY: -8 }] }, '100%': { transform: [{ translateY: 0 }] } }],
+  ketik: [{ '0%': { width: 0 }, '100%': { width: '100%' } }],
+  tuasGeser: [{ '0%': { transform: [{ translateX: 0 }] }, '100%': { transform: [{ translateX: 22 }] } }],
+  tuasWarna: [{ '0%': { backgroundColor: '#CBD2DA' }, '100%': { backgroundColor: '#1E7B4A' } }],
+  sorot: [{ '0%': { backgroundColor: 'rgba(30,123,74,0)' }, '100%': { backgroundColor: 'rgba(30,123,74,0.16)' } }],
+  isi: [{ '0%': { width: '0%' }, '100%': { width: '100%' } }],
+};
+// react-native-web hanya mengubah animationKeyframes menjadi @keyframes bila lewat StyleSheet.create
+// (gaya inline membuangnya) → setiap kombinasi dibuat sekali lalu disimpan.
+const CACHE_AN = new Map();
+function an(nama, tunda, durasi, ulang) {
+  const kunci = [nama, tunda || 0, durasi || 600, ulang ? 1 : 0].join('|');
+  if (!CACHE_AN.has(kunci)) {
+    CACHE_AN.set(kunci, StyleSheet.create({ a: { animationKeyframes: KF[nama], animationDuration: `${durasi || 600}ms`, animationDelay: `${tunda || 0}ms`, animationFillMode: 'both', animationTimingFunction: 'ease-out', animationIterationCount: ulang ? 'infinite' : 1 } }).a);
+  }
+  return CACHE_AN.get(kunci);
+}
+
+function Jendela({ judul, children, lebar }) {
+  return h(View, { style: [sp.jendela, lebar ? { width: lebar } : null, an('naik', 0, 500)] },
+    h(View, { style: sp.jendelaBar }, h(View, { style: [sp.titik, { backgroundColor: '#F87171' }] }), h(View, { style: [sp.titik, { backgroundColor: '#FBBF24' }] }), h(View, { style: [sp.titik, { backgroundColor: '#34D399' }] }), h(Text, { style: sp.jendelaJudul }, judul)),
+    h(View, { style: sp.jendelaIsi }, children)
+  );
+}
+function Gelembung({ dari, teks, tunda, ketik }) {
+  const ai = dari === 'ai';
+  return h(View, { style: [sp.gelembung, ai ? sp.gelembungAi : sp.gelembungUser, an('naik', tunda, 500)] },
+    ketik ? h(View, { style: [{ overflow: 'hidden' }, an('ketik', tunda + 300, 1400)] }, h(Text, { style: [sp.gelembungTeks, ai ? null : { color: '#fff' }], numberOfLines: 3 }, teks)) : h(Text, { style: [sp.gelembungTeks, ai ? null : { color: '#fff' }] }, teks)
+  );
+}
+function TuasAnimasi({ tunda, label }) {
+  return h(View, { style: sp.tuasBaris },
+    h(Text, { style: sp.tuasLabel }, label),
+    h(View, { style: [sp.tuas, an('tuasWarna', tunda, 350)] }, h(View, { style: [sp.tuasKnop, an('tuasGeser', tunda, 350)] }))
+  );
+}
+function Poin({ ikon, teks, tunda, warna }) {
+  return h(View, { style: [sp.poin, an('kanan', tunda, 450)] }, h(View, { style: [sp.poinIkon, warna ? { backgroundColor: warna } : null] }, h(Ionicons, { name: ikon, size: 16, color: C.white })), h(Text, { style: sp.poinTeks }, teks));
+}
+function Pil({ teks, ikon, tunda, warna }) {
+  return h(View, { style: [sp.pil, warna === 'kuning' ? sp.pilKuning : null, an('pop', tunda, 450)] }, ikon ? h(Ionicons, { name: ikon, size: 13, color: warna === 'kuning' ? C.warning : C.primaryDark }) : null, h(Text, { style: [sp.pilTeks, warna === 'kuning' ? { color: C.warning } : null] }, teks));
+}
+
+const SLIDE = [
+  {
+    judul: 'Asisten AI untuk koperasi Anda',
+    teks: 'Hubungkan KOPKU dengan Claude di komputer ini. Tanya data dengan bahasa sehari-hari — dan bila Anda izinkan, minta bantuan mencatat transaksi, mengimpor data, atau mengoreksi kesalahan.',
+    gambar: () => h(View, { style: sp.tengah },
+      h(View, { style: [sp.ikonBesar, an('pop', 0, 700)] }, h(Ionicons, { name: 'sparkles-outline', size: 54, color: C.primary })),
+      h(View, { style: [sp.barisPil, { marginTop: 18 }] }, h(Pil, { teks: 'Tanya data', ikon: 'chatbubbles-outline', tunda: 500 }), h(Pil, { teks: 'Bantu input & import', ikon: 'create-outline', tunda: 800 }), h(Pil, { teks: 'Koreksi aman', ikon: 'shield-checkmark-outline', tunda: 1100 }))
+    ),
+  },
+  {
+    judul: '1. Pasang Claude Desktop',
+    teks: 'Unduh aplikasi resmi Claude untuk Windows/macOS di claude.ai/download, pasang, buka sekali, lalu masuk dengan akun Claude Anda.',
+    gambar: () => h(Jendela, { judul: 'claude.ai/download' },
+      h(View, { style: sp.tengah },
+        h(View, { style: an('lompat', 400, 900, true) }, h(Ionicons, { name: 'download-outline', size: 46, color: C.primary })),
+        h(View, { style: [sp.tombolMock, an('pop', 600, 400)] }, h(Text, { style: sp.tombolMockTeks }, 'Download for Windows')),
+        h(View, { style: [sp.progres, an('muncul', 900, 300)] }, h(View, { style: [sp.progresIsi, an('isi', 1000, 2200)] }))
+      )
+    ),
+  },
+  {
+    judul: '2. Nyalakan "Hubungkan ke Claude"',
+    teks: 'Di KOPKU: Pengaturan › Asisten AI › nyalakan sakelar, lalu pilih "Hubungkan". KOPKU otomatis mendaftarkan konektor "kopku" ke Claude Desktop.',
+    gambar: () => h(Jendela, { judul: 'KOPKU › Pengaturan › Asisten AI' },
+      h(TuasAnimasi, { tunda: 900, label: 'Hubungkan ke Claude' }),
+      h(View, { style: [sp.barisPil, { marginTop: 14 }] }, h(Pil, { teks: 'Siap dipakai Claude', ikon: 'checkmark-circle', tunda: 1500 }), h(Pil, { teks: 'Konektor "kopku" terpasang', ikon: 'link-outline', tunda: 1800 }))
+    ),
+  },
+  {
+    judul: '3. Mulai ulang Claude Desktop',
+    teks: 'Tutup Claude SEPENUHNYA: klik kanan ikon Claude di tray (dekat jam) › Quit. Lalu buka lagi agar konektor "kopku" terbaca.',
+    gambar: () => h(View, { style: sp.tengah },
+      h(View, { style: [sp.menuTray, an('naik', 200, 500)] },
+        h(Text, { style: sp.menuItem }, 'Show Claude'),
+        h(Text, { style: sp.menuItem }, 'Settings…'),
+        h(View, { style: [sp.menuItemSorot, an('sorot', 900, 400)] }, h(Text, { style: [sp.menuItem, { fontWeight: '800' }] }, 'Quit'))
+      ),
+      h(View, { style: [sp.barisPil, { marginTop: 16 }] }, h(Pil, { teks: 'Buka Claude lagi', ikon: 'refresh', tunda: 1500 }))
+    ),
+  },
+  {
+    judul: '4. Bertanya di Claude',
+    teks: 'Ketik pertanyaan seperti biasa. Saat Claude meminta izin memakai alat "kopku", pilih Allow. KOPKU Desktop harus tetap terbuka.',
+    gambar: () => h(Jendela, { judul: 'Claude' },
+      h(Gelembung, { dari: 'user', teks: 'Berapa total tunggakan saat ini?', tunda: 200 }),
+      h(View, { style: [sp.alatPakai, an('pop', 900, 400)] }, h(Ionicons, { name: 'construct-outline', size: 13, color: C.textMuted }), h(Text, { style: sp.alatPakaiTeks }, 'Menggunakan alat: kopku › daftar_tunggakan')),
+      h(Gelembung, { dari: 'ai', teks: 'Ada 9 angsuran menunggak dari 3 pinjaman, total Rp4.905.000. Yang paling lama 59 hari.', tunda: 1500, ketik: true })
+    ),
+  },
+  {
+    judul: '5. Mengubah data — selalu dengan persetujuan Anda',
+    teks: 'Bila admin menyalakan "Izinkan Claude mengubah data", Claude menampilkan PRATINJAU dulu. Data baru disimpan setelah Anda setuju. Backup otomatis dibuat sebelumnya.',
+    gambar: () => h(Jendela, { judul: 'Claude' },
+      h(Gelembung, { dari: 'user', teks: 'Catat setoran wajib Oktober Rp50.000 untuk A00012', tunda: 200 }),
+      h(View, { style: [sp.pratinjau, an('naik', 900, 500)] },
+        h(Text, { style: sp.pratinjauJudul }, 'PRATINJAU — belum disimpan'),
+        h(Text, { style: sp.pratinjauTeks }, 'Setor simpanan wajib · A00012 · Rp50.000 · saldo Rp450.000 → Rp500.000')
+      ),
+      h(Gelembung, { dari: 'user', teks: 'Ya, simpan.', tunda: 1800 }),
+      h(View, { style: [sp.barisPil, { marginTop: 8 }] }, h(Pil, { teks: 'Backup otomatis', ikon: 'cloud-done-outline', tunda: 2400 }), h(Pil, { teks: 'Tersimpan: SP-WAJIB-2026-000123', ikon: 'checkmark-circle', tunda: 2700 }))
+    ),
+  },
+  {
+    judul: '6. Koreksi dan import Excel',
+    teks: 'Kesalahan diperbaiki dengan JURNAL PEMBALIK — transaksi asal tetap tercatat, tidak ada yang dihapus. Import Data Awal memakai pemeriksaan yang sama dengan menu Import.',
+    gambar: () => h(View, { style: sp.duaKolom },
+      h(View, { style: [sp.kartuMini, an('naik', 200, 500)] },
+        h(Text, { style: sp.kartuMiniJudul }, 'Koreksi transaksi'),
+        h(View, { style: [sp.jurnal, an('kanan', 600, 400)] }, h(Text, { style: sp.jurnalTeks }, 'SP-WAJIB-…123  Rp50.000')),
+        h(View, { style: [sp.jurnal, sp.jurnalBalik, an('kanan', 1200, 400)] }, h(Text, { style: sp.jurnalTeks }, '↩ Pembalik  −Rp50.000')),
+        h(Text, { style: [sp.kecil, an('muncul', 1700, 400)] }, 'Asal tetap tercatat · jejak koreksi tersimpan')
+      ),
+      h(View, { style: [sp.kartuMini, an('naik', 500, 500)] },
+        h(Text, { style: sp.kartuMiniJudul }, 'Import Data Awal'),
+        h(View, { style: [sp.berkas, an('pop', 900, 400)] }, h(Ionicons, { name: 'document-text-outline', size: 22, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'saldo-lama.xlsx')),
+        h(Poin, { ikon: 'search-outline', teks: 'Pratinjau & periksa baris', tunda: 1400 }),
+        h(Poin, { ikon: 'checkmark-done-outline', teks: 'Impor setelah disetujui', tunda: 1900 })
+      )
+    ),
+  },
+  {
+    judul: '7. Cara lain: ekstensi Claude (.mcpb)',
+    teks: 'Bila konektor tidak muncul, klik "Buat & buka ekstensi". Pilih folder penyimpanan (bawaan: Dokumen › KOPKU Desktop), lalu klik Install di Claude Desktop.',
+    gambar: () => h(Jendela, { judul: 'Simpan ekstensi Claude (KOPKU Asisten AI)' },
+      h(View, { style: [sp.dialogBaris, an('kanan', 300, 400)] }, h(Ionicons, { name: 'folder-open-outline', size: 18, color: C.warning }), h(Text, { style: sp.jurnalTeks }, 'Dokumen › KOPKU Desktop')),
+      h(View, { style: [sp.dialogBaris, an('kanan', 700, 400)] }, h(Ionicons, { name: 'cube-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, 'KOPKU-Asisten-AI.mcpb')),
+      h(View, { style: [sp.barisPil, { marginTop: 12 }] }, h(View, { style: [sp.tombolMock, an('pop', 1200, 400)] }, h(Text, { style: sp.tombolMockTeks }, 'Simpan')), h(View, { style: [sp.tombolMock, sp.tombolMockUngu, an('pop', 1800, 400)] }, h(Text, { style: sp.tombolMockTeks }, 'Install di Claude')))
+    ),
+  },
+  {
+    judul: '8. Aman dan rahasia',
+    teks: 'Asisten AI dirancang hanya untuk pekerjaan koperasi yang sah.',
+    gambar: () => h(View, { style: { gap: 10, paddingHorizontal: 10 } },
+      h(Poin, { ikon: 'eye-off-outline', teks: 'NIK, alamat, nomor HP, tanggal lahir, rekening tidak pernah dikirim', tunda: 200 }),
+      h(Poin, { ikon: 'lock-closed-outline', teks: 'Struktur aplikasi (kode, basis data, folder, kunci) tidak dibuka ke AI', tunda: 600 }),
+      h(Poin, { ikon: 'ban-outline', teks: 'Permintaan ilegal (memalsukan/menyembunyikan transaksi, rekayasa laporan) ditolak', tunda: 1000, warna: C.danger }),
+      h(Poin, { ikon: 'speedometer-outline', teks: 'Batas aman: maks 10 perubahan/menit, 120/jam', tunda: 1400 }),
+      h(Poin, { ikon: 'list-outline', teks: 'Semua pemakaian tercatat · dapat dimatikan kapan saja', tunda: 1800 })
+    ),
+  },
+  {
+    judul: 'Siap dipakai!',
+    teks: 'Contoh pertanyaan: "Buatkan ringkasan kondisi koperasi hari ini", "Siapa 10 anggota dengan tunggakan terlama?", "Buat draf laporan pengurus untuk RAT". Selalu periksa jawaban & pratinjau — AI dapat keliru.',
+    gambar: () => h(View, { style: sp.tengah },
+      h(View, { style: [sp.ikonBesar, an('pop', 0, 700), { backgroundColor: C.primaryLight }] }, h(Ionicons, { name: 'checkmark-done-outline', size: 54, color: C.primary })),
+      h(View, { style: an('denyut', 800, 1600, true) }, h(Text, { style: [sp.slideJudul, { marginTop: 14, fontSize: 18 }] }, 'Selamat bertanya 👋'))
+    ),
+  },
+];
+
+function PanduanSlide({ onTutup }) {
+  const [i, setI] = useState(0);
+  const [otomatis, setOtomatis] = useState(false);
+  const maju = useCallback(() => setI((x) => Math.min(SLIDE.length - 1, x + 1)), []);
+  const mundur = useCallback(() => setI((x) => Math.max(0, x - 1)), []);
+  useEffect(() => {
+    const t = (e) => {
+      if (e.key === 'ArrowRight') maju();
+      else if (e.key === 'ArrowLeft') mundur();
+      else if (e.key === 'Escape') onTutup();
+    };
+    if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('keydown', t);
+    return () => typeof window !== 'undefined' && window.removeEventListener && window.removeEventListener('keydown', t);
+  }, [maju, mundur, onTutup]);
+  useEffect(() => {
+    if (!otomatis) return undefined;
+    const t = setTimeout(() => (i < SLIDE.length - 1 ? maju() : setOtomatis(false)), 7000);
+    return () => clearTimeout(t);
+  }, [otomatis, i, maju]);
+  const sl = SLIDE[i];
+  return h(View, { style: sp.latar, testID: 'panduan-asisten-ai' },
+    h(View, { style: [sp.kotak, an('pop', 0, 350)] },
+      h(View, { style: sp.kepala },
+        h(Ionicons, { name: 'easel-outline', size: 18, color: C.primary }),
+        h(Text, { style: sp.kepalaTeks }, `Panduan Asisten AI · ${i + 1}/${SLIDE.length}`),
+        h(View, { style: { flex: 1 } }),
+        h(Touchable, { accessibilityRole: 'button', onPress: () => setOtomatis(!otomatis), style: sp.ikonTombol, testID: 'panduan-otomatis' }, h(Ionicons, { name: otomatis ? 'pause' : 'play', size: 16, color: C.text })),
+        h(Touchable, { accessibilityRole: 'button', onPress: onTutup, style: sp.ikonTombol, testID: 'panduan-tutup' }, h(Ionicons, { name: 'close', size: 18, color: C.text }))
+      ),
+      otomatis ? h(View, { style: sp.progresAtas }, h(View, { key: 'p' + i, style: [sp.progresIsi, an('isi', 0, 7000)] })) : null,
+      h(View, { key: 'slide-' + i, style: sp.isiSlide },
+        h(View, { style: sp.gambar }, sl.gambar()),
+        h(View, { style: [sp.teksSlide, an('naik', 150, 450)] }, h(Text, { style: sp.slideJudul }, sl.judul), h(Text, { style: sp.slideTeks }, sl.teks))
+      ),
+      h(View, { style: sp.kaki },
+        h(Tombol, { label: 'Sebelumnya', ikon: 'chevron-back', disabled: i === 0, onPress: mundur, testID: 'panduan-mundur' }),
+        h(View, { style: sp.titikBaris }, SLIDE.map((_, k) => h(Touchable, { key: k, accessibilityRole: 'button', accessibilityLabel: `Slide ${k + 1}`, onPress: () => setI(k), style: [sp.titikNav, k === i && sp.titikNavAktif] }))),
+        i < SLIDE.length - 1 ? h(Tombol, { label: 'Berikutnya', ikon: 'chevron-forward', utama: true, onPress: maju, testID: 'panduan-maju' }) : h(Tombol, { label: 'Selesai', ikon: 'checkmark', utama: true, onPress: onTutup, testID: 'panduan-selesai' })
+      )
+    )
+  );
+}
+
+const sp = StyleSheet.create({
+  latar: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,32,0.45)', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 50 },
+  kotak: Object.assign({ width: '100%', maxWidth: 820, backgroundColor: C.surface, borderRadius: T.radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: C.border }, T.elevation.card),
+  kepala: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: '#F7F8FA' },
+  kepalaTeks: { fontSize: 13, fontWeight: '700', color: C.text },
+  ikonTombol: { width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  progresAtas: { height: 3, backgroundColor: '#EEF0F3' },
+  isiSlide: { flexDirection: 'row', flexWrap: 'wrap', gap: 22, padding: 22, minHeight: 330, alignItems: 'center' },
+  gambar: { flex: 1.15, minWidth: 300, minHeight: 280, alignItems: 'stretch', justifyContent: 'center' },
+  teksSlide: { flex: 1, minWidth: 240, gap: 10 },
+  slideJudul: { fontSize: 21, fontWeight: '800', color: C.text },
+  slideTeks: { fontSize: 14, lineHeight: 21, color: C.textMuted },
+  kaki: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: C.border },
+  titikBaris: { flexDirection: 'row', gap: 6, flexWrap: 'wrap', justifyContent: 'center', flex: 1 },
+  titikNav: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#D6DBE1' },
+  titikNavAktif: { backgroundColor: C.primary, width: 22 },
+  tengah: { alignItems: 'center', justifyContent: 'center', gap: 6 },
+  ikonBesar: { width: 104, height: 104, borderRadius: 52, backgroundColor: C.primaryLight, alignItems: 'center', justifyContent: 'center' },
+  barisPil: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  pil: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: T.radius.pill, backgroundColor: C.primaryLight, borderWidth: 1, borderColor: '#9CCBB0' },
+  pilKuning: { backgroundColor: C.warningBg, borderColor: C.warningBorder },
+  pilTeks: { fontSize: 12, fontWeight: '700', color: C.primaryDark },
+  jendela: { borderWidth: 1, borderColor: C.border, borderRadius: T.radius.md, overflow: 'hidden', backgroundColor: C.surface },
+  jendelaBar: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: '#F1F3F6', borderBottomWidth: 1, borderBottomColor: C.border },
+  titik: { width: 9, height: 9, borderRadius: 5 },
+  jendelaJudul: { fontSize: 11.5, color: C.textMuted, marginLeft: 8, fontWeight: '600' },
+  jendelaIsi: { padding: 14, gap: 8, minHeight: 200, justifyContent: 'center' },
+  gelembung: { maxWidth: '88%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 14 },
+  gelembungUser: { alignSelf: 'flex-end', backgroundColor: '#3B6FD8' },
+  gelembungAi: { alignSelf: 'flex-start', backgroundColor: '#F1F3F6' },
+  gelembungTeks: { fontSize: 13, lineHeight: 18, color: C.text },
+  alatPakai: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: C.border },
+  alatPakaiTeks: { fontSize: 11.5, color: C.textMuted },
+  tuasBaris: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 6 },
+  tuasLabel: { fontSize: 15, fontWeight: '800', color: C.text },
+  tuas: { width: 46, height: 24, borderRadius: 12, padding: 2, backgroundColor: '#CBD2DA' },
+  tuasKnop: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff' },
+  menuTray: Object.assign({ width: 220, backgroundColor: C.surface, borderRadius: 8, borderWidth: 1, borderColor: C.border, paddingVertical: 6 }, T.elevation.card),
+  menuItem: { fontSize: 13, color: C.text, paddingHorizontal: 14, paddingVertical: 6 },
+  menuItemSorot: { borderRadius: 4, marginHorizontal: 4 },
+  tombolMock: { alignSelf: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: C.primary, marginTop: 6 },
+  tombolMockUngu: { backgroundColor: '#C2410C' },
+  tombolMockTeks: { color: '#fff', fontWeight: '800', fontSize: 13 },
+  progres: { width: 220, height: 6, borderRadius: 3, backgroundColor: '#EEF0F3', overflow: 'hidden', marginTop: 10 },
+  progresIsi: { height: '100%', backgroundColor: C.primary },
+  pratinjau: { borderWidth: 1, borderStyle: 'dashed', borderColor: C.warningBorder, backgroundColor: C.warningBg, borderRadius: 10, padding: 10, gap: 3 },
+  pratinjauJudul: { fontSize: 11, fontWeight: '800', color: C.warning, letterSpacing: 0.5 },
+  pratinjauTeks: { fontSize: 12.5, color: C.text },
+  duaKolom: { flexDirection: 'row', gap: 12, flexWrap: 'wrap' },
+  kartuMini: { flex: 1, minWidth: 150, borderWidth: 1, borderColor: C.border, borderRadius: 10, padding: 12, gap: 8, backgroundColor: C.surface },
+  kartuMiniJudul: { fontSize: 13, fontWeight: '800', color: C.text },
+  jurnal: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: 6, backgroundColor: '#F1F3F6' },
+  jurnalBalik: { backgroundColor: C.dangerBg },
+  jurnalTeks: { fontSize: 12, color: C.text, fontWeight: '600' },
+  kecil: { fontSize: 11, color: C.textMuted },
+  berkas: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: C.border },
+  poin: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  poinIkon: { width: 28, height: 28, borderRadius: 14, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
+  poinTeks: { flex: 1, fontSize: 13, color: C.text, lineHeight: 18 },
+  dialogBaris: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 9, borderRadius: 8, backgroundColor: '#F7F8FA', borderWidth: 1, borderColor: C.border },
+});
+
 const LABEL_ALAT = {};
 
 function AsistenAiScreen() {
@@ -52226,6 +52492,8 @@ function AsistenAiScreen() {
   const [sibuk, setSibuk] = useState('');
   const [manual, setManual] = useState(false);
   const hidup = useRef(true);
+  const [panduan, setPanduan] = useState(false);
+  const tutupPanduan = useCallback(() => setPanduan(false), []);
 
   const muat = useCallback(async () => {
     if (!A) return;
@@ -52255,7 +52523,8 @@ function AsistenAiScreen() {
     try {
       const hasil = await fn();
       if (hasil && hasil.claude && hidup.current) setSt(hasil);
-      if (pesanBerhasil) notify('Berhasil', typeof pesanBerhasil === 'function' ? pesanBerhasil(hasil) : pesanBerhasil, undefined, 'success');
+      const pesan = typeof pesanBerhasil === 'function' ? pesanBerhasil(hasil) : pesanBerhasil;
+      if (pesan) notify('Berhasil', pesan, undefined, 'success');
       return hasil;
     } catch (e) {
       notify('Gagal', String((e && e.message) || e), undefined, 'error');
@@ -52338,7 +52607,9 @@ function AsistenAiScreen() {
     ], 'warning');
   const ekstensi = () =>
     jalankan('ekstensi', () => A.buatEkstensi(pid), (x) =>
-      x && x.dibuka
+      x && x.dibatalkan
+        ? null
+        : x && x.dibuka
         ? 'Berkas ekstensi dibuka. Di Claude Desktop klik "Install", lalu aktifkan ekstensi "KOPKU — Asisten AI Koperasi".'
         : 'Berkas ekstensi dibuat: ' + (x && x.berkas) + '. Seret berkas itu ke jendela Claude Desktop (Settings › Extensions) lalu klik "Install".');
   const salin = (teks, label) => jalankan('salin', () => A.salin(teks), label || 'Disalin ke clipboard.');
@@ -52460,7 +52731,11 @@ function AsistenAiScreen() {
         h(View, { style: { flex: 1, minWidth: 240, gap: 6 } },
           h(Text, { style: s.tebal }, 'Ekstensi Claude (.mcpb)'),
           h(Text, { style: s.redup }, 'Membuat paket ekstensi lalu membukanya di Claude Desktop (klik Install). Memakai Node.js bawaan Claude Desktop. Entri konfigurasi di atas dilepas agar tidak ganda.'),
-          h(View, { style: s.aksi }, h(Tombol, { label: 'Buat & buka ekstensi', ikon: 'cube-outline', onPress: ekstensi, sibuk: sibuk === 'ekstensi', disabled: !bolehUbah || !pid, testID: 'tombol-ekstensi-claude' }))
+          h(Text, { style: s.redup }, 'Saat dibuat, Anda memilih folder penyimpanan berkas .mcpb. Folder terakhir: ', h(Text, { style: s.tebal, testID: 'folder-ekstensi' }, st.folderEkstensi || 'Dokumen › KOPKU Desktop')),
+          h(View, { style: s.aksi },
+            h(Tombol, { label: 'Buat & buka ekstensi', ikon: 'cube-outline', onPress: ekstensi, sibuk: sibuk === 'ekstensi', disabled: !bolehUbah || !pid, testID: 'tombol-ekstensi-claude' }),
+            h(Tombol, { label: 'Buka folder ekstensi', ikon: 'folder-open-outline', onPress: () => jalankan('folderEkstensi', () => A.bukaFolderEkstensi(), null), sibuk: sibuk === 'folderEkstensi', testID: 'tombol-folder-ekstensi' })
+          )
         ),
         h(View, { style: { flex: 1, minWidth: 240, gap: 6 } },
           h(Text, { style: s.tebal }, 'Pasang manual'),
@@ -52545,13 +52820,18 @@ function AsistenAiScreen() {
     )
   );
 
-  return h(
+  const banner = h(Touchable, { accessibilityRole: 'button', onPress: () => setPanduan(true), style: s.banner, testID: 'tombol-panduan' },
+    h(View, { style: s.bannerIkon }, h(Ionicons, { name: 'easel-outline', size: 22, color: C.white })),
+    h(View, { style: { flex: 1, minWidth: 0 } }, h(Text, { style: s.bannerJudul }, 'Baru di sini? Lihat panduan bergambar (10 slide)'), h(Text, { style: s.redup }, 'Animasi langkah demi langkah: pasang Claude, menyalakan konektor, bertanya, mengubah data dengan aman, dan ekstensi .mcpb.')),
+    h(Ionicons, { name: 'play-circle', size: 30, color: C.primary })
+  );
+  return h(View, { style: { flex: 1 } }, h(
     ScrollView,
     { style: s.layar, contentContainerStyle: UI.screenContent, testID: 'layar-asisten-ai' },
     h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari aplikasi Claude Desktop, dan (bila diizinkan) membantu mencatat transaksi, mengimpor data, serta mengoreksi transaksi. Mati secara bawaan.'),
     !bolehUbah ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginBottom: 12 }] }, h(Ionicons, { name: 'lock-closed-outline', size: 16, color: C.warning }), h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'Hanya pengguna dengan izin ubah Pengaturan (Admin) yang dapat menyalakan/mematikan Asisten AI.')) : null,
-    h(View, { style: s.kolom }, kartuSaklar, kartuPasang, kartuContoh, kartuAktivitas)
-  );
+    h(View, { style: s.kolom }, banner, kartuSaklar, kartuPasang, kartuContoh, kartuAktivitas)
+  ), panduan ? h(PanduanSlide, { onTutup: tutupPanduan }) : null);
 }
 
 const s = StyleSheet.create({
@@ -52597,6 +52877,9 @@ const s = StyleSheet.create({
   chipBaris: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: T.radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface },
   chipAktif: { borderColor: '#9CCBB0', backgroundColor: C.primaryLight },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14, borderRadius: T.radius.lg, borderWidth: 1, borderColor: '#9CCBB0', backgroundColor: C.primaryLight },
+  bannerIkon: { width: 42, height: 42, borderRadius: 21, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
+  bannerJudul: { fontSize: 14.5, fontWeight: '800', color: C.primaryDark },
   chipUbah: { borderColor: C.warningBorder, backgroundColor: C.warningBg },
   chipTeks: { fontSize: 12, fontWeight: '600', color: C.textMuted },
   logBaris: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F0F2F5' },

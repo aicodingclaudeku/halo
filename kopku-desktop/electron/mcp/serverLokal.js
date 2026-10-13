@@ -19,12 +19,29 @@ const { execFileSync } = require('node:child_process');
 
 const BERKAS_SERVER = ['stdio.js', 'katalog.js'];
 
+/**
+ * 1.0.28 — versi berkas yang DIKIRIM ke luar aplikasi (folder data pengguna & paket .mcpb): tanpa komentar,
+ * sehingga tidak memuat keterangan struktur internal KOPKU (nama berkas, alur, mekanisme keamanan).
+ * Hasil diperiksa dapat dikompilasi; bila tidak, pemasangan gagal (bukan mengirim versi berkomentar).
+ */
+function untukDikirim(sumber) {
+  const teks = String(sumber)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*\/\//.test(l))
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l, i, a) => l !== '' || (i > 0 && a[i - 1] !== ''))
+    .join('\n');
+  new (require('node:vm').Script)(`(function (exports, require, module, __filename, __dirname) {${teks}\n})`);
+  return Buffer.from("'use strict';\n" + teks.replace(/^\s*'use strict';\s*/, ''), 'utf8');
+}
+
 /** Salin server stdio ke <dataDir>/mcp/server (hanya bila isinya berbeda). @returns jalur stdio.js */
 function siapkanServerLokal(dataDir, sumberDir = __dirname) {
   const tujuan = path.join(dataDir, 'mcp', 'server');
   fs.mkdirSync(tujuan, { recursive: true });
   for (const n of BERKAS_SERVER) {
-    const isi = fs.readFileSync(path.join(sumberDir, n));
+    const isi = untukDikirim(fs.readFileSync(path.join(sumberDir, n), 'utf8'));
     const f = path.join(tujuan, n);
     let lama = null;
     try {
@@ -77,4 +94,4 @@ function cariNode(o = {}) {
   return null;
 }
 
-module.exports = { siapkanServerLokal, cariNode, kandidatNode, BERKAS_SERVER };
+module.exports = { siapkanServerLokal, cariNode, kandidatNode, untukDikirim, BERKAS_SERVER };
