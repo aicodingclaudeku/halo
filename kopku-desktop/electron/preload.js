@@ -156,6 +156,18 @@ contextBridge.exposeInMainWorld('kopkuDesktop', {
     sesiCabut: (o) => call('lanmu:sesiCabut', o),
     audit: (o) => call('lanmu:audit', o),
   },
+  // Pengaturan › Asisten AI (1.0.25) — konektor MCP lokal untuk Claude Desktop (baca saja).
+  // Hanya jendela utama; setiap perubahan diperiksa ulang di main process (izin Pengaturan › Ubah).
+  asistenAi: {
+    status: () => call('asistenAi:status'),
+    atur: (o) => call('asistenAi:atur', o),
+    pasangClaude: (penggunaId) => call('asistenAi:pasangClaude', penggunaId),
+    lepasClaude: (penggunaId) => call('asistenAi:lepasClaude', penggunaId),
+    buatEkstensi: (penggunaId) => call('asistenAi:buatEkstensi', penggunaId),
+    salin: (teks) => call('asistenAi:salin', teks),
+    bukaFolder: () => call('asistenAi:bukaFolder'),
+    unduhClaude: () => call('asistenAi:unduhClaude'),
+  },
 
   app: {
     openDataFolder: () => call('app:openData'),

@@ -83,6 +83,7 @@ function buatMock(opsi = {}) {
       setPath() {},
       setAppUserModelId() {},
       getPath: (n) => (n === 'userData' ? userData : path.join(userData, n)),
+      getAppPath: () => path.join(__dirname, '..', '..'),
       getVersion: () => '1.0.10',
       requestSingleInstanceLock: () => true,
       quit() {},
@@ -109,6 +110,7 @@ function buatMock(opsi = {}) {
     dialog: { showOpenDialog: async () => ({ canceled: true }), showSaveDialog: async () => ({ canceled: true }) },
     session: { defaultSession: { setPermissionRequestHandler() {} } },
     BrowserWindow,
+    clipboard: { teks: null, writeText(t) { this.teks = t; } },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: (s) => Buffer.from(s), decryptString: (b) => b.toString() },
     systemPreferences: {},
     // ---- renderer (preload)

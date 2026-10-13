@@ -1,6 +1,16 @@
-# KOPKU Desktop 1.0.24 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.25 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.25 — Pengaturan › Asisten AI (MCP untuk Claude; skema database TETAP v82)
+Tanpa migrasi database; perhitungan tidak berubah. Rincian & bukti: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md`.
+- **Menu baru Pengaturan › Asisten AI** (sidebar di bawah LAN & WhatsApp, Semua Pengaturan, Ctrl+K "ai"/"claude", Berkas › Asisten AI…). Tanya data koperasi dalam bahasa sehari-hari dari aplikasi **Claude Desktop** di komputer ini lewat **MCP** — tanpa API key, tanpa membuka data ke internet.
+- **Baca saja, 14 alat:** ringkasan koperasi, laporan keuangan (posisi keuangan, LHU, laba rugi, arus kas, perubahan ekuitas, neraca saldo), buku besar, kolektibilitas, SHU, kas & bank, dan — bila **Izinkan data per anggota** ON — tunggakan, anggota, simpanan, pinjaman & jadwal angsuran, riwayat transaksi. Angka dari service yang sama dengan layar.
+- **Aman:** bawaan MATI; hanya Admin (izin ubah Pengaturan) yang dapat menyalakan; Claude membaca atas nama pengguna itu sesuai Permission Matrix & lisensi; NIK, alamat, nomor HP, tanggal lahir, nomor rekening **tidak pernah** dikirim; hanya 127.0.0.1 + token acak; setiap pemakaian dicatat (tanpa isi data).
+- **Pasang satu klik:** menyalakan sakelar otomatis mendaftarkan konektor "kopku" ke Claude Desktop (server MCP lain tidak disentuh, cadangan dibuat). Claude Desktop menjalankan `KOPKU Desktop.exe --kopku-mcp-stdio` (tanpa Node.js). Cara cadangan: **ekstensi `.mcpb`** (klik Install di Claude Desktop) atau **pasang manual** (JSON + tombol Salin).
+- `electron/bersihkanClaude.js` (pembersih fitur Claude 1.0.14) dihapus. Kode baru: `electron/mcp/`, layar `renderer-patch/AsistenAiScreen.js`, pemasang `scripts/pasang-menu-asisten-ai.js` (otomatis di `npm start`/`dist:*`).
+- Uji: `npm run test:mcp` 12/12, `npm run test:lan` 81/81, `npm run test:keamanan` 15/15, uji layar Chromium 25/25, **Electron 44.5.1 nyata** 14/14, uji asap UI 1.0.21 14/14.
+- **Aplikasi HP tidak berubah** (fitur khusus desktop).
 
 ## Yang baru di 1.0.24 (source KOPKU RC-S133.6.9 — Penurunan Nilai Jasa Pinjaman; skema database TETAP v82)
 Tanpa migrasi database. Rincian & bukti: `docs/RC-S133.6.9_PENURUNAN_NILAI_JASA_PINJAMAN.md`.

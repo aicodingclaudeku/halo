@@ -16,7 +16,9 @@ const ROOT = path.join(__dirname, '..', '..');
 const MAIN = path.join(ROOT, 'electron', 'main.js');
 const keamanan = require(path.join(ROOT, 'electron', 'keamanan.js'));
 // DIPERBARUI 1.0.14: konektor Claude dihapus — modul mcp/claudeConfig tidak ada lagi.
-const { bersihkanSisaClaude, entriMilikKopku } = require(path.join(ROOT, 'electron', 'bersihkanClaude.js'));
+// DIPERBARUI 1.0.25: konektor Claude kembali sebagai Pengaturan › Asisten AI (permintaan pengguna) —
+// electron/bersihkanClaude.js dihapus (tidak boleh lagi melepas entri "kopku" setiap start).
+const claudeConfig = require(path.join(ROOT, 'electron', 'mcp', 'claudeConfig.js'));
 const { periksa, PENANDA } = require(path.join(ROOT, 'scripts', 'verifikasi-fuse.js'));
 const tunggu = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -147,6 +149,7 @@ test('package.json: Electron Fuses anti-bypass & titik masuk', () => {
   assert.equal(p.build.asar, true);
   assert.equal(p.build.asarUnpack, undefined, 'tidak ada kode proses utama di luar app.asar');
   // DIPERBARUI 1.0.14: extraResources kopku-mcp (cadangan konektor Claude) DIHAPUS.
+  // 1.0.25: tetap tidak perlu — Asisten AI memakai exe (--kopku-mcp-stdio, di dalam app.asar) atau paket .mcpb.
   assert.equal(p.build.extraResources, undefined);
   assert.match(p.scripts['postdist:win'], /verifikasi-fuse\.js/);
 });
@@ -160,52 +163,95 @@ test('verifikasi-fuse membaca fuse wire', () => {
   assert.equal(periksa(Buffer.from('tanpa penanda')).terbaca, false);
 });
 
-// DIPERBARUI 1.0.14 — fitur Claude DIHAPUS. Dua test 1.0.13 berikut diganti:
-//  - "konektor Claude: entri baru tanpa ELECTRON_RUN_AS_NODE" → pembersihan entri lama;
-//  - "entry.js --kopku-mcp-stdio menjawab MCP" → mode itu kini langsung keluar.
-test('1.0.14: entri "kopku" milik KOPKU dilepas dari Claude Desktop, server lain & berkas rusak tidak disentuh', () => {
+// DIPERBARUI 1.0.14 — fitur Claude DIHAPUS; dua test 1.0.13 diganti dengan uji pembersihan.
+// DIPERBARUI 1.0.25 — fitur kembali sebagai Pengaturan › Asisten AI (permintaan pengguna): uji pembersihan
+// diganti dengan uji pemasang konfigurasi Claude Desktop & mode stdio di dalam exe (tanpa RunAsNode).
+test('1.0.25: entri "kopku" dipasang/dilepas aman — server lain, berkas rusak, & entri milik program lain tidak disentuh', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-claude-'));
   const appData = path.join(home, 'Roaming');
   const lokal = path.join(home, 'Local');
+  const lingkungan = { platform: 'win32', env: { APPDATA: appData, LOCALAPPDATA: lokal }, home };
   const biasa = path.join(appData, 'Claude');
   const store = path.join(lokal, 'Packages', 'Claude_pzs8sxrjxfjjc', 'LocalCache', 'Roaming', 'Claude');
   const rusak = path.join(lokal, 'Packages', 'Claude_rusak', 'LocalCache', 'Roaming', 'Claude');
   for (const d of [biasa, store, rusak]) fs.mkdirSync(d, { recursive: true });
   const blender = { command: 'uvx', args: ['blender-mcp'] };
-  fs.writeFileSync(path.join(biasa, 'claude_desktop_config.json'), JSON.stringify({ preferences: { a: 1 }, mcpServers: { Blender: blender, kopku: { command: 'C:\\K\\KOPKU Desktop.exe', args: ['--kopku-mcp-stdio', '--data', 'D'] } } }));
-  fs.writeFileSync(path.join(store, 'claude_desktop_config.json'), JSON.stringify({ mcpServers: { kopku: { command: 'node', args: ['D:\\kopku\\KOPKU Desktop\\resources\\kopku-mcp\\stdio.js', '--data', 'D'] } } }));
+  // entri lama 1.0.12 (ELECTRON_RUN_AS_NODE) di Claude biasa; berkas Store belum ada; satu berkas rusak.
+  fs.writeFileSync(path.join(biasa, 'claude_desktop_config.json'), JSON.stringify({ preferences: { a: 1 }, mcpServers: { Blender: blender, kopku: { command: 'C:\\Lama\\KOPKU Desktop.exe', args: ['D:\\x\\electron\\mcp\\stdio.js'], env: { ELECTRON_RUN_AS_NODE: '1' } } } }));
   fs.writeFileSync(path.join(rusak, 'claude_desktop_config.json'), '{ rusak');
-  const dataDir = path.join(home, 'data');
-  fs.mkdirSync(path.join(dataDir, 'mcp'), { recursive: true });
-  fs.writeFileSync(path.join(dataDir, 'mcp', 'endpoint.json'), '{"token":"x"}');
-  const kunci = { 'kopku.claude.apikey': 'enc:x', 'kopku.claude.pengaturan': 'raw:x', lain: 'raw:y' };
-  const secure = { _load: () => kunci, remove: (k) => delete kunci[k], get: (k) => kunci[k] ?? null };
-  const h = bersihkanSisaClaude({ dataDir, secure, execPath: 'C:\\K\\KOPKU Desktop.exe', lingkungan: { platform: 'win32', env: { APPDATA: appData, LOCALAPPDATA: lokal }, home } });
-  assert.equal(h.config.length, 2);
-  const j1 = JSON.parse(fs.readFileSync(path.join(biasa, 'claude_desktop_config.json'), 'utf8'));
-  assert.deepEqual(j1, { preferences: { a: 1 }, mcpServers: { Blender: blender } });
-  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(store, 'claude_desktop_config.json'), 'utf8')), { mcpServers: {} });
+  const entri = claudeConfig.entriKopku({ execPath: 'C:\\K\\KOPKU Desktop.exe', dataDir: 'C:\\Users\\U\\AppData\\Roaming\\KOPKU Desktop' });
+  assert.deepEqual(entri, { command: 'C:\\K\\KOPKU Desktop.exe', args: ['--kopku-mcp-stdio', '--data', 'C:\\Users\\U\\AppData\\Roaming\\KOPKU Desktop'] });
+  assert.equal(entri.env, undefined, 'tanpa ELECTRON_RUN_AS_NODE (fuse RunAsNode tetap OFF)');
+
+  const h = claudeConfig.pasangKeClaude({ entri, lingkungan, now: 1 });
+  assert.equal(h.diubah.length, 2);
+  assert.equal(h.dilewati.length, 1, 'berkas rusak dilewati');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(biasa, 'claude_desktop_config.json'), 'utf8')), { preferences: { a: 1 }, mcpServers: { Blender: blender, kopku: entri } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(store, 'claude_desktop_config.json'), 'utf8')), { mcpServers: { kopku: entri } });
   assert.equal(fs.readFileSync(path.join(rusak, 'claude_desktop_config.json'), 'utf8'), '{ rusak');
-  assert.ok(fs.readdirSync(biasa).some((f) => /kopku-dilepas-\d+\.json$/.test(f)), 'cadangan dibuat');
-  assert.equal(fs.existsSync(path.join(dataDir, 'mcp')), false);
-  assert.deepEqual(Object.keys(kunci), ['lain']);
+  assert.ok(fs.existsSync(path.join(biasa, 'claude_desktop_config.kopku-cadangan-1.json')), 'cadangan dibuat');
+  const st = claudeConfig.statusClaude({ entri, lingkungan });
+  assert.equal(st.claudeTerdeteksi && st.terpasang && st.cocok, true);
+  assert.deepEqual(st.lokasi.find((l) => l.folder === biasa).serverLain, ['Blender']);
   // idempoten
-  assert.deepEqual(bersihkanSisaClaude({ dataDir, secure, execPath: 'x', lingkungan: { platform: 'win32', env: { APPDATA: appData, LOCALAPPDATA: lokal }, home } }).config, []);
-  // entri "kopku" milik pihak lain tidak dianggap milik KOPKU
-  assert.equal(entriMilikKopku({ command: 'python', args: ['kopku_server.py'] }, 'K.exe'), false);
-  assert.equal(entriMilikKopku({ command: 'K.exe', args: [], env: { ELECTRON_RUN_AS_NODE: '1' } }, 'k.EXE'), true);
+  assert.deepEqual(claudeConfig.pasangKeClaude({ entri, lingkungan, now: 2 }).diubah, []);
+  // KOPKU dipindah → hanya entri milik KOPKU yang diperbarui
+  const baru = claudeConfig.entriKopku({ execPath: 'D:\\Baru\\KOPKU Desktop.exe', dataDir: 'X' });
+  assert.equal(claudeConfig.perbaruiBilaBerubah({ entri: baru, lingkungan, now: 3 }).diubah.length, 2);
+  // lepas: hanya "kopku", Blender & preferensi tetap
+  assert.equal(claudeConfig.lepasDariClaude({ lingkungan, now: 4 }).diubah.length, 2);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(biasa, 'claude_desktop_config.json'), 'utf8')), { preferences: { a: 1 }, mcpServers: { Blender: blender } });
+  // "kopku" milik program lain: tidak ditimpa & tidak dilepas
+  const lain = { command: 'python', args: ['kopku_server.py'] };
+  fs.writeFileSync(path.join(store, 'claude_desktop_config.json'), JSON.stringify({ mcpServers: { kopku: lain } }));
+  const h2 = claudeConfig.pasangKeClaude({ entri, lingkungan, now: 5 });
+  assert.ok(h2.dilewati.some((x) => /milik program lain/.test(x.alasan)));
+  claudeConfig.lepasDariClaude({ lingkungan, now: 6 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(store, 'claude_desktop_config.json'), 'utf8')), { mcpServers: { kopku: lain } });
+  assert.equal(claudeConfig.entriMilikKopku(lain), false);
+  assert.equal(claudeConfig.entriMilikKopku({ command: 'K.exe', args: ['--kopku-mcp-stdio'] }), true);
+  // belum ada folder Claude sama sekali → dibuat di lokasi standar
+  const home2 = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-claude-'));
+  const l2 = { platform: 'win32', env: { APPDATA: path.join(home2, 'Roaming'), LOCALAPPDATA: path.join(home2, 'Local') }, home: home2 };
+  claudeConfig.pasangKeClaude({ entri, lingkungan: l2 });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home2, 'Roaming', 'Claude', 'claude_desktop_config.json'), 'utf8')), { mcpServers: { kopku: entri } });
 });
 
-test('1.0.14: entry.js --kopku-mcp-stdio langsung keluar (tanpa jendela, tanpa IPC, tanpa data)', async () => {
-  const p = spawn(process.execPath, ['-r', path.join(__dirname, 'electron-stub.js'), path.join(ROOT, 'electron', 'entry.js'), '--kopku-mcp-stdio', '--data', os.tmpdir()], { stdio: ['pipe', 'pipe', 'pipe'] });
+function jalankanStdioExe(args, masukan) {
+  const p = spawn(process.execPath, ['-r', path.join(__dirname, 'electron-stub.js'), path.join(ROOT, 'electron', 'entry.js'), ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
   let out = '';
   let err = '';
   p.stdout.on('data', (c) => (out += c));
   p.stderr.on('data', (c) => (err += c));
-  p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n');
-  const kode = await new Promise((r) => p.on('exit', r));
-  assert.equal(kode, 0);
-  assert.equal(out, '', 'tidak menjawab MCP');
-  assert.match(err, /\[stub\] exit 0 jendela=0 handler=0/, err);
-  assert.equal(fs.existsSync(path.join(ROOT, 'electron', 'mcp')), false, 'kode konektor sudah dihapus');
+  for (const m of masukan) p.stdin.write(JSON.stringify(m) + '\n');
+  p.stdin.end();
+  return new Promise((r) => p.on('exit', (kode) => r({ kode, out, err })));
+}
+
+test('1.0.25: entry.js --kopku-mcp-stdio menjawab MCP tanpa jendela, IPC, maupun database', async () => {
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-stdio-'));
+  const r = await jalankanStdioExe(['--kopku-mcp-stdio', '--data', data], [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'uji', version: '1' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/list' },
+    { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ringkasan_koperasi', arguments: {} } },
+  ]);
+  assert.equal(r.kode, 0, r.err);
+  const baris = r.out.trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(baris.map((b) => b.id), [1, 2, 3], 'notifikasi tidak dijawab; stdout hanya berisi pesan protokol');
+  assert.equal(baris[0].result.serverInfo.name, 'kopku');
+  assert.equal(baris[0].result.protocolVersion, '2025-06-18');
+  assert.equal(baris[1].result.tools.length, 14);
+  assert.ok(baris[1].result.tools.every((t) => t.annotations.readOnlyHint === true));
+  // KOPKU Desktop tidak terbuka → jawaban jelas, bukan galat protokol
+  assert.equal(baris[2].result.isError, true);
+  assert.match(baris[2].result.content[0].text, /KOPKU Desktop belum terbuka/);
+  assert.match(r.err, /\[stub\] exit 0 jendela=0 handler=0/, r.err);
+  assert.deepEqual(fs.readdirSync(data), [], 'folder data tidak disentuh');
+});
+
+test('1.0.25: mode stdio aplikasi terpasang tetap menolak saklar debug', async () => {
+  const r = await jalankanStdioExe(['--kopku-mcp-stdio', '--inspect', '--data', os.tmpdir()], [{ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }]);
+  assert.equal(r.kode, 1);
+  assert.equal(r.out, '');
 });

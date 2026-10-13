@@ -139,3 +139,18 @@ Dua saklar **ON/OFF yang berdiri sendiri** (keduanya OFF secara bawaan — KOPKU
 - Saklar tersimpan: saat KOPKU dibuka lagi, fitur yang ON otomatis menyala kembali.
 - Uji: `npm run test:lan` (Node 22+, tanpa Electron).
 - Rincian lengkap, keamanan, matriks izin, hasil uji: `docs/LAN-MULTIUSER-WHATSAPP.md`.
+
+
+## Asisten AI — MCP untuk Claude Desktop (1.0.25, opsional)
+
+Menu: **Pengaturan › Asisten AI** (sidebar, *Semua Pengaturan*, `Ctrl+K` "ai"/"claude", atau **Berkas › Asisten AI…**). Hanya Admin (izin ubah Pengaturan) yang dapat menyalakan.
+
+1. Pasang **Claude Desktop** (claude.ai/download), buka sekali dan masuk.
+2. Nyalakan **Hubungkan ke Claude** → konektor `kopku` otomatis didaftarkan di `claude_desktop_config.json` (server MCP lain tidak disentuh, cadangan dibuat).
+3. Tutup Claude Desktop sepenuhnya (tray › Quit), buka lagi, lalu bertanya — mis. "Berapa total tunggakan saat ini?". KOPKU Desktop harus tetap terbuka.
+
+- **Baca saja** (14 alat), mengikuti Permission Matrix & lisensi pengguna yang menyalakan; **data per anggota** punya sakelar sendiri (bawaan mati); NIK/alamat/nomor HP/tanggal lahir/nomor rekening tidak pernah dikirim.
+- Hanya `127.0.0.1` + token acak; log pemakaian tanpa isi data di `<folder data>/mcp/pemakaian.log`.
+- Cara cadangan: **ekstensi `.mcpb`** (Node.js bawaan Claude Desktop) atau **pasang manual** (potongan JSON di layar).
+- Uji: `npm run test:mcp`; uji layar: `node test/smoke-asisten-ai-chromium.js <folder-hasil>`; Electron nyata: `test/smoke-asisten-ai.js`.
+- Rincian: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md`.

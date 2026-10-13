@@ -7,7 +7,7 @@
  * HTTP lisensi, server LAN sinkron, QR). SELURUH logika bisnis berjalan
  * di renderer dengan kode yang sama persis dengan aplikasi Android.
  */
-const { app, BrowserWindow, protocol, net, ipcMain, Menu, shell, dialog, session } = require('electron');
+const { app, BrowserWindow, protocol, net, ipcMain, Menu, shell, dialog, session, clipboard } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -21,8 +21,9 @@ const { FirewallHost } = require('./hosts/firewallHost');
 const { KopkuLanServer } = require('./server');
 const { IpcServiceBridge } = require('./server/serviceBridge');
 const lanFirewall = require('./server/firewallLan');
-// 1.0.14 — fitur Claude (Asisten & konektor Claude Desktop) DIHAPUS; sisa-sisanya dibersihkan.
-const { bersihkanSisaClaude } = require('./bersihkanClaude');
+// 1.0.25 — Pengaturan › Asisten AI: konektor MCP lokal untuk Claude Desktop (baca saja, bawaan mati).
+const { McpHost } = require('./mcp/host');
+const { daftarkanIpcAsistenAi } = require('./mcp/ipc');
 // 1.0.13 — pengamanan anti-bypass (saklar debug, DevTools, webContents).
 const keamanan = require('./keamanan');
 const uri = require('./uri');
@@ -55,6 +56,7 @@ if (!app.requestSingleInstanceLock()) {
 let win = null;
 let hosts = null;
 let lanMulti = null;
+let asistenAi = null;
 
 function dirs() {
   const data = app.getPath('userData');
@@ -279,9 +281,37 @@ function registerLanMultiUser(d, secure) {
   h('lanmu:sesiCabut', (input) => lanMulti.sesiCabut(input));
   h('lanmu:audit', (opsi) => lanMulti.auditDaftar(opsi));
 
-  // ---- 1.0.14: fitur Claude dihapus — lepas entri "kopku" di Claude Desktop, folder mcp/,
-  // dan kunci API Claude (sekali jalan, idempoten, tidak pernah menggagalkan start).
-  bersihkanSisaClaude({ dataDir: d.data, secure: hosts.secure, execPath: process.execPath });
+  registerAsistenAi(d, bridge, h);
+}
+
+/**
+ * Pengaturan › Asisten AI (1.0.25) — konektor MCP lokal untuk Claude Desktop.
+ * Memakai jembatan adapter yang SAMA dengan Server LAN (operasi baca saja).
+ * Kanal `asistenAi:*` hanya diterima dari jendela utama (pembungkus `h`).
+ */
+function registerAsistenAi(d, bridge, h) {
+  asistenAi = new McpHost({
+    dataDir: d.data,
+    bridge,
+    versi: app.getVersion(),
+    pastikanAdapter: () => lanMulti._pastikanAdapter(),
+  });
+  hosts.asistenAi = asistenAi;
+  // Uji dari source saja: lokasi konfigurasi Claude Desktop tiruan (aplikasi terpasang memakai lokasi asli).
+  const rumahUji = MODE_UJI && process.env.KOPKU_CLAUDE_HOME ? process.env.KOPKU_CLAUDE_HOME : null;
+  daftarkanIpcAsistenAi({
+    h,
+    host: asistenAi,
+    dataDir: d.data,
+    execPath: process.execPath,
+    // Dijalankan dari source (`electron .`): exe = electron, perlu folder aplikasi sebagai argumen pertama.
+    appPath: app.isPackaged ? null : app.getAppPath(),
+    versi: app.getVersion(),
+    ikon: path.join(__dirname, '..', 'build', 'icon.png'),
+    shell,
+    clipboard,
+    lingkungan: rumahUji ? { platform: 'win32', env: { APPDATA: path.join(rumahUji, 'Roaming'), LOCALAPPDATA: path.join(rumahUji, 'Local') }, home: rumahUji } : undefined,
+  });
 }
 
 function registerProtocols(d) {
@@ -312,6 +342,7 @@ function buildMenu() {
       submenu: [
         { label: 'Sinkron HP…', accelerator: 'CmdOrCtrl+Shift+S', click: kirim('sinkron') },
         { label: 'LAN & WhatsApp…', click: kirim('lanwa') },
+        { label: 'Asisten AI…', click: kirim('asistenai') },
         { label: 'Backup & Restore…', accelerator: 'CmdOrCtrl+B', click: kirim('backup') },
         { type: 'separator' },
         { label: 'Buka Folder Data', click: () => hosts && shell.openPath(app.getPath('userData')) },
@@ -390,6 +421,12 @@ function createWindow() {
     if (!lanMulti) return;
     const p = lanMulti.aktif && lanMulti.ids ? hosts.lanBridge.pasang(lanMulti.ids) : lanMulti.mulaiBilaAktif();
     Promise.resolve(p).catch(() => undefined);
+    // Asisten AI tersimpan ON: host lokal menyala; adapter dipasang saat pertama dipakai
+    // (atau sekarang bila sudah pernah dipasang sebelum halaman dimuat ulang).
+    if (asistenAi && asistenAi.baca().aktif) {
+      asistenAi.mulaiBilaAktif().catch(() => undefined);
+      if (lanMulti.ids && !hosts.lanBridge.siap) hosts.lanBridge.pasang(lanMulti.ids).catch(() => undefined);
+    }
   });
   win.loadURL('app://kopku/');
   if (MODE_UJI && process.env.KOPKU_SMOKE) require(process.env.KOPKU_SMOKE)(win, app);
@@ -426,6 +463,7 @@ app.on('will-quit', () => {
   try {
     hosts && hosts.lan.stop();
     lanMulti && lanMulti.henti();
+    asistenAi && asistenAi.henti();
     hosts && hosts.sqlite.closeAll();
   } catch {
     /* abaikan */

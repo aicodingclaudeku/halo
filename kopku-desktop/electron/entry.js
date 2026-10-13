@@ -2,14 +2,12 @@
 /**
  * Titik masuk KOPKU Desktop (package.json "main") — sejak 1.0.13.
  *
- * 1.0.14: konektor Claude Desktop DIHAPUS. Claude Desktop yang masih memuat
- * entri lama (`KOPKU Desktop.exe --kopku-mcp-stdio`) sebelum KOPKU sempat
- * membersihkannya tidak boleh membuka aplikasi lengkap: proses itu langsung
- * keluar tanpa jendela, tanpa database.
+ * `KOPKU Desktop.exe --kopku-mcp-stdio --data <folder>` dijalankan oleh Claude Desktop
+ * untuk Pengaturan › Asisten AI (1.0.25): server MCP stdio tanpa jendela & tanpa database
+ * (electron/mcp/modeStdio.js). Selain itu aplikasi lengkap dimuat seperti biasa.
  */
 if (process.argv.includes('--kopku-mcp-stdio')) {
-  const { app } = require('electron');
-  app.exit(0);
+  require('./mcp/modeStdio');
 } else {
   require('./main');
 }

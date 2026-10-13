@@ -22,6 +22,7 @@ VERSI=$(node -p "require('./package.json').version")
 AKHIRAN=${AKHIRAN:-LAN}
 # Pastikan menu Pengaturan › LAN & WhatsApp terpasang di bundle renderer (idempoten).
 node scripts/pasang-menu-lan-wa.js
+node scripts/pasang-menu-asisten-ai.js
 OUT=dist/win-unpacked
 rm -rf "$OUT" && mkdir -p "$OUT"
 unzip -q "$ELECTRON_ZIP" -d "$OUT"

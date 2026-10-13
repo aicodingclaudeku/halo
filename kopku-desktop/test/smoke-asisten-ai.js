@@ -1,0 +1,183 @@
+'use strict';
+// Uji asap "Pengaturan › Asisten AI" di ELECTRON NYATA (main.js + preload.js + IPC + renderer terpasang):
+//  1) Koperasi, anggota, simpanan, pinjaman dibuat lewat service asli; lisensi DIGANTI TIRUAN (khusus uji).
+//  2) Masuk sebagai Admin lewat layar Login asli; Berkas › Asisten AI… membuka layarnya.
+//  3) Sakelar "Hubungkan ke Claude" diklik di layar (dialog konfirmasi asli) → host MCP menyala dan entri
+//     "kopku" ditulis ke claude_desktop_config.json (folder Claude TIRUAN: KOPKU_CLAUDE_HOME).
+//  4) Perintah PERSIS dari entri itu dijalankan seperti Claude Desktop (exe Electron --kopku-mcp-stdio):
+//     initialize → tools/list → tools/call; jawabannya berasal dari service KOPKU di jendela ini.
+// Jalankan (Linux: di bawah xvfb-run):
+//   KOPKU_USERDATA=<dir> KOPKU_CLAUDE_HOME=<dir> KOPKU_SMOKE=$PWD/test/smoke-asisten-ai.js KOPKU_SMOKE_OUT=<dir> electron .
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+module.exports = (win, app) => {
+  const out = process.env.KOPKU_SMOKE_OUT;
+  fs.mkdirSync(out, { recursive: true });
+  const tunggu = (ms) => new Promise((r) => setTimeout(r, ms));
+  const js = (c) => win.webContents.executeJavaScript(c);
+  const teks = () => js('document.body.innerText');
+  const shot = async (nama) => fs.writeFileSync(path.join(out, nama + '.png'), (await win.webContents.capturePage()).toPNG());
+  const hasil = {};
+  const cek = (nama, ok, info) => {
+    hasil[nama] = !!ok;
+    console.log(`ASISTEN-SMOKE ${ok ? 'OK  ' : 'GAGAL'} ${nama}${info ? ' :: ' + info : ''}`);
+  };
+  const isiInput = (indeks, nilai) =>
+    js(`(() => { const i = document.querySelectorAll('input')[${indeks}]; if (!i) return false;
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; set.call(i, ${JSON.stringify(nilai)});
+      i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const klikTombol = (re) => js(`(() => { const b = [...document.querySelectorAll('[role=button]')].find((x) => ${re}.test((x.innerText || '').trim())); if (b) b.click(); return !!b; })()`);
+  const klikTestId = (id) => js(`(() => { const e = document.querySelector('[data-testid="${id}"]'); if (!e) return false; (e.querySelector('input') || e).click(); return true; })()`);
+
+  /** Klien MCP stdio — perintah diambil dari claude_desktop_config.json, persis seperti Claude Desktop. */
+  function klienDariConfig(entri) {
+    // Lingkungan seperti Claude Desktop: tanpa variabel uji/Electron milik proses KOPKU ini.
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k2]) => !/^(KOPKU_|ELECTRON_|CHROME_)/.test(k2)));
+    // Linux sebagai root (container uji): Chromium mewajibkan --no-sandbox sebelum JS berjalan. Tidak berlaku di Windows/macOS.
+    const args = process.platform === 'linux' && process.getuid && process.getuid() === 0 ? ['--no-sandbox', ...entri.args] : entri.args;
+    const p = spawn(entri.command, args, { stdio: ['pipe', 'pipe', 'pipe'], env });
+    let galat = '';
+    let buf = '';
+    const bukanJson = [];
+    const tunggu2 = new Map();
+    p.stdout.on('data', (c) => {
+      buf += c;
+      let i;
+      while ((i = buf.indexOf('\n')) >= 0) {
+        const l = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        let m;
+        try {
+          m = JSON.parse(l);
+        } catch {
+          bukanJson.push(l);
+          continue;
+        }
+        if (tunggu2.has(m.id)) tunggu2.get(m.id)(m);
+      }
+    });
+    p.stderr.on('data', (c) => (galat += c));
+    let id = 0;
+    return {
+      kirim: (method, params) =>
+        new Promise((r, j) => {
+          const n = ++id;
+          tunggu2.set(n, r);
+          setTimeout(() => j(new Error('timeout ' + method + ' :: ' + galat.slice(-800))), 30000);
+          p.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n');
+        }),
+      tutup: () => new Promise((r) => { p.on('exit', r); p.stdin.end(); }),
+      bukanJson,
+    };
+  }
+
+  win.setSize(1440, 900);
+  win.webContents.once('did-finish-load', async () => {
+    try {
+      await tunggu(8000);
+      const { bangunIndeks } = require('../electron/server/bundleIndex');
+      const ids = bangunIndeks(path.join(__dirname, '..', 'renderer')).modul;
+      const lisensiTiruan = `const L = __r(ids.lisensi); const asli = L.getLicenseStatus;
+        L.getLicenseStatus = async (...a) => Object.assign({}, await asli(...a).catch(() => ({})), { allowAppAccess: true });
+        L.hasValidLocalLicense = async () => true;`;
+      await js(`(async () => {
+        const ids = ${JSON.stringify(ids)}; const R = (k) => __r(ids[k]);
+        await R('koperasi').setupKoperasi({ nama: 'Koperasi Maju Bersama', tahunBuku: 2026, adminUsername: 'admin', adminPassword: 'Admin#Kopku2026' });
+        ${lisensiTiruan}
+        const db = await R('db').getDb();
+        const admin = (await db.getFirstAsync("SELECT id FROM app_user WHERE username = 'admin'")).id;
+        const nama = ['Siti Aminah', 'Budi Santoso', 'Rina Wulandari'];
+        for (let i = 0; i < nama.length; i++) {
+          const a = (await R('anggota').createAnggota(admin, { namaLengkap: nama[i], tanggalBergabung: '2025-01-10', nomorHp: '08129999000' + i, status: 'AKTIF' })).id;
+          await R('simpanan').setorSimpanan({ anggotaId: a, jenis: 'POKOK', tanggal: '2026-01-15', nominal: 100000, sumberDana: 'KAS', createdBy: admin });
+          await R('simpanan').setorSimpanan({ anggotaId: a, jenis: 'WAJIB', tanggal: '2026-01-15', periode: '2026-01', nominal: 50000, sumberDana: 'KAS', createdBy: admin });
+          await R('simpanan').setorSimpanan({ anggotaId: a, jenis: 'SUKARELA', tanggal: '2026-01-15', nominal: 10000000, sumberDana: 'KAS', createdBy: admin });
+          const p = await R('pinjaman').ajukanPinjaman({ anggotaId: a, jumlahPinjaman: 3000000, tanggal: '2026-06-15', tenor: 6, satuanTenor: 'BULAN', metodeJasa: 'FLAT', persentaseJasa: 1.5, biayaAdminTipe: 'TIDAK_ADA', biayaAdminNilai: 0, dendaAktif: false, createdBy: admin });
+          await R('pinjaman').cairkanPinjaman({ pinjamanId: p.id, approvedBy: admin, tanggalPencairan: '2026-06-15', sumberDana: 'KAS' });
+        }
+        return true; })()`);
+      win.webContents.once('did-finish-load', async () => {
+        try {
+          await js(`(() => { const ids = ${JSON.stringify(ids)}; ${lisensiTiruan} return true; })()`).catch(() => undefined);
+          await tunggu(7000);
+          let t = await teks();
+          if (/Masuk|Login|Username/i.test(t)) {
+            await isiInput(0, 'admin');
+            await isiInput(1, 'Admin#Kopku2026');
+            await tunggu(300);
+            await js(`(() => { const b = [...document.querySelectorAll('[role=button],button,div')].filter((e) => e.childElementCount <= 2 && /^\\s*Masuk\\s*$/.test(e.textContent)); const x = b[b.length - 1]; if (x) x.click(); return !!x; })()`);
+            await tunggu(5000);
+          }
+          t = await teks();
+          cek('masuk ke aplikasi', /Dashboard/.test(t) && /Pengaturan/.test(t));
+          cek('preload mengekspos kopkuDesktop.asistenAi', await js('typeof kopkuDesktop.asistenAi.status === "function" && typeof kopkuDesktop.asistenAi.atur === "function"'));
+
+          // ---- Berkas › Asisten AI… (perintah menu Electron yang sama)
+          win.webContents.send('menu', 'asistenai');
+          await tunggu(2500);
+          await shot('50-asisten-mati');
+          t = await teks();
+          cek('menu Berkas › Asisten AI… membuka layar', /Hubungkan ke Claude/.test(t) && /Pasang di Claude Desktop/.test(t));
+          cek('bawaan MATI', (await js('kopkuDesktop.asistenAi.status()')).aktif === false);
+
+          // ---- nyalakan lewat sakelar di layar + dialog konfirmasi asli
+          await klikTestId('saklar-asisten-ai');
+          await tunggu(800);
+          await shot('51-konfirmasi');
+          await klikTombol('/^Hubungkan$/');
+          await tunggu(3000);
+          await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+          await tunggu(800);
+          const st = await js('kopkuDesktop.asistenAi.status()');
+          cek('host MCP menyala atas nama admin', st.aktif && st.berjalan && st.pengguna && st.pengguna.username === 'admin', JSON.stringify({ aktif: st.aktif, berjalan: st.berjalan, port: st.port }));
+          cek('entri "kopku" terpasang & cocok di Claude Desktop', st.claude.terpasang && st.claude.cocok, st.claude.lokasi.map((l) => l.berkas).join(','));
+          const berkasConf = st.claude.lokasi.find((l) => l.terpasang).berkas;
+          const entri = JSON.parse(fs.readFileSync(berkasConf, 'utf8')).mcpServers.kopku;
+          cek('entri menjalankan exe KOPKU (tanpa Node.js, tanpa ELECTRON_RUN_AS_NODE)', entri.command === process.execPath && entri.args.includes('--kopku-mcp-stdio') && !entri.env, JSON.stringify(entri));
+
+          // ---- jalankan entri persis seperti Claude Desktop
+          const c = klienDariConfig(entri);
+          const init = await c.kirim('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-ai', version: '0.1.0' } });
+          cek('Electron --kopku-mcp-stdio: initialize', init.result && init.result.serverInfo.name === 'kopku');
+          const daftar = await c.kirim('tools/list', {});
+          cek('tools/list (per anggota OFF → 7 alat)', daftar.result.tools.length === 7, String(daftar.result.tools.length));
+          const r = await c.kirim('tools/call', { name: 'ringkasan_koperasi', arguments: {} });
+          const j = JSON.parse(r.result.content[0].text);
+          cek('ringkasan_koperasi dari jendela KOPKU (adapter disuntikkan lewat IPC asli)', !r.result.isError && j.koperasi === 'Koperasi Maju Bersama' && j.anggotaAktif === 3 && j.pinjaman.jumlahPinjamanAktif === 3, r.result.content[0].text.slice(0, 160));
+          const pos = await c.kirim('tools/call', { name: 'laporan_keuangan', arguments: { jenis: 'posisi_keuangan' } });
+          cek('laporan posisi keuangan seimbang', JSON.parse(pos.result.content[0].text).data.isBalanced === true);
+          // per anggota lewat sakelar di layar
+          await klikTestId('saklar-asisten-per-anggota');
+          await tunggu(700);
+          await klikTombol('/^Izinkan$/');
+          await tunggu(2500);
+          await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+          const tg = await c.kirim('tools/call', { name: 'daftar_tunggakan', arguments: {} });
+          cek('per anggota ON → daftar_tunggakan tanpa nomor HP', !tg.result.isError && /Siti Aminah|Budi Santoso|Rina Wulandari/.test(tg.result.content[0].text) && !/0812999/.test(tg.result.content[0].text), tg.result.content[0].text.slice(0, 120));
+          cek('stdout server stdio hanya berisi JSON-RPC', c.bukanJson.length === 0, c.bukanJson.slice(0, 2).join(' / '));
+          await tunggu(5500);
+          await shot('52-asisten-menyala');
+          await js(`(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 99999; return true; })()`);
+          await tunggu(500);
+          await shot('53-aktivitas');
+          t = await teks();
+          cek('layar menampilkan aktivitas pemakaian', /Ringkasan koperasi/.test(t) && /Daftar tunggakan/.test(t));
+          await c.tutup();
+        } catch (e) {
+          console.log('ASISTEN-SMOKE-ERR', e && e.stack);
+          hasil.galat = false;
+        }
+        fs.writeFileSync(path.join(out, 'hasil-asisten-ai.json'), JSON.stringify(hasil, null, 1));
+        const semua = Object.values(hasil);
+        console.log(`ASISTEN-SMOKE SELESAI ${semua.filter(Boolean).length}/${semua.length}`);
+        app.exit(semua.every(Boolean) ? 0 : 1);
+      });
+      win.webContents.reload();
+    } catch (e) {
+      console.log('ASISTEN-SMOKE-ERR', e && e.stack);
+      app.exit(1);
+    }
+  });
+};

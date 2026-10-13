@@ -111,7 +111,11 @@ test('berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host
   // DIPERBARUI 1.0.24 / RC-S133.6.9: hash bundle, kopku-setup.nsi (versi 1.0.24) dan package-lock.json diperbarui
   // setelah scripts/tambal-renderer-rc-s133.6.9.js (menu Penurunan Nilai Jasa Pinjaman, akun 1-1215/5-2110)
   // — lihat docs/laporan-tambal-rc-s133.6.9.json. Skema TETAP v82.
+  // DIPERBARUI 1.0.25: menu "Pengaturan › Asisten AI" (scripts/pasang-menu-asisten-ai.js) juga disisipkan;
+  // dilepas lebih dulu, lalu menu LAN & WhatsApp — sisanya harus byte-identik dengan bundle 1.0.24 (hash tidak berubah).
+  // Hash kopku-setup.nsi & package-lock.json diperbarui hanya karena nomor versi 1.0.25. Skema TETAP v82.
   const { lepas } = require(path.join(ROOT, 'scripts', 'pasang-menu-lan-wa.js'));
+  const asistenAi = require(path.join(ROOT, 'scripts', 'pasang-menu-asisten-ai.js'));
   for (const [p, h] of Object.entries(m)) {
     const f = path.join(ROOT, p);
     if (!fs.existsSync(f)) {
@@ -123,7 +127,8 @@ test('berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host
     if (/^renderer\/_expo\/static\/js\/web\/entry-.*\.js$/.test(p)) {
       const teks = isi.toString('utf8');
       assert.ok(teks.includes('name:"LanWhatsApp"'), 'menu LAN & WhatsApp terpasang di bundle');
-      isi = Buffer.from(lepas(teks), 'utf8');
+      assert.ok(teks.includes('name:"AsistenAi"'), 'menu Asisten AI terpasang di bundle');
+      isi = Buffer.from(lepas(asistenAi.lepas(teks)), 'utf8');
     }
     if (crypto.createHash('sha256').update(isi).digest('hex') !== h) beda.push(`${p} berubah`);
   }
