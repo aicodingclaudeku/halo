@@ -13,7 +13,7 @@ ManifestDPIAware true
 
 !define APP_NAME "KOPKU Desktop"
 !define APP_EXE "KOPKU Desktop.exe"
-!define APP_VERSION "1.0.26"
+!define APP_VERSION "1.0.27"
 !define PUBLISHER "KOPKU"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\KOPKUDesktop"
 !ifndef SRC
@@ -28,7 +28,7 @@ OutFile "${OUT}"
 InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"
 BrandingText "KOPKU — Keuangan Koperasi Simpan Pinjam"
-VIProductVersion "1.0.26.0"
+VIProductVersion "1.0.27.0"
 VIAddVersionKey /LANG=1057 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=1057 "CompanyName" "${PUBLISHER}"
 VIAddVersionKey /LANG=1057 "FileDescription" "Pemasang ${APP_NAME}"

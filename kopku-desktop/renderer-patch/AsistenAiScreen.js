@@ -8,7 +8,7 @@
  * dependensi). Urutan `d[...]` sesuai DEPENDENSI di skrip pemasang.
  *
  * Menghubungkan KOPKU Desktop dengan Claude Desktop lewat MCP (Model Context
- * Protocol) di komputer ini — BACA SAJA. Seluruh aksi lewat
+ * Protocol) di komputer ini — membaca; mengubah data hanya bila diizinkan (1.0.27). Seluruh aksi lewat
  * `window.kopkuDesktop.asistenAi` (preload) → main process (electron/mcp/).
  */
 'use strict';
@@ -157,7 +157,7 @@ function AsistenAiScreen() {
       if (!hidup.current) return;
       setSt(x);
       setGalatMuat('');
-      for (const a of x.alat || []) LABEL_ALAT[a.nama] = a.judul;
+      for (const a of (x.alat || []).concat(x.alatTulis || [])) LABEL_ALAT[a.nama] = a.judul;
     } catch (e) {
       if (hidup.current) setGalatMuat(String((e && e.message) || e));
     }
@@ -218,7 +218,7 @@ function AsistenAiScreen() {
       'Hubungkan KOPKU ke Claude?',
       'Claude (Anthropic) akan dapat MEMBACA data koperasi dari KOPKU Desktop di komputer ini saat Anda bertanya di aplikasi Claude Desktop, atas nama Anda (' +
         ((pengguna && (pengguna.nama || pengguna.username)) || 'pengguna ini') +
-        ') dan sesuai izin Anda. Data yang dibaca dikirim ke Claude sebagai bagian percakapan. Claude tidak dapat mencatat atau mengubah transaksi. NIK, alamat, nomor HP, tanggal lahir, dan nomor rekening tidak pernah dikirim.',
+        ') dan sesuai izin Anda. Data yang dibaca dikirim ke Claude sebagai bagian percakapan. Claude tidak dapat mengubah data kecuali Anda juga menyalakan "Izinkan Claude mengubah data". NIK, alamat, nomor HP, tanggal lahir, dan nomor rekening tidak pernah dikirim.',
       [{ text: 'Batal', style: 'cancel' }, { text: 'Hubungkan', style: 'default', onPress: terapkan }],
       'warning'
     );
@@ -230,6 +230,21 @@ function AsistenAiScreen() {
       'Izinkan data per anggota?',
       'Claude akan dapat membaca nama & nomor anggota, saldo simpanan, pinjaman, jadwal angsuran, dan tunggakan per anggota. Data pribadi (NIK, alamat, nomor HP, tanggal lahir, nomor rekening) tetap tidak dikirim.',
       [{ text: 'Batal', style: 'cancel' }, { text: 'Izinkan', style: 'default', onPress: terapkan }],
+      'warning'
+    );
+  };
+  const ubahBolehTulis = (v) => {
+    const terapkan = () =>
+      jalankan('bolehTulis', () => A.atur({ bolehTulis: v, penggunaId: pid }), v
+        ? 'Claude kini dapat mengubah data (selalu lewat pratinjau + persetujuan Anda). Daftar alat di Claude diperbarui otomatis.'
+        : 'Claude kembali hanya dapat membaca data.');
+    if (!v) return terapkan();
+    notify(
+      'Izinkan Claude MENGUBAH data koperasi?',
+      'Claude akan dapat mencatat transaksi (setor/tarik simpanan, ajukan/cairkan pinjaman, bayar angsuran, pelunasan, kas masuk/keluar/transfer), menambah & mengubah data anggota, MENGIMPOR Data Awal dari Excel, dan MENGOREKSI transaksi dengan jurnal pembalik — atas nama ' +
+        ((pengguna && (pengguna.nama || pengguna.username)) || 'pengguna ini') +
+        ' dan sesuai izinnya.\n\nPengaman: setiap perubahan selalu dipratinjau dulu dan HANYA disimpan setelah Anda menyetujuinya di Claude (kode konfirmasi sekali pakai); backup otomatis dibuat sebelum perubahan; semua aturan KOPKU (periode tutup buku, saldo, SHU) tetap berlaku; tidak ada data yang dihapus. Data per anggota ikut diizinkan.\n\nPeriksa setiap pratinjau dengan teliti — AI dapat keliru.',
+      [{ text: 'Batal', style: 'cancel' }, { text: 'Izinkan mengubah data', style: 'destructive', onPress: terapkan }],
       'warning'
     );
   };
@@ -265,7 +280,7 @@ function AsistenAiScreen() {
     { testID: 'kartu-asisten-saklar' },
     h(Saklar, {
       judul: 'Hubungkan ke Claude',
-      sub: 'Tanya data koperasi dengan bahasa sehari-hari dari aplikasi Claude Desktop di komputer ini. Hanya membaca — tidak dapat mencatat atau mengubah transaksi.',
+      sub: 'Tanya data koperasi dengan bahasa sehari-hari dari aplikasi Claude Desktop di komputer ini. Membaca data; mengubah data hanya bila diizinkan di bawah.',
       ikon: 'sparkles-outline',
       nilai: aktif,
       onUbah: ubahAktif,
@@ -290,6 +305,21 @@ function AsistenAiScreen() {
         disabled: !bolehUbah || !pid,
         sibuk: sibuk === 'perAnggota',
         testID: 'saklar-asisten-per-anggota',
+      })
+    ),
+    h(View, { style: s.blok },
+      h(Saklar, {
+        judul: 'Izinkan Claude mengubah data',
+        sub: st.bolehTulis
+          ? 'ON: Claude dapat mencatat transaksi, menambah/mengubah anggota, mengimpor Data Awal (Excel), dan mengoreksi transaksi (jurnal pembalik) — SELALU lewat pratinjau dan persetujuan Anda di Claude. Backup otomatis sebelum perubahan.'
+          : 'MATI: Claude hanya membaca. Nyalakan agar Claude dapat membantu input transaksi, import data, dan koreksi.',
+        ikon: 'create-outline',
+        nilai: !!st.bolehTulis,
+        onUbah: ubahBolehTulis,
+        disabled: !bolehUbah || !pid,
+        sibuk: sibuk === 'bolehTulis',
+        lencana: st.bolehTulis ? h(Lencana, { warna: 'kuning', teks: 'Ubah data aktif', ikon: 'warning-outline' }) : null,
+        testID: 'saklar-asisten-ubah-data',
       })
     ),
     h(View, { style: [s.blok, s.privasi] },
@@ -383,7 +413,7 @@ function AsistenAiScreen() {
       )
     ),
     h(View, { style: s.blok },
-      h(Subjudul, { teks: `Alat yang dapat dipakai Claude (${st.jumlahAlat} dari ${(st.alat || []).length}) — semuanya baca saja` }),
+      h(Subjudul, { teks: `Alat baca (${st.jumlahAlat} dari ${(st.alat || []).length}) — tidak mengubah apa pun` }),
       h(View, { style: s.chipBaris },
         (st.alat || []).map((a) =>
           h(View, { key: a.nama, style: [s.chip, a.aktif ? s.chipAktif : null] },
@@ -393,6 +423,20 @@ function AsistenAiScreen() {
         )
       ),
       !st.perAnggota ? h(Text, { style: s.catatan }, 'Alat bergembok memerlukan "Izinkan data per anggota". Alat juga hanya berjalan bila pengguna punya izin Lihat pada menu terkait.') : null
+    ),
+    h(View, { style: s.blok },
+      h(Subjudul, { teks: `Alat ubah data (${(st.alatTulis || []).length}) — ${st.bolehTulis ? 'aktif, selalu pratinjau + persetujuan' : 'MATI'}` }),
+      h(View, { style: s.chipBaris },
+        (st.alatTulis || []).map((a) =>
+          h(View, { key: a.nama, style: [s.chip, a.aktif ? s.chipUbah : null] },
+            h(Ionicons, { name: a.aktif ? 'create-outline' : 'lock-closed-outline', size: 14, color: a.aktif ? C.warning : C.textFaint }),
+            h(Text, { style: [s.chipTeks, a.aktif && { color: C.warning }] }, a.judul)
+          )
+        )
+      ),
+      st.bolehTulis
+        ? h(Text, { style: s.catatan }, 'Contoh: "Catat setoran wajib Oktober Rp50.000 untuk A00012", "Import berkas C:\\Users\\...\\Downloads\\saldo-lama.xlsx sebagai saldo lama cut-off 1 Juli 2026", "Koreksi transaksi SP-WAJIB-2026-000123 karena nominal salah".')
+        : null
     )
   );
 
@@ -413,8 +457,10 @@ function AsistenAiScreen() {
         ? h(Text, { style: s.redup }, 'Belum ada aktivitas. Setiap kali Claude memakai alat, waktu, nama alat, dan hasilnya (berhasil/gagal) dicatat di sini — tanpa isi data.')
         : riwayat.map((x, i) =>
             h(View, { key: i, style: s.logBaris },
-              h(Lencana, { warna: x.status === 'BERHASIL' ? 'hijau' : 'merah', teks: x.status === 'BERHASIL' ? 'Berhasil' : 'Gagal' }),
-              h(Text, { style: [s.td, { width: 190 }], numberOfLines: 1 }, x.alat === '(pengaturan)' ? 'Pengaturan diubah' : LABEL_ALAT[x.alat] || x.alat),
+              /^UBAH:/.test(x.ket || '')
+                ? h(Lencana, { warna: 'kuning', teks: 'Diubah', ikon: 'create-outline' })
+                : h(Lencana, { warna: x.status === 'BERHASIL' ? 'hijau' : 'merah', teks: x.status === 'BERHASIL' ? 'Berhasil' : 'Gagal' }),
+              h(Text, { style: [s.td, { width: 190 }], numberOfLines: 1 }, x.alat === '(pengaturan)' ? 'Pengaturan diubah' : x.alat === '(backup otomatis)' ? 'Backup otomatis' : LABEL_ALAT[x.alat] || x.alat),
               h(Text, { style: s.logTeks, numberOfLines: 1 }, x.ket || x.ms || ''),
               h(Text, { style: s.logWaktu }, waktuLokal(x.waktu))
             )
@@ -425,7 +471,7 @@ function AsistenAiScreen() {
   return h(
     ScrollView,
     { style: s.layar, contentContainerStyle: UI.screenContent, testID: 'layar-asisten-ai' },
-    h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari aplikasi Claude Desktop. Mati secara bawaan.'),
+    h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari aplikasi Claude Desktop, dan (bila diizinkan) membantu mencatat transaksi, mengimpor data, serta mengoreksi transaksi. Mati secara bawaan.'),
     !bolehUbah ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginBottom: 12 }] }, h(Ionicons, { name: 'lock-closed-outline', size: 16, color: C.warning }), h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'Hanya pengguna dengan izin ubah Pengaturan (Admin) yang dapat menyalakan/mematikan Asisten AI.')) : null,
     h(View, { style: s.kolom }, kartuSaklar, kartuPasang, kartuContoh, kartuAktivitas)
   );
@@ -474,6 +520,7 @@ const s = StyleSheet.create({
   chipBaris: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: T.radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface },
   chipAktif: { borderColor: '#9CCBB0', backgroundColor: C.primaryLight },
+  chipUbah: { borderColor: C.warningBorder, backgroundColor: C.warningBg },
   chipTeks: { fontSize: 12, fontWeight: '600', color: C.textMuted },
   logBaris: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#F0F2F5' },
   logTeks: { flex: 1, fontSize: 12.5, color: C.textMuted },

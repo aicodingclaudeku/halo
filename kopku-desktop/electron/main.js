@@ -24,6 +24,7 @@ const lanFirewall = require('./server/firewallLan');
 // 1.0.25 — Pengaturan › Asisten AI: konektor MCP lokal untuk Claude Desktop (baca saja, bawaan mati).
 const { McpHost } = require('./mcp/host');
 const { daftarkanIpcAsistenAi } = require('./mcp/ipc');
+const { pasangAdapterTulis, indeksTulis } = require('./mcp/adapterTulis');
 // 1.0.13 — pengamanan anti-bypass (saklar debug, DevTools, webContents).
 const keamanan = require('./keamanan');
 const uri = require('./uri');
@@ -295,6 +296,10 @@ function registerAsistenAi(d, bridge, h) {
     bridge,
     versi: app.getVersion(),
     pastikanAdapter: () => lanMulti._pastikanAdapter(),
+    // 1.0.27 — perubahan data (koreksi, import, backup): adapter tulis disuntikkan ke jendela utama
+    // hanya saat pertama dipakai (Asisten AI + "Izinkan Claude mengubah data" ON).
+    tulis: { jalankan: (op, args, ctx) => jalankanTulisAi(op, args, ctx) },
+    salinKeCache: (jalur) => hosts.fsh.copyIntoCache(jalur),
   });
   hosts.asistenAi = asistenAi;
   // Uji dari source saja: lokasi konfigurasi Claude Desktop tiruan (aplikasi terpasang memakai lokasi asli).
@@ -312,6 +317,17 @@ function registerAsistenAi(d, bridge, h) {
     clipboard,
     lingkungan: rumahUji ? { platform: 'win32', env: { APPDATA: path.join(rumahUji, 'Roaming'), LOCALAPPDATA: path.join(rumahUji, 'Local') }, home: rumahUji } : undefined,
   });
+}
+
+let idsTulisAi = null;
+/** Jalankan operasi adapter tulis Asisten AI di jendela utama (dipasang bila belum ada). */
+async function jalankanTulisAi(op, args, ctx) {
+  const wc = win && !win.isDestroyed() ? win.webContents : null;
+  if (!wc) return { ok: false, error: { kode: 'LAYANAN_BELUM_SIAP', pesan: 'Jendela KOPKU Desktop belum terbuka.' } };
+  if (!idsTulisAi) idsTulisAi = indeksTulis(RENDERER_DIR);
+  const ada = await wc.executeJavaScript(`!!(globalThis.__kopkuAiTulis && globalThis.__kopkuAiTulis.idsKey === ${JSON.stringify(JSON.stringify(idsTulisAi))})`, true).catch(() => false);
+  if (!ada) await wc.executeJavaScript(`(${pasangAdapterTulis.toString()})(${JSON.stringify(idsTulisAi)}); true;`, true);
+  return wc.executeJavaScript(`globalThis.__kopkuAiTulis.jalankan(${JSON.stringify(String(op))}, ${JSON.stringify(args || {})}, ${JSON.stringify({ userId: ctx && ctx.userId })})`, true);
 }
 
 function registerProtocols(d) {

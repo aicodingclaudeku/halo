@@ -154,3 +154,6 @@ Menu: **Pengaturan › Asisten AI** (sidebar, *Semua Pengaturan*, `Ctrl+K` "ai"/
 - Cara cadangan: **ekstensi `.mcpb`** (Node.js bawaan Claude Desktop) atau **pasang manual** (potongan JSON di layar).
 - Uji: `npm run test:mcp`; uji layar: `node test/smoke-asisten-ai-chromium.js <folder-hasil>`; Electron nyata: `test/smoke-asisten-ai.js`.
 - Rincian: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md`.
+
+### Mengubah data lewat Claude (1.0.27, opsional)
+Sakelar **Izinkan Claude mengubah data** (bawaan mati, hanya Admin): Claude dapat mencatat transaksi, menambah/mengubah anggota, mengimpor Data Awal dari Excel, dan mengoreksi transaksi (jurnal pembalik). Setiap perubahan: pratinjau → persetujuan pengguna → simpan (kode konfirmasi sekali pakai), backup otomatis sebelumnya, aturan & izin KOPKU tetap berlaku. Rincian: `docs/DESKTOP-1.0.25_ASISTEN_AI_MCP_CLAUDE.md` §J.

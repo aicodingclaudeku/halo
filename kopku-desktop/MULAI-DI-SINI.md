@@ -1,6 +1,14 @@
-# KOPKU Desktop 1.0.26 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.27 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.27 — Asisten AI dapat MENGUBAH data (input, import, koreksi) — opsional
+- **Sakelar baru Pengaturan › Asisten AI › "Izinkan Claude mengubah data"** (bawaan MATI, hanya Admin, dialog peringatan; data per anggota ikut ON). Bila ON, Claude mendapat **16 alat ubah data**: tambah/ubah anggota, setor/tarik simpanan, ajukan/cairkan/batalkan pinjaman, bayar angsuran, pelunasan, kas masuk/keluar/transfer, **koreksi/balik transaksi**, **Import Data Awal dari Excel**, buat backup, dan daftar pilihan transaksi.
+- **Pengaman:** setiap perubahan **dua langkah** — Claude menampilkan **pratinjau** (belum disimpan) + kode konfirmasi sekali pakai (10 menit); disimpan hanya bila pengguna setuju dan argumen + data masih sama dengan pratinjau. **Backup otomatis** (terenkripsi) sebelum perubahan; backup gagal → perubahan dibatalkan. Semua lewat service KOPKU yang sama dengan layar (aturan periode, saldo, SHU, syarat pinjaman tetap berlaku), izin Permission Matrix per aksi, **koreksi = jurnal pembalik** (tidak ada data yang dihapus). Aktivitas perubahan tampil di layar (lencana "Diubah") dan log.
+- **Import Excel** memakai alur layar Import Data Awal persis: pratinjau, galat per baris, BLOKIR/PERINGATAN, baris yang sudah pernah diimpor dilewati; berkas terblokir tidak mendapat kode konfirmasi.
+- Claude otomatis memuat ulang daftar alat saat sakelar diubah (`tools/list_changed`).
+- Tidak termasuk (sengaja): restore/hapus backup, hapus data, tutup buku/SHU, ubah pengaturan & pengguna.
+- Uji: `test:mcp` 27/27 (baru 10: pratinjau tidak menulis, kode sekali pakai/terikat data, backup, semua alat, koreksi, import), `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 30/30, **Electron nyata 20/20** (termasuk backup .kdb sungguhan & koreksi).
 
 ## Yang baru di 1.0.26 — perbaikan Asisten AI di Windows ("kopku — Gagal: Server disconnected")
 - **Penyebab:** Claude Desktop menjalankan `KOPKU Desktop.exe --kopku-mcp-stdio`; di Windows stdin proses Electron (aplikasi GUI) langsung tertutup, sehingga server keluar ±0,3 detik setelah start (log Claude: "Server transport closed unexpectedly"). Di Linux tidak terjadi, sehingga uji 1.0.25 tidak menangkapnya.

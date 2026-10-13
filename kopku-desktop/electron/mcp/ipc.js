@@ -79,6 +79,7 @@ function daftarkanIpcAsistenAi(o) {
     const st = await host.atur({
       aktif: i.aktif === undefined ? undefined : i.aktif === true,
       perAnggota: i.perAnggota === undefined ? undefined : i.perAnggota === true,
+      bolehTulis: i.bolehTulis === undefined ? undefined : i.bolehTulis === true,
       penggunaId: i.penggunaId,
     });
     // Dinyalakan dengan cara bawaan (konfigurasi Claude Desktop) → pastikan entri "kopku" terpasang.

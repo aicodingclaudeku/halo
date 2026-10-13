@@ -32,6 +32,7 @@ const { bangunIndeks, cariBerkasBundle } = require(path.join(ROOT, 'electron/ser
 const { pasangAdapter } = require(path.join(ROOT, 'electron/server/rendererAdapter.js'));
 const { McpHost } = require(path.join(ROOT, 'electron/mcp/host.js'));
 const { daftarkanIpcAsistenAi } = require(path.join(ROOT, 'electron/mcp/ipc.js'));
+const { pasangAdapterTulis, indeksTulis } = require(path.join(ROOT, 'electron/mcp/adapterTulis.js'));
 
 const RENDERER = path.join(ROOT, 'renderer');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-asisten-'));
@@ -136,6 +137,18 @@ function klienStdio(perintah, args) {
       await pg.evaluate(`(${pasangAdapter.toString()})(${JSON.stringify(idx)}, { tanpaRegistrasi: true }); true;`);
       adapterSiap = true;
     },
+    // 1.0.27 — adapter tulis ASLI disuntikkan ke halaman (seperti main.js: executeJavaScript).
+    tulis: {
+      jalankan: async (op, args, ctx) => {
+        // Jembatan berkas uji ini tiruan (fs.* kosong) sehingga BackupService tidak dapat menulis berkas;
+        // backup sungguhan diuji di test/mcp/asisten-ai-tulis.test.js (FsHost asli). Tanpa backup, perubahan DIBATALKAN.
+        if (op === 'backup.buat') return { ok: true, value: { berkas: 'uji-chromium.kdb' } };
+        const ids = indeksTulis(RENDERER);
+        await pg.evaluate(`(${pasangAdapterTulis.toString()})(${JSON.stringify(ids)}); true;`);
+        return pg.evaluate(([op, args, ctx]) => globalThis.__kopkuAiTulis.jalankan(op, args, ctx), [op, args || {}, ctx || {}]);
+      },
+    },
+    salinKeCache: (p) => p,
   });
   const handler = new Map();
   const dibuka = [];
@@ -339,6 +352,33 @@ function klienStdio(perintah, args) {
   await pg.waitForTimeout(800);
   await pg.keyboard.press('Enter');
   ok('tombol Salin memakai clipboard sistem', disalin.length >= 1, disalin[0] && disalin[0].slice(0, 60));
+
+  // ---- 1.0.27: izinkan Claude mengubah data → dialog peringatan → Claude mencatat setoran (pratinjau + konfirmasi)
+  await pg.evaluate(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; });
+  await pg.locator('[data-testid=saklar-asisten-ubah-data]').click();
+  await pg.waitForTimeout(700);
+  await pg.screenshot({ path: path.join(OUT, '48-konfirmasi-ubah-data.png') });
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('dialog "Izinkan Claude MENGUBAH data" menjelaskan pengaman', /MENGUBAH data koperasi\?/.test(teks) && /pratinjau/.test(teks) && /backup otomatis/.test(teks));
+  await pg.evaluate(() => { const b = [...document.querySelectorAll('[role=button]')].find((x) => /Izinkan mengubah data$/.test((x.innerText || '').trim())); b && b.click(); });
+  await pg.waitForTimeout(2500);
+  await pg.keyboard.press('Enter');
+  ok('ubah data ON (per anggota ikut ON)', mcp.baca().bolehTulis === true && mcp.baca().perAnggota === true);
+  const pr = await k.kirim('tools/call', { name: 'simpanan_setor', arguments: { anggota: 'Siti Aminah', jenis: 'WAJIB', nominal: 50000, tanggal: '2026-10-01', periode: '2026-10' } });
+  const prj = JSON.parse(pr.result.content[0].text);
+  ok('Claude: pratinjau setoran (belum disimpan) + kode konfirmasi', prj.status === 'MENUNGGU_KONFIRMASI' && /^K-/.test(prj.konfirmasi), pr.result.content[0].text.slice(0, 160));
+  const sm = await k.kirim('tools/call', { name: 'simpanan_setor', arguments: { anggota: 'Siti Aminah', jenis: 'WAJIB', nominal: 50000, tanggal: '2026-10-01', periode: '2026-10', konfirmasi: prj.konfirmasi } });
+  const smj = JSON.parse(sm.result.content[0].text);
+  ok('Claude: setoran tersimpan setelah konfirmasi (service KOPKU di halaman)', smj.status === 'BERHASIL' && /^SP-WAJIB-/.test(smj.hasil.nomorTransaksi), sm.result.content[0].text.slice(0, 160));
+  await pg.waitForTimeout(5500);
+  for (const [i, y] of [[1, 0], [2, 1700], [3, 99999]]) {
+    await pg.evaluate((y) => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = y; }, y);
+    await pg.waitForTimeout(400);
+    await pg.screenshot({ path: path.join(OUT, `49-ubah-data-${i}.png`) });
+  }
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('layar: sakelar ubah data ON, alat ubah data aktif, aktivitas "Diubah"', /Ubah data aktif/.test(teks) && /Alat ubah data \(16\)/i.test(teks) && /Diubah/.test(teks) && /UBAH: Setor simpanan wajib/.test(teks));
+  await pg.evaluate(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; });
 
   // ---- cara 2: ekstensi .mcpb
   await pg.locator('[data-testid=tombol-ekstensi-claude]').click();

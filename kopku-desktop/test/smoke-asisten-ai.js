@@ -157,6 +157,29 @@ module.exports = (win, app) => {
           await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
           const tg = await c.kirim('tools/call', { name: 'daftar_tunggakan', arguments: {} });
           cek('per anggota ON → daftar_tunggakan tanpa nomor HP', !tg.result.isError && /Siti Aminah|Budi Santoso|Rina Wulandari/.test(tg.result.content[0].text) && !/0812999/.test(tg.result.content[0].text), tg.result.content[0].text.slice(0, 120));
+          // ---- 1.0.27: izinkan Claude mengubah data (sakelar + dialog asli) → setoran lewat pratinjau + konfirmasi,
+          //      backup otomatis SUNGGUHAN, lalu koreksi (jurnal pembalik) — adapter tulis disuntikkan main.js.
+          await js(`(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; return true; })()`);
+          await klikTestId('saklar-asisten-ubah-data');
+          await tunggu(800);
+          await shot('54-konfirmasi-ubah-data');
+          await klikTombol('/^Izinkan mengubah data$/');
+          await tunggu(2500);
+          await js(`(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); return true; })()`);
+          const st2 = await js('kopkuDesktop.asistenAi.status()');
+          cek('ubah data ON lewat layar', st2.bolehTulis === true);
+          const argSetor = { anggota: 'Siti Aminah', jenis: 'WAJIB', nominal: 50000, tanggal: '2026-10-01', periode: '2026-10' };
+          const pr = JSON.parse((await c.kirim('tools/call', { name: 'simpanan_setor', arguments: argSetor })).result.content[0].text);
+          cek('pratinjau setoran + kode konfirmasi', pr.status === 'MENUNGGU_KONFIRMASI' && /^K-/.test(pr.konfirmasi), JSON.stringify(pr.pratinjau));
+          const sm = JSON.parse((await c.kirim('tools/call', { name: 'simpanan_setor', arguments: Object.assign({}, argSetor, { konfirmasi: pr.konfirmasi }) })).result.content[0].text);
+          cek('setoran tersimpan setelah konfirmasi', sm.status === 'BERHASIL' && /^SP-WAJIB-/.test(sm.hasil.nomorTransaksi), JSON.stringify(sm).slice(0, 200));
+          const dirBackup = path.join(app.getPath('userData'), 'documents', 'backups');
+          cek('backup otomatis SUNGGUHAN dibuat sebelum perubahan', fs.existsSync(dirBackup) && fs.readdirSync(dirBackup).some((f) => /\.kdb$/.test(f)), fs.existsSync(dirBackup) ? fs.readdirSync(dirBackup).join(',') : 'tidak ada folder');
+          const kp = JSON.parse((await c.kirim('tools/call', { name: 'koreksi_transaksi', arguments: { transaksi: sm.hasil.nomorTransaksi, alasan: 'uji koreksi dari Claude' } })).result.content[0].text);
+          const kj = JSON.parse((await c.kirim('tools/call', { name: 'koreksi_transaksi', arguments: { transaksi: sm.hasil.nomorTransaksi, alasan: 'uji koreksi dari Claude', konfirmasi: kp.konfirmasi } })).result.content[0].text);
+          cek('koreksi transaksi (jurnal pembalik) lewat Claude', kj.status === 'BERHASIL', JSON.stringify(kj).slice(0, 200));
+          const pos2 = JSON.parse((await c.kirim('tools/call', { name: 'laporan_keuangan', arguments: { jenis: 'posisi_keuangan' } })).result.content[0].text);
+          cek('neraca tetap seimbang setelah perubahan', pos2.data.isBalanced === true);
           cek('stdout server stdio hanya berisi JSON-RPC', c.bukanJson.length === 0, c.bukanJson.slice(0, 2).join(' / '));
           await tunggu(5500);
           await shot('52-asisten-menyala');
@@ -164,7 +187,7 @@ module.exports = (win, app) => {
           await tunggu(500);
           await shot('53-aktivitas');
           t = await teks();
-          cek('layar menampilkan aktivitas pemakaian', /Ringkasan koperasi/.test(t) && /Daftar tunggakan/.test(t));
+          cek('layar menampilkan aktivitas pemakaian (termasuk perubahan)', /Ringkasan koperasi/.test(t) && /Daftar tunggakan/.test(t) && /UBAH: Setor simpanan wajib/.test(t));
           await c.tutup();
         } catch (e) {
           console.log('ASISTEN-SMOKE-ERR', e && e.stack);

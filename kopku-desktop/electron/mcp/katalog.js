@@ -23,11 +23,12 @@ const tanggal = (ket) => ({ type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', d
 const batas = (bawaan, maks) => ({ type: 'integer', minimum: 1, maximum: maks, default: bawaan, description: `Jumlah baris maksimum (bawaan ${bawaan}, maks ${maks}).` });
 
 const PETUNJUK = [
-  'Server "kopku" membaca data koperasi simpan pinjam dari aplikasi KOPKU Desktop di komputer ini (baca saja).',
+  'Server "kopku" membaca data koperasi simpan pinjam dari aplikasi KOPKU Desktop di komputer ini; bila diizinkan admin KOPKU, juga dapat mengubah data lewat alat dua langkah.',
   'Semua nominal dalam Rupiah (IDR) tanpa desimal. Tanggal memakai format YYYY-MM-DD.',
   'Mulai dengan ringkasan_koperasi untuk gambaran umum, lalu gunakan alat yang lebih rinci.',
   'Data pribadi (NIK, alamat, nomor HP, tanggal lahir, nomor rekening) tidak pernah dikirim.',
-  'Alat tidak dapat mencatat atau mengubah transaksi; arahkan pengguna ke aplikasi KOPKU Desktop untuk itu.',
+  'Alat pembaca tidak mengubah apa pun. Alat pengubah data (bila diizinkan admin) selalu dua langkah: pratinjau dulu, tunjukkan ke pengguna, dan kirim `konfirmasi` HANYA setelah pengguna menyetujui secara eksplisit. Jangan pernah mengisi `konfirmasi` atas inisiatif sendiri.',
+  'Kesalahan transaksi diperbaiki dengan koreksi_transaksi (jurnal pembalik), bukan dengan mencatat transaksi tandingan.',
   'Jawab dalam Bahasa Indonesia kecuali pengguna meminta bahasa lain.',
 ].join(' ');
 
@@ -188,9 +189,88 @@ const ALAT = [
   },
 ];
 
+// ============================================================ ALAT UBAH DATA (1.0.27)
+// Hanya tersedia bila sakelar "Izinkan Claude mengubah data" ON. SETIAP alat dua langkah:
+//   1) dipanggil TANPA `konfirmasi` → pratinjau (belum ada yang disimpan) + kode konfirmasi;
+//   2) setelah pengguna MENYETUJUI pratinjau, dipanggil lagi dengan argumen SAMA + `konfirmasi`.
+// Semua perubahan memakai service KOPKU yang sama dengan layar (aturan bisnis, jurnal, izin tetap
+// berlaku). Koreksi = jurnal pembalik, tidak ada data yang dihapus. Backup otomatis sebelum perubahan.
+const KONFIRMASI = { type: 'string', maxLength: 40, description: 'Kode konfirmasi dari pratinjau. KOSONGKAN pada panggilan pertama. Isi HANYA setelah pengguna menyetujui pratinjau secara eksplisit.' };
+const SUMBER_DANA = { type: 'string', enum: ['KAS', 'BANK'], default: 'KAS', description: 'Sumber/tujuan dana.' };
+const REKENING_BANK = { type: 'string', maxLength: 120, description: 'Nama atau ID rekening bank (wajib bila sumber_dana BANK dan ada lebih dari satu rekening).' };
+const ANGGOTA = { type: 'string', minLength: 1, maxLength: 100, description: 'Nomor anggota (mis. A00012), ID, atau nama lengkap persis.' };
+const PINJAMAN = { type: 'string', minLength: 1, maxLength: 100, description: 'Nomor pinjaman (mis. PJ-2026-000012) atau ID.' };
+const objek = (properties, required = []) => ({ type: 'object', properties: Object.assign({}, properties, { konfirmasi: KONFIRMASI }), required, additionalProperties: false });
+const DUA_LANGKAH = ' DUA LANGKAH: panggil tanpa `konfirmasi` untuk pratinjau, tunjukkan pratinjau ke pengguna, lalu panggil lagi dengan argumen yang sama + `konfirmasi` hanya bila pengguna setuju.';
+const DATA_ANGGOTA = {
+  nama_lengkap: { type: 'string', maxLength: 150 },
+  nik: { type: 'string', maxLength: 32, description: '16 digit (opsional).' },
+  jenis_kelamin: { type: 'string', enum: ['LAKI_LAKI', 'PEREMPUAN'] },
+  tempat_lahir: { type: 'string', maxLength: 100 },
+  tanggal_lahir: tanggal('Tanggal lahir'),
+  alamat: { type: 'string', maxLength: 300 },
+  nomor_hp: { type: 'string', maxLength: 20 },
+  pekerjaan: { type: 'string', maxLength: 100 },
+  catatan: { type: 'string', maxLength: 500 },
+};
+
+const ALAT_TULIS = [
+  { name: 'opsi_transaksi', title: 'Pilihan untuk transaksi', resource: 'kas_bank', aksi: 'view', baca: true,
+    description: 'Daftar rekening kas/bank aktif, akun pendapatan (untuk kas_masuk), dan kategori beban (untuk kas_keluar). Baca saja — panggil sebelum mencatat transaksi kas/bank.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+  { name: 'anggota_tambah', title: 'Tambah anggota', resource: 'anggota', aksi: 'create',
+    description: 'Mendaftarkan anggota baru (status AKTIF, nomor anggota dibuat otomatis).' + DUA_LANGKAH,
+    inputSchema: objek(Object.assign({ tanggal_bergabung: tanggal('Tanggal bergabung') }, DATA_ANGGOTA), ['nama_lengkap', 'tanggal_bergabung']) },
+  { name: 'anggota_ubah', title: 'Ubah data anggota', resource: 'anggota', aksi: 'edit',
+    description: 'Mengubah data identitas anggota (hanya kolom yang diisi di `perubahan`). Status keluar/meninggal tetap lewat menu aplikasi.' + DUA_LANGKAH,
+    inputSchema: objek({ anggota: ANGGOTA, perubahan: { type: 'object', properties: Object.assign({ tanggal_bergabung: tanggal('Tanggal bergabung') }, DATA_ANGGOTA), additionalProperties: false, minProperties: 1 } }, ['anggota', 'perubahan']) },
+  { name: 'simpanan_setor', title: 'Setor simpanan', resource: 'simpanan', aksi: 'create',
+    description: 'Mencatat setoran simpanan pokok/wajib/sukarela (jurnal otomatis).' + DUA_LANGKAH,
+    inputSchema: objek({ anggota: ANGGOTA, jenis: { type: 'string', enum: ['POKOK', 'WAJIB', 'SUKARELA'] }, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal setor'), periode: { type: 'string', pattern: '^\\d{4}-\\d{2}$', description: 'Periode simpanan wajib (YYYY-MM).' }, sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK, keterangan: { type: 'string', maxLength: 200 } }, ['anggota', 'jenis', 'nominal', 'tanggal']) },
+  { name: 'simpanan_tarik', title: 'Tarik simpanan sukarela', resource: 'simpanan', aksi: 'create',
+    description: 'Mencatat penarikan simpanan sukarela (saldo diperiksa pada tanggal penarikan).' + DUA_LANGKAH,
+    inputSchema: objek({ anggota: ANGGOTA, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal tarik'), sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK, keterangan: { type: 'string', maxLength: 200 } }, ['anggota', 'nominal', 'tanggal']) },
+  { name: 'pinjaman_ajukan', title: 'Ajukan pinjaman', resource: 'pinjaman', aksi: 'create',
+    description: 'Membuat pengajuan pinjaman (syarat pinjaman koperasi diperiksa). Belum mencairkan dana — gunakan pinjaman_cairkan.' + DUA_LANGKAH,
+    inputSchema: objek({ anggota: ANGGOTA, tanggal: tanggal('Tanggal pengajuan'), jumlah: { type: 'integer', minimum: 1 }, tenor: { type: 'integer', minimum: 1, maximum: 600 }, satuan_tenor: { type: 'string', enum: ['BULAN', 'MINGGU', 'HARI'], default: 'BULAN' }, metode_jasa: { type: 'string', enum: ['FLAT', 'EFEKTIF', 'MENURUN'] }, persentase_jasa: { type: 'number', minimum: 0, maximum: 100, description: 'Persen per periode (mis. 1.5).' }, biaya_admin_tipe: { type: 'string', enum: ['TIDAK_ADA', 'NOMINAL', 'PERSENTASE'], default: 'TIDAK_ADA' }, biaya_admin_nilai: { type: 'number', minimum: 0 }, denda_per_hari: { type: 'integer', minimum: 0, description: 'Kosong = tanpa denda.' }, tujuan: { type: 'string', enum: ['MODAL_KERJA', 'INVESTASI', 'KONSUMTIF', 'LAINNYA'] }, tujuan_detail: { type: 'string', maxLength: 200 }, keterangan: { type: 'string', maxLength: 300 } }, ['anggota', 'tanggal', 'jumlah', 'tenor', 'metode_jasa', 'persentase_jasa']) },
+  { name: 'pinjaman_cairkan', title: 'Cairkan pinjaman', resource: 'pinjaman', aksi: 'approve',
+    description: 'Mencairkan pinjaman yang sudah diajukan (membuat jadwal angsuran & jurnal pencairan).' + DUA_LANGKAH,
+    inputSchema: objek({ pinjaman: PINJAMAN, tanggal: tanggal('Tanggal pencairan'), sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK }, ['pinjaman', 'tanggal']) },
+  { name: 'pinjaman_batalkan', title: 'Batalkan pengajuan pinjaman', resource: 'pinjaman', aksi: 'edit',
+    description: 'Membatalkan pengajuan pinjaman yang BELUM dicairkan. Pinjaman yang sudah cair dikoreksi dengan koreksi_transaksi.' + DUA_LANGKAH,
+    inputSchema: objek({ pinjaman: PINJAMAN, alasan: { type: 'string', minLength: 5, maxLength: 200 } }, ['pinjaman', 'alasan']) },
+  { name: 'angsuran_bayar', title: 'Bayar angsuran', resource: 'pinjaman', aksi: 'create',
+    description: 'Mencatat pembayaran angsuran (alokasi denda/jasa/pokok mengikuti aturan KOPKU). Tanpa angsuran_ke: angsuran tertagih paling awal.' + DUA_LANGKAH,
+    inputSchema: objek({ pinjaman: PINJAMAN, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal bayar'), angsuran_ke: { type: 'integer', minimum: 1 }, sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK }, ['pinjaman', 'nominal', 'tanggal']) },
+  { name: 'pinjaman_lunasi', title: 'Pelunasan pinjaman', resource: 'pinjaman', aksi: 'create',
+    description: 'Melunasi seluruh sisa pinjaman pada tanggal tertentu (total dihitung KOPKU, ditampilkan di pratinjau).' + DUA_LANGKAH,
+    inputSchema: objek({ pinjaman: PINJAMAN, tanggal: tanggal('Tanggal pelunasan'), metode_jasa: { type: 'string', enum: ['JASA_KONTRAKTUAL', 'JASA_TERUTANG'] }, sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK }, ['pinjaman', 'tanggal']) },
+  { name: 'kas_masuk', title: 'Kas/bank masuk (pendapatan lain)', resource: 'kas_bank', aksi: 'create',
+    description: 'Mencatat penerimaan pendapatan lain ke kas/bank. Akun dari opsi_transaksi (kode/nama).' + DUA_LANGKAH,
+    inputSchema: objek({ akun_pendapatan: { type: 'string', maxLength: 120 }, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal'), rekening: { type: 'string', enum: ['KAS', 'KAS_KECIL', 'BANK'], default: 'KAS' }, rekening_bank: REKENING_BANK, keterangan: { type: 'string', maxLength: 200 } }, ['akun_pendapatan', 'nominal', 'tanggal']) },
+  { name: 'kas_keluar', title: 'Kas/bank keluar (beban)', resource: 'kas_bank', aksi: 'create',
+    description: 'Mencatat pengeluaran beban dari kas/bank. Kategori dari opsi_transaksi.' + DUA_LANGKAH,
+    inputSchema: objek({ kategori_beban: { type: 'string', maxLength: 120 }, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal'), rekening: { type: 'string', enum: ['KAS', 'KAS_KECIL', 'BANK'], default: 'KAS' }, rekening_bank: REKENING_BANK, keterangan: { type: 'string', maxLength: 200 } }, ['kategori_beban', 'nominal', 'tanggal']) },
+  { name: 'kas_transfer', title: 'Transfer antar rekening', resource: 'kas_bank', aksi: 'edit',
+    description: 'Memindahkan dana antar kas, kas kecil, dan rekening bank.' + DUA_LANGKAH,
+    inputSchema: objek({ dari: { type: 'string', enum: ['KAS', 'KAS_KECIL', 'BANK'] }, dari_bank: REKENING_BANK, ke: { type: 'string', enum: ['KAS', 'KAS_KECIL', 'BANK'] }, ke_bank: REKENING_BANK, nominal: { type: 'integer', minimum: 1 }, tanggal: tanggal('Tanggal'), keterangan: { type: 'string', maxLength: 200 } }, ['dari', 'ke', 'nominal', 'tanggal']) },
+  { name: 'koreksi_transaksi', title: 'Koreksi / balik transaksi', resource: 'history_transaksi', aksi: 'edit',
+    description: 'Membalik transaksi yang salah dengan JURNAL PEMBALIK (transaksi asal tetap tercatat, tidak dihapus), opsional dicatat ulang dengan data benar (`catat_ulang`, untuk pencairan pinjaman, angsuran, setoran data awal). Didukung: setoran/penarikan simpanan, pencairan pinjaman, pembayaran angsuran, transaksi kas/bank. Cari transaksi dengan riwayat_transaksi.' + DUA_LANGKAH,
+    inputSchema: objek({ transaksi: { type: 'string', minLength: 1, maxLength: 80, description: 'Nomor transaksi/jurnal (dari riwayat_transaksi) atau ID jurnal.' }, alasan: { type: 'string', minLength: 5, maxLength: 300 }, catat_ulang: { type: 'object', properties: { tanggal: tanggal('Tanggal pencatatan ulang'), nominal: { type: 'integer', minimum: 1, description: 'Angsuran.' }, pokok: { type: 'integer', minimum: 0 }, wajib: { type: 'integer', minimum: 0 }, sukarela: { type: 'integer', minimum: 0 }, sumber_dana: SUMBER_DANA, rekening_bank: REKENING_BANK }, required: ['tanggal'], additionalProperties: false } }, ['transaksi', 'alasan']) },
+  { name: 'import_data_awal', title: 'Import Data Awal (Excel)', resource: 'backup', aksi: 'create',
+    description: 'Mengimpor berkas Excel template KOPKU (Template Saldo Lama / Template Transaksi Baru — unduh dari Pengaturan › Import Data Awal). Pratinjau memeriksa berkas persis seperti layar Import (galat per baris, BLOKIR, peringatan, baris yang sudah pernah diimpor dilewati). `berkas` = jalur lengkap di komputer ini, mis. C:\\Users\\Nama\\Downloads\\data.xlsx.' + DUA_LANGKAH,
+    inputSchema: objek({ berkas: { type: 'string', minLength: 3, maxLength: 500 }, sifat: { type: 'string', enum: ['SALDO_LAMA', 'TRANSAKSI_BARU'], description: 'SALDO_LAMA = koperasi yang sudah berjalan (wajib cut_off); TRANSAKSI_BARU = kas/bank ikut bergerak.' }, cut_off: tanggal('Tanggal cut-off untuk SALDO_LAMA (saldo per 30 Juni → 2026-07-01)') }, ['berkas', 'sifat']) },
+  { name: 'buat_backup', title: 'Buat backup', resource: 'backup', aksi: 'create', tanpaKonfirmasi: true,
+    description: 'Membuat backup database terenkripsi sekarang (sama dengan menu Backup & Restore). Backup juga dibuat otomatis sebelum perubahan data.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false } },
+];
+
 /** Daftar alat untuk `tools/list` (tanpa kolom internal). */
 function untukMcp(daftar = ALAT) {
-  return daftar.map((a) => ({ name: a.name, title: a.title, description: a.description, inputSchema: a.inputSchema, annotations: { title: a.title, readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false } }));
+  return daftar.map((a) => {
+    const ubah = !!a.aksi && !a.baca;
+    return { name: a.name, title: a.title, description: a.description, inputSchema: a.inputSchema, annotations: { title: a.title, readOnlyHint: !ubah, destructiveHint: ubah, idempotentHint: !ubah, openWorldHint: false } };
+  });
 }
 
-module.exports = { NAMA_SERVER, VERSI_PROTOKOL, PETUNJUK, ALAT, untukMcp };
+module.exports = { NAMA_SERVER, VERSI_PROTOKOL, PETUNJUK, ALAT, ALAT_TULIS, untukMcp };

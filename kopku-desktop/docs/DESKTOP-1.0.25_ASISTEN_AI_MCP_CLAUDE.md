@@ -159,3 +159,44 @@ proses Electron (subsistem GUI) di Windows tertutup seketika. Pola yang sama ter
 **Langkah pengguna setelah memasang 1.0.26:** buka KOPKU Desktop (entri diperbarui otomatis), lalu tutup
 Claude Desktop sepenuhnya (tray › Quit) dan buka lagi. Di Claude › Settings › Developer, "kopku" harus
 berstatus *running*; Perintah = `C:\Program Files\nodejs\node.exe`.
+
+## §J 1.0.27 — Claude dapat mengubah data (input, import Excel, koreksi)
+
+**Permintaan pengguna:** "bukan hanya membaca, tapi juga membantu mengimport data, memperbaiki, mengedit/koreksi seperti reverse."
+
+**Sakelar:** Pengaturan › Asisten AI › **Izinkan Claude mengubah data** — bawaan MATI, hanya pengguna dengan
+izin Pengaturan › Ubah, dialog peringatan; menyalakannya ikut menyalakan data per anggota, mematikan data per
+anggota ikut mematikannya. Disimpan `bolehTulis` di `<userData>/mcp/pengaturan.json`.
+
+**Alat (16):** `opsi_transaksi` (baca), `anggota_tambah`, `anggota_ubah`, `simpanan_setor`, `simpanan_tarik`,
+`pinjaman_ajukan`, `pinjaman_cairkan`, `pinjaman_batalkan`, `angsuran_bayar`, `pinjaman_lunasi`, `kas_masuk`,
+`kas_keluar`, `kas_transfer`, `koreksi_transaksi`, `import_data_awal`, `buat_backup`. Total alat 30 bila ON.
+
+**Pengaman (`electron/mcp/alatTulis.js`, semua gagal tertutup):**
+1. **Dua langkah:** panggilan tanpa `konfirmasi` hanya PRATINJAU (diuji: jumlah baris semua tabel tidak berubah)
+   + kode `K-XXXXXX` sekali pakai, berlaku 10 menit, terikat nama alat + argumen + isi pratinjau. Bila argumen atau
+   data KOPKU berubah (mis. saldo berubah karena transaksi lain), kode lama ditolak dan pratinjau baru dikirim.
+   Petunjuk server & deskripsi alat mewajibkan Claude meminta persetujuan eksplisit pengguna; Claude Desktop juga
+   meminta izin per alat (alat bertanda `destructiveHint`).
+2. **Izin per aksi** (Permission Matrix): anggota create/edit, simpanan create, pinjaman create/approve/edit,
+   kas_bank create/edit, history_transaksi edit, backup create; service KOPKU memeriksa ulang.
+3. **Backup otomatis** terenkripsi (BackupService, sama dengan menu Backup) sebelum perubahan pertama tiap 30 menit;
+   gagal → perubahan DIBATALKAN.
+4. **Hanya service KOPKU:** operasi tulis Server LAN yang sudah teruji (validasi `electron/server/validasi.js`) +
+   adapter tulis baru `electron/mcp/adapterTulis.js` (disuntikkan ke jendela utama hanya saat dipakai) untuk
+   KoreksiTransaksiService, koreksiSimpanan, koreksiTransaksiKasBank, ImportDataAwalService + PanduanImportData,
+   BackupService. Tidak ada SQL tulis langsung.
+5. **Koreksi = jurnal pembalik** (transaksi asal tetap tercatat; jejak koreksi); opsional catat ulang untuk
+   pencairan pinjaman, angsuran, setoran data awal. Ditolak bila periode tutup buku, SHU final, sudah dikoreksi,
+   saldo akan negatif, dst. (aturan KoreksiTransaksiService).
+6. **Import Excel:** alur layar Import Data Awal persis (pratinjau → periksaSebelumImport → jalankanImportDataAwal
+   atas pratinjau yang sama); berkas BLOKIR tidak mendapat kode; impor ganda dicegah sidik KOPKU; Saldo Lama wajib
+   cut-off; berkas disalin ke cache aplikasi (maks 20 MB, .xlsx).
+7. **Log:** `UBAH: <ringkasan>` di `pemakaian.log` & layar (lencana "Diubah"), tanpa data pribadi.
+
+**Sengaja tidak disediakan:** restore/hapus backup, hapus data, tutup buku & SHU, pengaturan, pengguna & izin.
+
+**Hasil uji:** `test/mcp/asisten-ai-tulis.test.js` 10/10 (headless, service & SQLite asli, klien stdio sungguhan);
+`test:mcp` 27/27; `test:lan` 81/81; `test:keamanan` 15/15; layar Chromium 30/30; **Electron 44.5.1 nyata 20/20**
+(sakelar di layar → setoran lewat pratinjau + konfirmasi → backup `.kdb` sungguhan → koreksi → neraca seimbang).
+Tangkapan layar: `docs/tangkapan-layar/1.0.27-*.png`.

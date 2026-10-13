@@ -87,6 +87,22 @@ function keHost(dataDir, metode, jalur, isi, batasMs = 120000) {
   });
 }
 
+const namaAlat = (tools) => tools.map((t) => t.name).sort().join(',');
+
+/**
+ * Daftar alat di KOPKU dapat berubah (sakelar per anggota / ubah data, izin pengguna) saat Claude
+ * sudah terhubung → kirim `notifications/tools/list_changed` agar Claude memuat ulang daftar alat.
+ */
+async function alatBerubah(o) {
+  if (o.daftarAlat === undefined) return false;
+  const r = await (o.host || keHost)(o.dataDir, 'GET', '/alat', undefined, 3000);
+  if (!(r.status === 200 && r.json && Array.isArray(r.json.tools))) return false;
+  const baru = namaAlat(r.json.tools);
+  if (baru === o.daftarAlat) return false;
+  o.daftarAlat = baru;
+  return true;
+}
+
 function hasilTeks(teks, isError = false) {
   return { content: [{ type: 'text', text: teks }], isError };
 }
@@ -115,7 +131,7 @@ async function tangani(msg, o) {
     case 'initialize':
       return ok({
         protocolVersion: pilihVersi(p.protocolVersion),
-        capabilities: { tools: { listChanged: false }, resources: {}, prompts: {} },
+        capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} },
         serverInfo: { name: katalog.NAMA_SERVER, title: 'KOPKU — Asisten AI Koperasi', version: VERSI },
         instructions: katalog.PETUNJUK,
       });
@@ -123,13 +139,13 @@ async function tangani(msg, o) {
       return ok({});
     case 'tools/list': {
       const r = await host(o.dataDir, 'GET', '/alat', undefined, 5000);
-      if (r.status === 200 && r.json && Array.isArray(r.json.tools)) return ok({ tools: r.json.tools });
-      // KOPKU tertutup: tetap tampilkan seluruh alat agar Claude mengenalnya; pemanggilan akan menjelaskan.
-      return ok({ tools: katalog.untukMcp() });
+      const tools = r.status === 200 && r.json && Array.isArray(r.json.tools) ? r.json.tools : katalog.untukMcp(); // KOPKU tertutup: alat baca tetap dikenal
+      o.daftarAlat = namaAlat(tools);
+      return ok({ tools });
     }
     case 'tools/call': {
       const nama = typeof p.name === 'string' ? p.name : '';
-      if (!katalog.ALAT.some((a) => a.name === nama)) return gagal(-32602, `Alat tidak dikenal: ${nama}`);
+      if (!katalog.ALAT.some((a) => a.name === nama) && !katalog.ALAT_TULIS.some((a) => a.name === nama)) return gagal(-32602, `Alat tidak dikenal: ${nama}`);
       const r = await host(o.dataDir, 'POST', '/panggil', { name: nama, arguments: p.arguments && typeof p.arguments === 'object' ? p.arguments : {} });
       if (r.tertutup) return ok(hasilTeks(PESAN_TERTUTUP, true));
       if (r.galat) return ok(hasilTeks(r.galat, true));
@@ -182,7 +198,10 @@ function jalankanStdio(opsi = {}) {
         if (Array.isArray(msg)) {
           const hasil = (await Promise.all(msg.map((m) => tangani(m, o)))).filter(Boolean);
           if (hasil.length) tulis(hasil);
-        } else tulis(await tangani(msg, o));
+        } else {
+          tulis(await tangani(msg, o));
+          if (msg && msg.method === 'tools/call' && (await alatBerubah(o).catch(() => false))) tulis({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+        }
       } catch (e) {
         stderr.write(`[kopku-mcp] galat: ${(e && e.message) || e}\n`);
         if (msg && msg.id !== undefined) tulis({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: 'Internal error' } });
@@ -190,6 +209,13 @@ function jalankanStdio(opsi = {}) {
     });
   };
   stderr.write(`[kopku-mcp] siap · data: ${o.dataDir}\n`);
+  // Periksa perubahan daftar alat tiap 20 detik (sakelar diubah di KOPKU saat Claude sudah terhubung).
+  const pantau = setInterval(() => {
+    antre = antre.then(async () => {
+      if (await alatBerubah(o).catch(() => false)) tulis({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+    });
+  }, opsi.intervalPantauMs || 20000);
+  if (typeof pantau.unref === 'function') pantau.unref();
   return new Promise((resolve) => {
     if (typeof stdin.setEncoding === 'function') stdin.setEncoding('utf8');
     stdin.on('data', (c) => {
@@ -209,6 +235,7 @@ function jalankanStdio(opsi = {}) {
     const selesai = () => {
       if (ditutup) return;
       ditutup = true;
+      clearInterval(pantau);
       if (sisa.trim()) proses(sisa);
       sisa = '';
       stderr.write(`[kopku-mcp] stdin ditutup setelah ${jumlahPesan} pesan\n`);

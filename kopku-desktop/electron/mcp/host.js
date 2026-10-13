@@ -23,7 +23,11 @@ const path = require('node:path');
 const http = require('node:http');
 const crypto = require('node:crypto');
 const { jalankanAlat, alatTersedia, hariIniLokal } = require('./alat');
-const { untukMcp, ALAT } = require('./katalog');
+const { untukMcp, ALAT, ALAT_TULIS } = require('./katalog');
+const { jalankanAlatTulis } = require('./alatTulis');
+
+const NAMA_TULIS = new Set(ALAT_TULIS.map((a) => a.name));
+const JEDA_BACKUP_MS = 30 * 60 * 1000;
 
 const BATAS_BADAN = 256 * 1024;
 const BATAS_LOG = 512 * 1024;
@@ -46,6 +50,9 @@ class McpHost {
    * @param {() => Promise<void>} o.pastikanAdapter pasang adapter renderer bila belum
    * @param {string} [o.versi] versi KOPKU Desktop
    * @param {() => number} [o.now]
+   * @param {{ jalankan:(op:string,args:object,ctx:object)=>Promise<{ok:boolean,value?:any,error?:{kode:string,pesan:string}}> }} [o.tulis]
+   *        adapter tulis (koreksi, import, backup) — lihat adapterTulis.js
+   * @param {(jalur:string) => string} [o.salinKeCache] salin berkas pengguna ke cache aplikasi → URI
    */
   constructor(o) {
     this.o = o;
@@ -57,7 +64,9 @@ class McpHost {
     this.port = null;
     this.token = null;
     this.galat = null;
-    this.statistik = { total: 0, gagal: 0, terakhir: null };
+    this.statistik = { total: 0, gagal: 0, terakhir: null, perubahan: 0 };
+    this.kodeKonfirmasi = new Map(); // kode → { nama, sidik, kedaluwarsa } (sekali pakai)
+    this.backupTerakhir = 0;
     this._antrean = Promise.resolve();
   }
 
@@ -74,12 +83,14 @@ class McpHost {
 
   baca() {
     // cara: 'config' = entri di claude_desktop_config.json (bawaan), 'ekstensi' = paket .mcpb.
-    const bawaan = { aktif: false, perAnggota: false, pengguna: null, cara: 'config', diubah: null };
+    // bolehTulis (1.0.27): Claude boleh MENGUBAH data lewat alat dua-langkah (bawaan MATI).
+    const bawaan = { aktif: false, perAnggota: false, bolehTulis: false, pengguna: null, cara: 'config', diubah: null };
     try {
       const j = JSON.parse(fs.readFileSync(this.berkasPengaturan, 'utf8'));
       return Object.assign(bawaan, {
         aktif: j.aktif === true,
         perAnggota: j.perAnggota === true,
+        bolehTulis: j.bolehTulis === true && j.perAnggota === true,
         pengguna: j.pengguna && typeof j.pengguna.id === 'string' ? { id: j.pengguna.id, nama: String(j.pengguna.nama || ''), username: String(j.pengguna.username || '') } : null,
         cara: j.cara === 'ekstensi' ? 'ekstensi' : 'config',
         diubah: j.diubah || null,
@@ -104,6 +115,7 @@ class McpHost {
       aktif: p.aktif,
       berjalan: this.berjalan,
       perAnggota: p.perAnggota,
+      bolehTulis: p.bolehTulis,
       cara: p.cara,
       pengguna: p.pengguna ? { nama: p.pengguna.nama, username: p.pengguna.username } : null,
       port: this.berjalan ? this.port : null,
@@ -111,6 +123,7 @@ class McpHost {
       pemakaian: Object.assign({}, this.statistik),
       jumlahAlat: ALAT.filter((a) => p.perAnggota || !a.perAnggota).length,
       alat: ALAT.map((a) => ({ nama: a.name, judul: a.title, perAnggota: a.perAnggota, aktif: p.perAnggota || !a.perAnggota })),
+      alatTulis: ALAT_TULIS.map((a) => ({ nama: a.name, judul: a.title, aktif: p.bolehTulis })),
       folder: this.dir,
     };
   }
@@ -128,7 +141,7 @@ class McpHost {
 
   /**
    * Ubah pengaturan dari layar Pengaturan › Asisten AI.
-   * @param {{ aktif?:boolean, perAnggota?:boolean, cara?:'config'|'ekstensi', penggunaId:string }} input
+   * @param {{ aktif?:boolean, perAnggota?:boolean, bolehTulis?:boolean, cara?:'config'|'ekstensi', penggunaId:string }} input
    */
   async atur(input) {
     return this._serial(async () => {
@@ -136,6 +149,11 @@ class McpHost {
       const u = await this._cekPengubah(i.penggunaId);
       const p = this.baca();
       if (i.perAnggota !== undefined) p.perAnggota = i.perAnggota === true;
+      if (i.bolehTulis !== undefined) p.bolehTulis = i.bolehTulis === true;
+      // Mengubah data butuh data per anggota (mencari anggota/pinjaman); mematikan per anggota juga mematikan ubah data.
+      if (i.bolehTulis === true) p.perAnggota = true;
+      if (!p.perAnggota) p.bolehTulis = false;
+      if (!p.bolehTulis) this.kodeKonfirmasi.clear();
       if (i.cara === 'config' || i.cara === 'ekstensi') p.cara = i.cara;
       if (i.aktif !== undefined) {
         p.aktif = i.aktif === true;
@@ -143,7 +161,7 @@ class McpHost {
         if (p.aktif) p.pengguna = { id: u.id, nama: u.nama, username: u.username };
       }
       this._simpan(p);
-      this._catat({ alat: '(pengaturan)', ok: true, ket: `${p.aktif ? 'Menyala' : 'Mati'} · data per anggota ${p.perAnggota ? 'diizinkan' : 'tidak diizinkan'} · ${p.cara === 'ekstensi' ? 'ekstensi .mcpb' : 'konfigurasi Claude Desktop'} · oleh ${u.username}` });
+      this._catat({ alat: '(pengaturan)', ok: true, ket: `${p.aktif ? 'Menyala' : 'Mati'} · data per anggota ${p.perAnggota ? 'diizinkan' : 'tidak diizinkan'} · ubah data ${p.bolehTulis ? 'DIIZINKAN' : 'tidak diizinkan'} · ${p.cara === 'ekstensi' ? 'ekstensi .mcpb' : 'konfigurasi Claude Desktop'} · oleh ${u.username}` });
       if (p.aktif) await this._mulai();
       else await this._henti();
       return this.status();
@@ -266,7 +284,12 @@ class McpHost {
     const url = String(req.url || '').split('?')[0];
     if (req.method === 'GET' && url === '/alat') {
       return this._konteks()
-        .then(async (k) => this._kirim(res, { tools: untukMcp(await alatTersedia({ perAnggota: k.perAnggota, boleh: k.boleh })) }))
+        .then(async (k) => {
+          const baca = await alatTersedia({ perAnggota: k.perAnggota, boleh: k.boleh });
+          const tulis = [];
+          if (k.bolehTulis) for (const a of ALAT_TULIS) if (await k.bolehAksi(a.resource, a.aksi)) tulis.push(a);
+          this._kirim(res, { tools: untukMcp(baca.concat(tulis)) });
+        })
         // Konteks gagal (mis. lisensi kedaluwarsa): tetap kirim katalog agar Claude memanggil alat dan menerima penjelasannya.
         .catch((e) => this._kirim(res, { tools: untukMcp(ALAT.filter((a) => this.baca().perAnggota || !a.perAnggota)), pesan: e.message }));
     }
@@ -313,8 +336,40 @@ class McpHost {
       return cache.get(resource);
     };
     const ctx = { userId: u.id };
+    const cacheAksi = new Map();
+    const bolehAksi = async (resource, action) => {
+      const kk = resource + ':' + action;
+      if (!cacheAksi.has(kk)) cacheAksi.set(kk, !!(await B.panggil('izin.cek', { userId: u.id, resource, action }, {})));
+      return cacheAksi.get(kk);
+    };
+    const tulis = async (op, args) => {
+      if (!this.o.tulis) throw galat('Perubahan data tidak tersedia pada versi ini.', 'TIDAK_TERSEDIA');
+      const r = await this.o.tulis.jalankan(op, args || {}, ctx);
+      if (r && r.ok) return r.value;
+      const e = (r && r.error) || { kode: 'INTERNAL', pesan: 'Terjadi kesalahan.' };
+      throw galat(e.pesan, e.kode);
+    };
     return {
       perAnggota: p.perAnggota,
+      bolehTulis: p.bolehTulis && p.perAnggota,
+      bolehAksi,
+      tulis,
+      salinKeCache: (jalur) => {
+        if (!this.o.salinKeCache) throw galat('Import berkas tidak tersedia pada versi ini.', 'TIDAK_TERSEDIA');
+        return this.o.salinKeCache(jalur);
+      },
+      catatBackup: () => (this.backupTerakhir = this._now()),
+      /** Backup terenkripsi sebelum perubahan (paling jarang tiap 30 menit). Gagal → perubahan dibatalkan. */
+      backupOtomatis: async () => {
+        if (this._now() - this.backupTerakhir < JEDA_BACKUP_MS) return;
+        try {
+          await tulis('backup.buat', {});
+        } catch (e) {
+          throw galat(`Backup otomatis sebelum perubahan gagal (${e.message}). Perubahan DIBATALKAN demi keamanan data.`, 'BACKUP_GAGAL');
+        }
+        this.backupTerakhir = this._now();
+        this._catat({ alat: '(backup otomatis)', ok: true, ket: 'sebelum perubahan data oleh Claude' });
+      },
       boleh,
       hariIni: hariIniLokal(this._now()),
       panggil: (op, args) => B.panggil(op, args || {}, ctx),
@@ -328,14 +383,23 @@ class McpHost {
     let hasil;
     try {
       const k = await this._konteks();
-      hasil = await jalankanAlat(String(nama || ''), args, k);
+      const n = String(nama || '');
+      if (NAMA_TULIS.has(n)) {
+        if (!k.bolehTulis) hasil = { content: [{ type: 'text', text: 'Perubahan data oleh Claude TIDAK diizinkan di KOPKU Desktop (Pengaturan › Asisten AI › "Izinkan Claude mengubah data"). Minta admin KOPKU menyalakannya, atau lakukan perubahan di aplikasi.' }], isError: true };
+        else hasil = await jalankanAlatTulis(n, args, k, this.kodeKonfirmasi, this._now());
+      } else hasil = await jalankanAlat(n, args, k);
     } catch (e) {
       hasil = { content: [{ type: 'text', text: e && e.kode ? e.message : 'KOPKU Desktop belum siap. Pastikan aplikasi terbuka dan sudah masuk, lalu coba lagi.' }], isError: true };
     }
     this.statistik.total++;
     if (hasil.isError) this.statistik.gagal++;
     this.statistik.terakhir = new Date(this._now()).toISOString();
-    const ket = hasil.isError ? String(hasil.content[0].text).slice(0, 160) : '';
+    let ket = hasil.isError ? String(hasil.content[0].text).slice(0, 160) : '';
+    if (!hasil.isError && hasil._ringkasLog) {
+      this.statistik.perubahan++;
+      ket = 'UBAH: ' + hasil._ringkasLog;
+    } else if (!hasil.isError && NAMA_TULIS.has(String(nama)) && /MENUNGGU_KONFIRMASI|PRATINJAU_BERUBAH/.test(hasil.content[0].text)) ket = 'pratinjau (belum disimpan)';
+    delete hasil._ringkasLog;
     this._catat({ alat: String(nama || '?').slice(0, 60), ok: !hasil.isError, ms: this._now() - mulai, ket });
     delete hasil._galat;
     return hasil;
