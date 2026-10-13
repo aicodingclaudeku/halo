@@ -72,10 +72,20 @@ function daftarkanIpcAsistenAi(o) {
     }
     return o.folderDokumen ? path.join(o.folderDokumen, 'KOPKU Desktop') : path.join(dataDir, 'mcp');
   };
+  // 1.0.30 — ekstensi .mcpb yang dibuat versi lama (≤ 1.0.29) tidak menyala di Node.js bawaan Claude Desktop
+  // ("Request timed out") → layar meminta pengguna membuat ulang ekstensi.
+  const versiEkstensi = () => {
+    try {
+      return JSON.parse(fs.readFileSync(berkasLokasi, 'utf8')).versi || null;
+    } catch {
+      return null;
+    }
+  };
   const statusLengkap = () =>
     Object.assign(host.status(), {
       claude: claudeConfig.statusClaude({ entri: entri(), lingkungan }),
       folderEkstensi: folderEkstensi(),
+      ekstensiUsang: host.baca().cara === 'ekstensi' && versiEkstensi() !== o.versi,
       chatgpt: chatgpt.status(),
       runtime: runtime(),
       riwayat: host.riwayat(15),
@@ -97,7 +107,7 @@ function daftarkanIpcAsistenAi(o) {
     }
     fs.mkdirSync(path.dirname(tujuan), { recursive: true });
     try {
-      fs.writeFileSync(berkasLokasi, JSON.stringify({ folder: path.dirname(tujuan) }));
+      fs.writeFileSync(berkasLokasi, JSON.stringify({ folder: path.dirname(tujuan), versi: o.versi }));
     } catch {
       /* abaikan */
     }

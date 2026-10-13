@@ -7,7 +7,7 @@
  * dengan Node.js BAWAANNYA sendiri, jadi tidak perlu Node.js terpasang dan tidak
  * bergantung pada `KOPKU Desktop.exe --kopku-mcp-stdio`.
  *
- * Isi paket: manifest.json, server/stdio.js, server/katalog.js, icon.png.
+ * Isi paket: manifest.json, server/index.js (titik masuk, 1.0.30), server/stdio.js, server/katalog.js, icon.png.
  * Server di dalam paket identik dengan electron/mcp/stdio.js: hanya meneruskan
  * pemanggilan ke KOPKU Desktop yang sedang terbuka (127.0.0.1 + token).
  *
@@ -116,16 +116,17 @@ function manifest({ versi, dataDir }) {
     name: 'kopku',
     display_name: 'KOPKU — Asisten AI Koperasi',
     version: semver(versi),
-    description: 'Tanya data koperasi dari KOPKU Desktop di komputer ini: ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU. Baca saja.',
+    description: 'Tanya data koperasi dari KOPKU Desktop di komputer ini: ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU. Mengubah data hanya bila diizinkan admin KOPKU.',
     long_description:
-      'Menghubungkan Claude dengan KOPKU Desktop yang sedang terbuka di komputer ini (127.0.0.1, tanpa internet tambahan). Semua alat hanya membaca; data pribadi anggota (NIK, alamat, nomor HP, tanggal lahir, nomor rekening) tidak pernah dikirim. Akses mengikuti izin pengguna KOPKU yang menyalakan Asisten AI dan dapat dimatikan kapan saja di KOPKU Desktop › Pengaturan › Asisten AI.',
+      'Menghubungkan Claude dengan KOPKU Desktop yang sedang terbuka di komputer ini (127.0.0.1, tanpa internet tambahan). Alat membaca data; mengubah data hanya bila diizinkan admin KOPKU dan selalu lewat pratinjau + persetujuan pengguna; data pribadi anggota (NIK, alamat, nomor HP, tanggal lahir, nomor rekening) tidak pernah dikirim. Akses mengikuti izin pengguna KOPKU yang menyalakan Asisten AI dan dapat dimatikan kapan saja di KOPKU Desktop › Pengaturan › Asisten AI.',
     author: { name: 'KOPKU', url: 'https://koperasikufinanace.my.id' },
     homepage: 'https://koperasikufinanace.my.id',
     icon: 'icon.png',
     server: {
       type: 'node',
-      entry_point: 'server/stdio.js',
-      mcp_config: { command: 'node', args: ['${__dirname}/server/stdio.js', '--data', dataDir] },
+      // 1.0.30 — titik masuk terpisah yang selalu menyalakan server (Node bawaan Claude memuat lewat pembungkus).
+      entry_point: 'server/index.js',
+      mcp_config: { command: 'node', args: ['${__dirname}/server/index.js', '--data', dataDir] },
     },
     tools: ALAT.map((a) => ({ name: a.name, description: a.description })),
     keywords: ['koperasi', 'kopku', 'akuntansi', 'simpan pinjam'],
@@ -142,6 +143,7 @@ function buatMcpb({ tujuan, versi, dataDir, ikon = null, sumberDir = __dirname }
   const berkas = [
     { nama: 'manifest.json', isi: JSON.stringify(manifest({ versi, dataDir }), null, 2) },
     // 1.0.28 — tanpa komentar (tidak memuat keterangan struktur internal KOPKU).
+    { nama: 'server/index.js', isi: untukDikirim(fs.readFileSync(path.join(sumberDir, 'stdioMulai.js'), 'utf8')) },
     { nama: 'server/stdio.js', isi: untukDikirim(fs.readFileSync(path.join(sumberDir, 'stdio.js'), 'utf8')) },
     { nama: 'server/katalog.js', isi: untukDikirim(fs.readFileSync(path.join(sumberDir, 'katalog.js'), 'utf8')) },
   ];

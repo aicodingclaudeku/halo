@@ -1,6 +1,13 @@
-# KOPKU Desktop 1.0.29 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.30 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.30 — perbaikan ekstensi Claude `.mcpb` (tanpa Node.js) "Request timed out"
+- **Gejala (log Claude Desktop pengguna):** ekstensi "KOPKU — Asisten AI Koperasi" berstatus "connected", menerima `initialize`, tetapi tidak pernah menjawab → "Request timed out" / "Couldn't start". Cara Node.js terpasang tidak terpengaruh, sehingga seolah-olah KOPKU hanya bisa dipakai bila Node.js terpasang.
+- **Penyebab:** Node.js bawaan Claude Desktop memuat titik masuk ekstensi lewat pembungkusnya sendiri, sehingga penjaga `require.main === module` di `stdio.js` tidak pernah menyalakan server.
+- **Perbaikan:** titik masuk baru `server/index.js` (`electron/mcp/stdioMulai.js`) yang SELALU menyalakan server; manifest `entry_point` & `mcp_config` memakainya. Uji regresi memuat server lewat pembungkus (versi lama: tidak menjawab; versi baru: menjawab `initialize` & alat).
+- **Ekstensi lama perlu dibuat ulang:** layar Asisten AI menampilkan peringatan + tombol **Buat ulang ekstensi** bila ekstensi dibuat versi lama; lalu klik Install di Claude Desktop.
+- Uji: `test:mcp` 42/42, `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 45/45, Electron nyata 20/20.
 
 ## Yang baru di 1.0.29 — ChatGPT di menu Pengaturan › Asisten AI (opsional)
 - **Menu Asisten AI kini punya dua tab: Claude dan ChatGPT.** Sakelar bersama di atas: **Aktifkan Asisten AI**, **Izinkan data per anggota**, **Izinkan AI mengubah data** (berlaku untuk keduanya).

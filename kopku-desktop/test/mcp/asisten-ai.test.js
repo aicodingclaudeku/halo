@@ -252,18 +252,18 @@ test('paket .mcpb: ZIP sah, manifest MCPB 0.2, server di dalamnya menjawab lewat
     isi[nama] = data;
     o += 46 + pn;
   }
-  assert.deepEqual(Object.keys(isi).sort(), ['icon.png', 'manifest.json', 'server/katalog.js', 'server/stdio.js']);
+  assert.deepEqual(Object.keys(isi).sort(), ['icon.png', 'manifest.json', 'server/index.js', 'server/katalog.js', 'server/stdio.js']);
   const man = JSON.parse(isi['manifest.json']);
   assert.equal(man.manifest_version, '0.2');
   assert.equal(man.name, 'kopku');
   assert.equal(man.version, '1.0.25');
   assert.equal(man.server.type, 'node');
-  assert.equal(man.server.entry_point, 'server/stdio.js');
-  assert.deepEqual(man.server.mcp_config, { command: 'node', args: ['${__dirname}/server/stdio.js', '--data', dataDir] });
+  assert.equal(man.server.entry_point, 'server/index.js');
+  assert.deepEqual(man.server.mcp_config, { command: 'node', args: ['${__dirname}/server/index.js', '--data', dataDir] });
   assert.equal(man.tools.length, 14);
   // 1.0.28 — server di paket = stdio.js tanpa komentar (tidak memuat keterangan struktur internal).
   assert.deepEqual(isi['server/stdio.js'], untukDikirim(fs.readFileSync(path.join(ROOT, 'electron', 'mcp', 'stdio.js'), 'utf8')));
-  for (const n of ['server/stdio.js', 'server/katalog.js']) assert.doesNotMatch(isi[n].toString(), /\/\*\*|^\s*\/\//m, `${n} tanpa komentar`);
+  for (const n of ['server/index.js', 'server/stdio.js', 'server/katalog.js']) assert.doesNotMatch(isi[n].toString(), /\/\*\*|^\s*\/\//m, `${n} tanpa komentar`);
   const ext = fs.mkdtempSync(path.join(os.tmpdir(), 'kopku-mcpb-'));
   for (const [nama, data] of Object.entries(isi)) {
     fs.mkdirSync(path.dirname(path.join(ext, nama)), { recursive: true });
@@ -278,6 +278,24 @@ test('paket .mcpb: ZIP sah, manifest MCPB 0.2, server di dalamnya menjawab lewat
   const j = JSON.parse(out.trim());
   assert.equal(j.result.isError, false);
   assert.match(j.result.content[0].text, /Kas Tunai/);
+
+  // 1.0.30 — Node.js bawaan Claude Desktop MEMUAT titik masuk lewat pembungkusnya (require.main ≠ berkas server).
+  // Dulu (entry = stdio.js) server tidak pernah menyala → `initialize` tidak dijawab → "Request timed out".
+  const lewatPembungkus = async (berkas) => {
+    const q = spawn(process.execPath, ['-e', 'require(process.argv[1])', path.join(ext, berkas), '--data', dataDir], { stdio: ['pipe', 'pipe', 'ignore'] });
+    let keluar = '';
+    q.stdout.on('data', (c) => (keluar += c));
+    q.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }) + '\n');
+    q.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'saldo_kas_bank', arguments: {} } }) + '\n');
+    q.stdin.end();
+    await new Promise((r) => q.on('exit', r));
+    return keluar.trim().split('\n').filter(Boolean).map((b) => JSON.parse(b));
+  };
+  const lewat = await lewatPembungkus(man.server.entry_point);
+  assert.equal(lewat.length, 2, 'titik masuk menjawab walau dimuat lewat pembungkus');
+  assert.equal(lewat[0].result.serverInfo.name, 'kopku');
+  assert.match(lewat[1].result.content[0].text, /Kas Tunai/);
+  assert.deepEqual(await lewatPembungkus('server/stdio.js'), [], 'bukti penyebab: stdio.js saja tidak menyala bila dimuat pembungkus');
 });
 
 test('dimatikan: port ditutup, endpoint dihapus; server stdio tetap menjawab dengan petunjuk', async () => {
@@ -539,6 +557,10 @@ test('1.0.28: .mcpb — pengguna memilih folder simpan; batal = tidak ada berkas
   const st = await u.ipc('asistenAi:status');
   assert.equal(st.folderEkstensi, pilihan, 'folder terakhir diingat');
   assert.equal(st.cara, 'ekstensi');
+  // 1.0.30 — ekstensi dari versi lama → layar meminta dibuat ulang; ekstensi baru → tidak
+  assert.equal(st.ekstensiUsang, false);
+  fs.writeFileSync(path.join(dir, 'mcp', 'lokasi-ekstensi.json'), JSON.stringify({ folder: pilihan }));
+  assert.equal((await u.ipc('asistenAi:status')).ekstensiUsang, true, 'ekstensi buatan versi lama (tanpa versi)');
   // dialog berikutnya dibuka di folder terakhir; "Buka folder ekstensi" membuka folder itu
   jawab = { canceled: true };
   await u.ipc('asistenAi:buatEkstensi', s.users.admin);

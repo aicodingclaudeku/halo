@@ -52942,6 +52942,12 @@ function AsistenAiScreen() {
     { style: s.layar, contentContainerStyle: UI.screenContent, testID: 'layar-asisten-ai' },
     h(Text, { style: UI.screenIntro }, 'Hubungkan KOPKU dengan Claude (Anthropic) atau ChatGPT (OpenAI) lewat MCP agar Anda dapat bertanya tentang data koperasi — ringkasan, laporan keuangan, kolektibilitas, tunggakan, simpanan, pinjaman, SHU — langsung dari Claude Desktop atau ChatGPT, dan (bila diizinkan) membantu mencatat transaksi, mengimpor data, serta mengoreksi transaksi. Mati secara bawaan.'),
     !bolehUbah ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginBottom: 12 }] }, h(Ionicons, { name: 'lock-closed-outline', size: 16, color: C.warning }), h(Text, { style: [s.galatTeks, { color: C.warning }] }, 'Hanya pengguna dengan izin ubah Pengaturan (Admin) yang dapat menyalakan/mematikan Asisten AI.')) : null,
+    st.ekstensiUsang
+      ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginBottom: 12 }], testID: 'peringatan-ekstensi-usang' },
+          h(Ionicons, { name: 'refresh-circle-outline', size: 18, color: C.warning }),
+          h(Text, { style: [s.galatTeks, { color: C.warning, flex: 1 }] }, 'Ekstensi Claude (.mcpb) Anda dibuat oleh versi KOPKU lama dan dapat gagal menyala di Claude Desktop ("Request timed out"). Buat ulang lalu klik Install di Claude Desktop (ganti ekstensi lama).'),
+          h(Tombol, { label: 'Buat ulang ekstensi', ikon: 'cube-outline', utama: true, kecil: true, onPress: ekstensi, sibuk: sibuk === 'ekstensi', disabled: !bolehUbah || !pid, testID: 'tombol-perbarui-ekstensi' }))
+      : null,
     h(View, { style: s.kolom }, banner, kartuSaklar, tabBar, ...(tab === 'chatgpt' ? [kartuChatGPT] : [kartuPasang]), kartuContoh, kartuAktivitas)
   ), panduan ? h(PanduanSlide, { onTutup: tutupPanduan }) : null);
 }

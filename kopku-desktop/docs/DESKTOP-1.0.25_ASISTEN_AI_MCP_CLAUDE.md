@@ -258,3 +258,13 @@ ChatGPT (server OpenAI) ──HTTPS──▶ terowongan milik pengguna (mis. Clo
 `test:lan` 81/81; `test:keamanan` 15/15; layar Chromium 45/45; Electron 44.5.1 nyata 20/20.
 Tangkapan layar: `docs/tangkapan-layar/1.0.29-*.png`.
 
+## §M 1.0.30 — Ekstensi `.mcpb` tidak menjawab di Node.js bawaan Claude Desktop
+
+Log Claude Desktop (13 Okt 2026): `Server started and connected successfully` → `Message from client: method="initialize" id=0`
+→ ±60 detik kemudian `Request timed out`; baris diagnostik `[kopku-mcp] siap` tidak pernah muncul. Node.js bawaan Claude
+memuat `entry_point` lewat pembungkus, jadi `require.main !== module` dan `stdio.js` tidak menyalakan loop stdio.
+Perbaikan: `server/index.js` (dari `electron/mcp/stdioMulai.js`) memanggil `jalankanStdio()` tanpa syarat; manifest
+memakai `server/index.js`. Status `ekstensiUsang` (versi pembuat ekstensi di `mcp/lokasi-ekstensi.json` ≠ versi aplikasi)
+→ layar meminta membuat ulang ekstensi. Uji: `test/mcp/asisten-ai.test.js` memuat server paket lewat pembungkus
+(`node -e "require(...)"`): `index.js` menjawab, `stdio.js` saja tidak (bukti penyebab).
+
