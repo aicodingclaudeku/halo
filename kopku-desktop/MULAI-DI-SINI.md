@@ -1,6 +1,12 @@
-# KOPKU Desktop 1.0.33 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.34 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.34 — audit menyeluruh kolektibilitas (angka penyesuaian = jurnal)
+- **Diperbaiki:** layar Kolektibilitas Piutang & ekspornya dulu membandingkan buku besar dengan total daftar yang difilter (default **Anggota Aktif**), padahal tombol **Sesuaikan Penyisihan** membukukan target **semua anggota**. Kini target, selisih, kalimat konfirmasi, dan baris ekspor memakai angka yang sama dengan jurnal; bila lingkup tampilan berbeda, ada catatan totalnya.
+- **Ditambah (tampilan):** rincian per pinjaman — jumlah angsuran jatuh tempo belum lunas, pokok & jasa jatuh tempo, dan jasa yang belum jatuh tempo (ikut dalam "saldo piutang").
+- **Tidak diubah:** penggolongan, ambang, persentase penyisihan, batas fiskal, skema (v82), data, jurnal lama.
+- Tambalan: `scripts/tambal-kolektibilitas-1.0.34.js`; uji `npm run test:kolektibilitas` (13/13) & `test/smoke-kolektibilitas-chromium.js`. Laporan audit A–K: `docs/AUDIT-1.0.34_KOLEKTIBILITAS.md`.
 
 ## Yang baru di 1.0.33 — perbaikan kolektibilitas piutang (batas bulan dihitung dengan kalender)
 - **Akar masalah:** batas "melampaui N bulan" (Juklak SOM 3/2025 angka 12.1) dibandingkan dengan bulan penuh yang dibulatkan ke bawah, sehingga tunggakan 3 bulan + 1…30 hari tetap **Lancar** (penyisihan 0%). Kini dihitung dengan tanggal kalender: jatuh tempo 5 Jul → per 14 Okt sudah melampaui 3 bulan → **Kurang Lancar**.

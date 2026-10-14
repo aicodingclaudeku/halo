@@ -219,3 +219,60 @@ test('konsistensi: Σ saldo pokok = Piutang Pinjaman di buku besar; jurnal penye
   const pos = await lap.getPosisiKeuangan(db, TGL);
   assert.equal(pos.isBalanced, true);
 });
+
+// ---------------------------------------------------------------- 1.0.34 (audit menyeluruh, RC-S133.6.11)
+test('1.0.34 F2: rincian tunggakan — jumlah angsuran, pokok & jasa jatuh tempo, jasa belum jatuh tempo; tidak mengubah kategori/cadangan', async () => {
+  const kl = await klasifikasi();
+  for (const x of kl) {
+    assert.equal(typeof x.angsuranTertunggak, 'number', `${x.nomorPinjaman} angsuranTertunggak`);
+    assert.equal(x.jasaTertunggak + x.jasaBelumJatuhTempo, x.saldoJasa, `${x.nomorPinjaman} jasa jatuh tempo + belum = saldo jasa`);
+    assert.ok(x.pokokTertunggak <= x.saldoPokok);
+    assert.equal(x.nilaiCadangan, SOM.hitungPenyisihanSom(x.saldoPokok, x.kolektibilitas), 'cadangan tetap dari saldo pokok');
+  }
+  // T95: jatuh tempo 11-07, 11-08, 11-09, 11-10 sudah tiba per 14-10 (angsuran ke-1 dibayar sebagian) → 4 angsuran
+  const t95 = await satu('T95');
+  const j = (await k.R('pinjaman').getJadwalAngsuran(pinjamanUji.T95)).filter((r) => r.tanggalJatuhTempo <= TGL);
+  assert.equal(j.length, 4);
+  assert.equal(t95.angsuranTertunggak, 4);
+  assert.equal(t95.pokokTertunggak, j.reduce((a, r) => a + r.pokok - r.pokokTerbayar, 0));
+  assert.equal(t95.jasaTertunggak, j.reduce((a, r) => a + r.jasa - r.jasaTerbayar, 0));
+  // T86: belum ada angsuran yang melewati 3 bulan, tetapi 3 angsuran (20-07, 20-08, 20-09) sudah jatuh tempo
+  assert.equal((await satu('T86')).angsuranTertunggak, 3);
+});
+
+test('1.0.34 F1: lingkup layar AKTIF ≠ target jurnal (SEMUA) — ekspor menyatakan penyesuaian = jurnal yang benar-benar dibuat', async () => {
+  const teks = fs.readFileSync(cariBerkasBundle(path.join(ROOT, 'renderer')), 'utf8');
+  const EXP = globalThis.__r(resolusi(indeksEkspor(teks), { exp: ['buildKolektibilitasExport'] }).modul.exp);
+  const penyisihanId = await k.R('akunMapping').resolveAccountId(db, 'PENYISIHAN_PIUTANG', 'KREDIT_PENYISIHAN');
+  const tercatat = await k.R('saldoAkun').getAccountBalance(db, penyisihanId, TGL);
+  const target = await KOL.getTotalPenyisihanTarget(db, TGL);
+  assert.equal(tercatat, target, 'prasyarat: buku besar sudah disesuaikan pada uji sebelumnya');
+  // Anggota peminjam T95 (Kurang Lancar) menjadi nonaktif — DB uji, bukan data pengguna.
+  const t95 = await satu('T95');
+  await db.runAsync(`UPDATE anggota SET status = 'TIDAK_AKTIF' WHERE id = ?`, t95.anggotaId);
+  const aktif = await KOL.getKlasifikasiPinjamanAktif(db, { tanggalLaporan: TGL, statusAnggota: 'AKTIF' });
+  const totalAktif = aktif.reduce((a, x) => a + x.nilaiCadangan, 0);
+  assert.equal(totalAktif, target - t95.nilaiCadangan, 'lingkup AKTIF tidak memuat cadangan T95');
+  assert.equal(await KOL.getTotalPenyisihanTarget(db, TGL), target, 'target jurnal tetap SEMUA anggota');
+  const info = { namaKoperasi: 'Uji' };
+  const kv = (ex) => Object.fromEntries(ex.seksi[0].baris.map((b) => [b.label, b.nilai]));
+  const sesudah = kv(EXP.buildKolektibilitasExport(info, 'P', aktif, { lingkupAnggota: 'Anggota aktif', penyisihanTercatat: tercatat, targetPenyisihanBukuBesar: target }));
+  assert.equal(sesudah['Penyesuaian penyisihan yang diperlukan'], 'Tidak ada (sudah sesuai)');
+  assert.ok(sesudah['Target penyisihan buku besar (semua anggota)'], 'target SEMUA anggota ditampilkan saat berbeda dari lingkup');
+  // Perilaku 1.0.33 (tanpa target): ekspor menyuruh "Kurangi" padahal jurnal tidak akan dibuat.
+  const lama = kv(EXP.buildKolektibilitasExport(info, 'P', aktif, { penyisihanTercatat: tercatat }));
+  assert.match(lama['Penyesuaian penyisihan yang diperlukan'], /^Kurangi /);
+  const h = await KOL.sesuaikanPenyisihanPiutang({ tanggal: TGL, createdBy: s.users.admin });
+  assert.equal(h.delta, 0, 'jurnal sungguhan: tidak ada penyesuaian — sama dengan ekspor 1.0.34');
+  await db.runAsync(`UPDATE anggota SET status = 'AKTIF' WHERE id = ?`, t95.anggotaId);
+});
+
+test('1.0.34: layar Kolektibilitas Piutang di bundle memakai target jurnal (getTotalPenyisihanTarget) untuk selisih & konfirmasi', () => {
+  const teks = fs.readFileSync(cariBerkasBundle(path.join(ROOT, 'renderer')), 'utf8');
+  assert.ok(teks.includes('KOPKU 1.0.34 kolektibilitas audit'));
+  assert.ok(teks.includes('const target = await (0, LoanImpairmentService_1.getTotalPenyisihanTarget)(db, tanggalLaporan);'));
+  assert.ok(teks.includes('const selisihPenyisihan = saldoTercatat !== null ? targetPenyisihan - saldoTercatat : 0;'));
+  assert.ok(teks.includes('menjadi ${(0, money_1.formatRupiah)(targetPenyisihan)} (selisih'));
+  assert.ok(teks.includes('targetPenyisihanBukuBesar: targetBukuBesar,'));
+  assert.ok(!teks.includes('ringkasan.totalCadangan - saldoTercatat'), 'tidak ada lagi selisih terhadap total lingkup');
+});
