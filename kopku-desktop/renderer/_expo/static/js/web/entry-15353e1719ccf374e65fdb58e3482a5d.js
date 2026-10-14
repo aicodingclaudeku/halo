@@ -13372,6 +13372,7 @@ exports.isPinjamanBermasalah=isPinjamanBermasalah;
 exports.kelompokMasaAngsuran=kelompokMasaAngsuran;
 exports.masaAngsuranBulanDariSatuanTenor=masaAngsuranBulanDariSatuanTenor;
 exports.bulanPenuhAntara=bulanPenuhAntara;
+exports.bulanTunggakanTepat=bulanTunggakanTepat;
 exports.klasifikasikanSom=klasifikasikanSom;
 exports.hitungPenyisihanSom=hitungPenyisihanSom;
 const money_1 = require("@/utils/money");
@@ -13537,6 +13538,40 @@ function bulanPenuhAntara(dariIso, keIso) {
         bulan -= 1;
     return Math.max(0, bulan);
 }
+/**
+ * KOPKU 1.0.33 kolektibilitas kalender — usia tunggakan dalam BULAN KALENDER, dengan pecahan.
+ * Tepat N bulan (tanggal sama, atau akhir bulan bila tanggalnya tidak ada) → N; lewat 1 hari → N + pecahan.
+ * Dengan demikian "melampaui N bulan" ⇔ hasil > N, dan "belum melampaui N bulan" ⇔ hasil ≤ N — bacaan harfiah
+ * Juklak SOM 3/2025 angka 12.1. Contoh: jatuh tempo 5 Jul, tanggal laporan 14 Okt → 3,29 (melampaui 3 bulan
+ * sejak 5 Okt); jatuh tempo 14 Jul → tepat 3 (belum melampaui).
+ */
+function tambahBulanKalender(y, m, d, n) {
+    const t = new Date(y, m + n, 1);
+    const akhir = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+    return new Date(t.getFullYear(), t.getMonth(), Math.min(d, akhir));
+}
+function bulanTunggakanTepat(dariIso, keIso) {
+    const dari = new Date(`${dariIso}T00:00:00`);
+    const ke = new Date(`${keIso}T00:00:00`);
+    if (Number.isNaN(dari.getTime()) || Number.isNaN(ke.getTime()))
+        return 0;
+    if (ke <= dari)
+        return 0;
+    const y = dari.getFullYear(), m = dari.getMonth(), d = dari.getDate();
+    let n = Math.max(0, (ke.getFullYear() - y) * 12 + (ke.getMonth() - m) - 1);
+    while (tambahBulanKalender(y, m, d, n + 1) <= ke)
+        n += 1;
+    const batas = tambahBulanKalender(y, m, d, n);
+    if (ke.getTime() === batas.getTime())
+        return n;
+    const berikut = tambahBulanKalender(y, m, d, n + 1);
+    const pecahan = (ke.getTime() - batas.getTime()) / (berikut.getTime() - batas.getTime());
+    return n + Math.min(0.999, Math.max(0.001, pecahan));
+}
+function teksBulanTunggakan(b) {
+    const bulat = Math.floor(b);
+    return b > bulat ? `${bulat} bulan lebih` : `${bulat} bulan`;
+}
 function tingkatTunggakan(bulan, lewatBulan, batasAtasBulan) {
     // "melampaui X bulan" = bulan > X. "belum melampaui Y bulan" = bulan <= Y.
     if (bulan <= lewatBulan)
@@ -13602,25 +13637,27 @@ function klasifikasikanSom(input) {
     let uraianTunggakan;
     if (input.polaPengembalian === 'TANPA_ANGSURAN') {
         if (input.sudahJatuhTempo) {
-            const bulan = Math.max(0, Math.floor(input.bulanSejakJatuhTempo));
+            const bulan = Math.max(0, input.bulanSejakJatuhTempo);
             batasAtasBulan = exports.AMBANG_SOM_TANPA_ANGSURAN.setelahJatuhTempoBatasAtasBulan;
             // "telah jatuh tempo dan belum dibayar tetapi belum melampaui 3
             // bulan" — jatuh tempo yang baru terlewati (0 bulan) sudah masuk
             // Kurang Lancar, karena pinjamannya memang sudah harus lunas.
+            // 1.0.33: dibandingkan dengan usia TEPAT (kalender), bukan bulan penuh dibulatkan.
             tingkat = bulan <= batasAtasBulan ? 1 : 2;
-            uraianTunggakan = `pinjaman tanpa angsuran sudah jatuh tempo ${bulan} bulan dan belum dibayar`;
+            uraianTunggakan = `pinjaman tanpa angsuran sudah jatuh tempo ${teksBulanTunggakan(bulan)} dan belum dibayar`;
         }
         else {
-            const bulan = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+            const bulan = Math.max(0, input.bulanTunggakanJasa);
             batasAtasBulan = exports.AMBANG_SOM_TANPA_ANGSURAN.jasaBatasAtasBulan;
             tingkat = tingkatTunggakan(bulan, exports.AMBANG_SOM_TANPA_ANGSURAN.jasaLewatBulan, batasAtasBulan);
-            uraianTunggakan = `pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${bulan} bulan`;
+            uraianTunggakan = `pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${teksBulanTunggakan(bulan)}`;
         }
     }
     else {
         const ambang = exports.AMBANG_SOM[kelompok];
-        const bulanPokok = Math.max(0, Math.floor(input.bulanTunggakanPokok));
-        const bulanJasa = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+        // 1.0.33: usia TEPAT (kalender) — tidak dibulatkan sebelum dibandingkan dengan ambang.
+        const bulanPokok = Math.max(0, input.bulanTunggakanPokok);
+        const bulanJasa = Math.max(0, input.bulanTunggakanJasa);
         const tingkatPokok = tingkatTunggakan(bulanPokok, ambang.pokokLewatBulan, ambang.pokokBatasAtasBulan);
         const tingkatJasa = tingkatTunggakan(bulanJasa, ambang.jasaLewatBulan, ambang.jasaBatasAtasBulan);
         // Dimensi TERBURUK yang menentukan. Saat seri, pokok dipakai sebagai
@@ -13628,12 +13665,12 @@ function klasifikasikanSom(input) {
         if (tingkatJasa > tingkatPokok) {
             tingkat = tingkatJasa;
             batasAtasBulan = ambang.jasaBatasAtasBulan;
-            uraianTunggakan = `tunggakan bunga ${bulanJasa} bulan`;
+            uraianTunggakan = `tunggakan bunga ${teksBulanTunggakan(bulanJasa)}`;
         }
         else {
             tingkat = tingkatPokok;
             batasAtasBulan = ambang.pokokBatasAtasBulan;
-            uraianTunggakan = `tunggakan pokok ${bulanPokok} bulan`;
+            uraianTunggakan = `tunggakan pokok ${teksBulanTunggakan(bulanPokok)}`;
         }
     }
     if (tingkat === 0) {
@@ -13652,9 +13689,10 @@ function klasifikasikanSom(input) {
     // adalah angsuran tertua yang MASIH outstanding) dan hitungan 21
     // bulan ikut mundur — persis bunyi "belum ada pelunasan".
     const usiaTunggakan = input.polaPengembalian === 'TANPA_ANGSURAN' && input.sudahJatuhTempo
-        ? Math.max(0, Math.floor(input.bulanSejakJatuhTempo))
-        : Math.max(Math.floor(Math.max(0, input.bulanTunggakanPokok)), Math.floor(Math.max(0, input.bulanTunggakanJasa)));
-    const bulanSejakDiragukan = Math.max(0, usiaTunggakan - batasAtasBulan);
+        ? Math.max(0, input.bulanSejakJatuhTempo)
+        : Math.max(Math.max(0, input.bulanTunggakanPokok), Math.max(0, input.bulanTunggakanJasa));
+    // Bulan PENUH sejak melewati batas atas Kurang Lancar (dasar kriteria Macet 21 bulan).
+    const bulanSejakDiragukan = Math.max(0, Math.floor(usiaTunggakan - batasAtasBulan));
     const angsuranMemenuhi = rasioAngsuranPersen >= exports.RASIO_ANGSURAN_MINIMUM_DIRAGUKAN;
     const agunanMemenuhi = rasioAgunanPersen >= exports.RASIO_AGUNAN_MINIMUM_DIRAGUKAN;
     if (!angsuranMemenuhi && !agunanMemenuhi) {
@@ -16700,6 +16738,8 @@ async function getKlasifikasiPinjamanAktif(db, opts = {}) {
         // langsung digolongkan Kurang Lancar pada hari jatuh temponya.
         const sudahJatuhTempo = !!jatuhTempoPinjaman && jatuhTempoPinjaman < tanggalLaporan;
         const bulanSejakJatuhTempo = jatuhTempoPinjaman && sudahJatuhTempo ? (0, KolektibilitasSomService_1.bulanPenuhAntara)(jatuhTempoPinjaman, tanggalLaporan) : 0;
+        // 1.0.33 — usia TEPAT (bulan kalender + pecahan) untuk penggolongan; kolom bulan di atas tetap bulat untuk tampilan.
+        const usiaTepat = (tgl) => (tgl ? (0, KolektibilitasSomService_1.bulanTunggakanTepat)(String(tgl), tanggalLaporan) : 0);
         const angsuranTerbayar = Math.max(0, r.angsuran_terbayar ?? 0);
         const kewajibanKontraktual = Math.max(0, r.kewajiban_kontraktual ?? 0);
         // RC-S133.6.4 — kriteria Macet angka 3: hanya bila pencatatan ADA dan
@@ -16712,10 +16752,10 @@ async function getKlasifikasiPinjamanAktif(db, opts = {}) {
         const som = (0, KolektibilitasSomService_1.klasifikasikanSom)({
             polaPengembalian,
             masaAngsuranBulan,
-            bulanTunggakanPokok,
-            bulanTunggakanJasa,
+            bulanTunggakanPokok: usiaTepat(r.jatuh_tempo_pokok_tertua),
+            bulanTunggakanJasa: usiaTepat(r.jatuh_tempo_jasa_tertua),
             sudahJatuhTempo,
-            bulanSejakJatuhTempo,
+            bulanSejakJatuhTempo: sudahJatuhTempo ? usiaTepat(jatuhTempoPinjaman) : 0,
             // Kriteria Diragukan huruf a (rasio 75%) dan huruf b (rasio 100%)
             // memakai PENYEBUT YANG BERBEDA — lihat komentar masing-masing
             // field di `InputKlasifikasiSom`. Huruf a mengukur kemajuan

@@ -1,6 +1,11 @@
-# KOPKU Desktop 1.0.32 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.33 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.33 — perbaikan kolektibilitas piutang (batas bulan dihitung dengan kalender)
+- **Akar masalah:** batas "melampaui N bulan" (Juklak SOM 3/2025 angka 12.1) dibandingkan dengan bulan penuh yang dibulatkan ke bawah, sehingga tunggakan 3 bulan + 1…30 hari tetap **Lancar** (penyisihan 0%). Kini dihitung dengan tanggal kalender: jatuh tempo 5 Jul → per 14 Okt sudah melampaui 3 bulan → **Kurang Lancar**.
+- **Tidak diubah:** ambang, persentase penyisihan SOM (0/50/75/100%), batas fiskal PMK 74/2024, skema database (v82), data, jurnal lama. Jurnal penyisihan tetap lewat prosedur resmi **Sesuaikan Penyisihan** (buat backup dulu).
+- Tambalan: `scripts/tambal-kolektibilitas-1.0.33.js`; uji baru `npm run test:kolektibilitas` (10/10). Laporan audit lengkap: `docs/AUDIT-1.0.33_KOLEKTIBILITAS.md`.
 
 ## Yang baru di 1.0.32 — ChatGPT Desktop (aplikasi Windows): satu URL, tanpa API key
 - Tab **ChatGPT** kini punya dua kartu: **ChatGPT Desktop (aplikasi Windows)** — baru — dan **ChatGPT Web (chatgpt.com di Chrome/browser)** — cara Secure MCP Tunnel 1.0.31, TIDAK diubah.

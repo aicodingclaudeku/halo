@@ -1,0 +1,92 @@
+13374a13375
+> exports.bulanTunggakanTepat=bulanTunggakanTepat;
+13539a13541,13574
+> /**
+>  * KOPKU 1.0.33 kolektibilitas kalender — usia tunggakan dalam BULAN KALENDER, dengan pecahan.
+>  * Tepat N bulan (tanggal sama, atau akhir bulan bila tanggalnya tidak ada) → N; lewat 1 hari → N + pecahan.
+>  * Dengan demikian "melampaui N bulan" ⇔ hasil > N, dan "belum melampaui N bulan" ⇔ hasil ≤ N — bacaan harfiah
+>  * Juklak SOM 3/2025 angka 12.1. Contoh: jatuh tempo 5 Jul, tanggal laporan 14 Okt → 3,29 (melampaui 3 bulan
+>  * sejak 5 Okt); jatuh tempo 14 Jul → tepat 3 (belum melampaui).
+>  */
+> function tambahBulanKalender(y, m, d, n) {
+>     const t = new Date(y, m + n, 1);
+>     const akhir = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+>     return new Date(t.getFullYear(), t.getMonth(), Math.min(d, akhir));
+> }
+> function bulanTunggakanTepat(dariIso, keIso) {
+>     const dari = new Date(`${dariIso}T00:00:00`);
+>     const ke = new Date(`${keIso}T00:00:00`);
+>     if (Number.isNaN(dari.getTime()) || Number.isNaN(ke.getTime()))
+>         return 0;
+>     if (ke <= dari)
+>         return 0;
+>     const y = dari.getFullYear(), m = dari.getMonth(), d = dari.getDate();
+>     let n = Math.max(0, (ke.getFullYear() - y) * 12 + (ke.getMonth() - m) - 1);
+>     while (tambahBulanKalender(y, m, d, n + 1) <= ke)
+>         n += 1;
+>     const batas = tambahBulanKalender(y, m, d, n);
+>     if (ke.getTime() === batas.getTime())
+>         return n;
+>     const berikut = tambahBulanKalender(y, m, d, n + 1);
+>     const pecahan = (ke.getTime() - batas.getTime()) / (berikut.getTime() - batas.getTime());
+>     return n + Math.min(0.999, Math.max(0.001, pecahan));
+> }
+> function teksBulanTunggakan(b) {
+>     const bulat = Math.floor(b);
+>     return b > bulat ? `${bulat} bulan lebih` : `${bulat} bulan`;
+> }
+13605c13640
+<             const bulan = Math.max(0, Math.floor(input.bulanSejakJatuhTempo));
+---
+>             const bulan = Math.max(0, input.bulanSejakJatuhTempo);
+13609a13645
+>             // 1.0.33: dibandingkan dengan usia TEPAT (kalender), bukan bulan penuh dibulatkan.
+13611c13647
+<             uraianTunggakan = `pinjaman tanpa angsuran sudah jatuh tempo ${bulan} bulan dan belum dibayar`;
+---
+>             uraianTunggakan = `pinjaman tanpa angsuran sudah jatuh tempo ${teksBulanTunggakan(bulan)} dan belum dibayar`;
+13614c13650
+<             const bulan = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+---
+>             const bulan = Math.max(0, input.bulanTunggakanJasa);
+13617c13653
+<             uraianTunggakan = `pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${bulan} bulan`;
+---
+>             uraianTunggakan = `pinjaman tanpa angsuran belum jatuh tempo, tunggakan bunga ${teksBulanTunggakan(bulan)}`;
+13622,13623c13658,13660
+<         const bulanPokok = Math.max(0, Math.floor(input.bulanTunggakanPokok));
+<         const bulanJasa = Math.max(0, Math.floor(input.bulanTunggakanJasa));
+---
+>         // 1.0.33: usia TEPAT (kalender) — tidak dibulatkan sebelum dibandingkan dengan ambang.
+>         const bulanPokok = Math.max(0, input.bulanTunggakanPokok);
+>         const bulanJasa = Math.max(0, input.bulanTunggakanJasa);
+13631c13668
+<             uraianTunggakan = `tunggakan bunga ${bulanJasa} bulan`;
+---
+>             uraianTunggakan = `tunggakan bunga ${teksBulanTunggakan(bulanJasa)}`;
+13636c13673
+<             uraianTunggakan = `tunggakan pokok ${bulanPokok} bulan`;
+---
+>             uraianTunggakan = `tunggakan pokok ${teksBulanTunggakan(bulanPokok)}`;
+13655,13657c13692,13695
+<         ? Math.max(0, Math.floor(input.bulanSejakJatuhTempo))
+<         : Math.max(Math.floor(Math.max(0, input.bulanTunggakanPokok)), Math.floor(Math.max(0, input.bulanTunggakanJasa)));
+<     const bulanSejakDiragukan = Math.max(0, usiaTunggakan - batasAtasBulan);
+---
+>         ? Math.max(0, input.bulanSejakJatuhTempo)
+>         : Math.max(Math.max(0, input.bulanTunggakanPokok), Math.max(0, input.bulanTunggakanJasa));
+>     // Bulan PENUH sejak melewati batas atas Kurang Lancar (dasar kriteria Macet 21 bulan).
+>     const bulanSejakDiragukan = Math.max(0, Math.floor(usiaTunggakan - batasAtasBulan));
+16702a16741,16742
+>         // 1.0.33 — usia TEPAT (bulan kalender + pecahan) untuk penggolongan; kolom bulan di atas tetap bulat untuk tampilan.
+>         const usiaTepat = (tgl) => (tgl ? (0, KolektibilitasSomService_1.bulanTunggakanTepat)(String(tgl), tanggalLaporan) : 0);
+16715,16716c16755,16756
+<             bulanTunggakanPokok,
+<             bulanTunggakanJasa,
+---
+>             bulanTunggakanPokok: usiaTepat(r.jatuh_tempo_pokok_tertua),
+>             bulanTunggakanJasa: usiaTepat(r.jatuh_tempo_jasa_tertua),
+16718c16758
+<             bulanSejakJatuhTempo,
+---
+>             bulanSejakJatuhTempo: sudahJatuhTempo ? usiaTepat(jatuhTempoPinjaman) : 0,

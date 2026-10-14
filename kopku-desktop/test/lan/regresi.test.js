@@ -113,7 +113,10 @@ test('berkas yang tidak boleh berubah identik dengan sumber asli (renderer, host
   // — lihat docs/laporan-tambal-rc-s133.6.9.json. Skema TETAP v82.
   // DIPERBARUI 1.0.25: menu "Pengaturan › Asisten AI" (scripts/pasang-menu-asisten-ai.js) juga disisipkan;
   // dilepas lebih dulu, lalu menu LAN & WhatsApp — sisanya harus byte-identik dengan bundle 1.0.24 (hash tidak berubah).
-  // Hash kopku-setup.nsi & package-lock.json diperbarui hanya karena nomor versi (1.0.25, 1.0.26, 1.0.27, 1.0.28, 1.0.29, 1.0.30, 1.0.31, 1.0.32). Skema TETAP v82.
+  // Hash kopku-setup.nsi & package-lock.json diperbarui hanya karena nomor versi (1.0.25, 1.0.26, 1.0.27, 1.0.28, 1.0.29, 1.0.30, 1.0.31, 1.0.32, 1.0.33). Skema TETAP v82.
+  // DIPERBARUI 1.0.33: hash bundle diperbarui setelah scripts/tambal-kolektibilitas-1.0.33.js (batas "melampaui N bulan"
+  // kolektibilitas SOM dihitung dengan tanggal kalender; ambang & persentase tidak berubah) — lihat
+  // docs/AUDIT-1.0.33_KOLEKTIBILITAS.md & test/kolektibilitas/. Skema TETAP v82.
   const { lepas } = require(path.join(ROOT, 'scripts', 'pasang-menu-lan-wa.js'));
   const asistenAi = require(path.join(ROOT, 'scripts', 'pasang-menu-asisten-ai.js'));
   for (const [p, h] of Object.entries(m)) {
