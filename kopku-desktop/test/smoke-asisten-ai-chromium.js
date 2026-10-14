@@ -483,6 +483,27 @@ function klienStdio(perintah, args) {
   gst = (await handler.get('asistenAi:status')()).chatgpt;
   ok('Putuskan → MATI, tunnel tidak dilayani', gst.keadaan === 'MATI' && !chatgpt.berjalan);
   await pg.screenshot({ path: path.join(OUT, '53-chatgpt-diputus.png'), fullPage: true });
+  // ---- 1.0.32: ChatGPT Desktop (Streamable HTTP lokal, satu URL)
+  await pg.evaluate(() => { const el = document.querySelector('[data-testid=layar-asisten-ai]'); if (el) el.scrollTop = 0; });
+  await pg.locator('[data-testid=tombol-desktop-nyala]').click();
+  await pg.waitForTimeout(2000);
+  await pg.waitForTimeout(5500);
+  const urlDesktop = (await pg.locator('[data-testid=url-desktop]').innerText()).trim();
+  ok('ChatGPT Desktop: satu URL lokal tampil (127.0.0.1 + kunci)', /^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/.test(urlDesktop), urlDesktop.replace(/[0-9a-f]{64}/, '…'));
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('ChatGPT Desktop: isian Name/Type/URL & langkah Plugins › Connect to a custom MCP', /Streamable HTTP/.test(teks) && /Connect to a custom MCP/.test(teks) && /ChatGPT Web \(chatgpt\.com di Chrome\/browser\)/.test(teks));
+  await pg.locator('[data-testid=tombol-salin-url-desktop]').click();
+  await pg.waitForTimeout(800);
+  await pg.keyboard.press('Enter');
+  ok('ChatGPT Desktop: tombol Salin URL', disalin.includes(urlDesktop));
+  const rpcDesktop = (isi) => fetch(urlDesktop, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }, body: JSON.stringify(isi) }).then((r) => r.json());
+  const iniD = await rpcDesktop({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {} } });
+  const rD = await rpcDesktop({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'saldo_kas_bank', arguments: {} } });
+  ok('ChatGPT Desktop: klien Streamable HTTP membaca data lewat URL itu', iniD.result.serverInfo.name === 'kopku' && !rD.result.isError && /Kas/.test(rD.result.content[0].text));
+  await pg.waitForTimeout(5500);
+  await pg.screenshot({ path: path.join(OUT, '55-chatgpt-desktop.png'), fullPage: true });
+  teks = await pg.evaluate(() => document.body.innerText);
+  ok('ChatGPT Desktop: status "Terhubung & dipakai" di layar', /Terhubung & dipakai/.test(teks));
   await pg.locator('[data-testid=tab-claude]').click();
   await pg.waitForTimeout(800);
 

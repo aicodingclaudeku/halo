@@ -304,3 +304,19 @@ ulang, putuskan, restart aplikasi, server lokal menolak akses tanpa kunci. Chrom
 **Belum diuji:** server OpenAI & ChatGPT asli (butuh akun/API key pengguna) dan exe Windows hasil build dijalankan di
 Windows (lingkungan build Linux, tanpa Windows/Wine).
 
+## §O 1.0.32 — ChatGPT Desktop (Streamable HTTP lokal)
+
+ChatGPT Desktop (Windows) › Settings › Plugins › "Connect to a custom MCP" menyediakan Type **STDIO** dan **Streamable
+HTTP** (dijalankan aplikasi di komputer pengguna). KOPKU memakai Streamable HTTP ke server yang sama dengan jalur tunnel
+(`electron/mcp/chatgpt.js`), dengan jalur `POST /mcp/<kunciDesktop>`:
+- `chatgpt.json`: `desktop`, `kunciDesktop` (64 hex, terpisah dari `kunci` tunnel), `port` (tetap; dipilih acak 41000–48999
+  sekali, diganti bila EADDRINUSE + `peringatan`).
+- Otentikasi: jalur `/mcp` + `Authorization: Bearer <kunci>` → sumber tunnel; `/mcp/<kunciDesktop>` + Host
+  `127.0.0.1:<port>`/`localhost:<port>` → sumber desktop; selain itu 404. Origin ditolak. Statistik terpisah (`statDesktop`).
+- Aksi IPC `asistenAi:aturChatGPT`: `desktop` (`nyala`), `gantiKunciDesktop`. Putuskan/hapus tunnel tidak mematikan server
+  bila desktop menyala; Asisten AI dimatikan → semua berhenti, dinyalakan → desktop kembali dengan URL sama.
+- Server JSON saja (tanpa SSE): `GET`/`DELETE` → 405, sesuai spesifikasi Streamable HTTP untuk server tanpa stream.
+
+**Uji:** 4 uji baru (klien Streamable HTTP: initialize, initialized, tools/list, tools/call; kunci salah, Host asing,
+Origin, ganti URL, restart → URL sama, port bentrok). Chromium 53/53. **Belum diuji:** aplikasi ChatGPT Desktop asli.
+

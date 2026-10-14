@@ -52357,7 +52357,7 @@ const SLIDE = [
   },
   {
     judul: '8. ChatGPT (opsional)',
-    teks: 'Tab ChatGPT memakai cara resmi OpenAI (Secure MCP Tunnel). Sekali saja: tempel Tunnel ID + Runtime API key dari OpenAI Platform. Lalu klik "Hubungkan ke ChatGPT" dan tambahkan konektor (Connection: Tunnel) di ChatGPT. Tanpa URL publik, tanpa Command Prompt.',
+    teks: 'ChatGPT Desktop (aplikasi Windows): klik "Aktifkan untuk ChatGPT Desktop", lalu salin URL ke ChatGPT › Settings › Plugins › Connect to a custom MCP (Streamable HTTP). ChatGPT di Chrome: tempel Tunnel ID + Runtime API key lalu klik "Hubungkan ke ChatGPT" (Secure MCP Tunnel resmi OpenAI).',
     gambar: () => h(Jendela, { judul: 'KOPKU › Asisten AI › ChatGPT' },
       h(View, { style: [sp.dialogBaris, an('kanan', 300, 400)] }, h(Ionicons, { name: 'key-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, '1  Tunnel ID + API key (sekali)')),
       h(View, { style: [sp.dialogBaris, an('kanan', 800, 400)] }, h(Ionicons, { name: 'link-outline', size: 18, color: C.primary }), h(Text, { style: sp.jurnalTeks }, '2  Hubungkan ke ChatGPT')),
@@ -52879,8 +52879,8 @@ function AsistenAiScreen() {
     Kartu,
     { testID: 'kartu-chatgpt' },
     h(View, { style: s.judulBaris },
-      h(Ionicons, { name: 'chatbubbles-outline', size: 20, color: C.primary }),
-      h(Text, { style: s.kartuJudul }, 'Hubungkan ke ChatGPT'),
+      h(Ionicons, { name: 'globe-outline', size: 20, color: C.primary }),
+      h(Text, { style: s.kartuJudul }, 'ChatGPT Web (chatgpt.com di Chrome/browser)'),
       lencanaGpt
     ),
     h(Text, { style: [s.redup, { marginTop: 6 }], testID: 'status-chatgpt' }, g.pesan || ''),
@@ -52944,12 +52944,72 @@ function AsistenAiScreen() {
     )
   );
 
+  // ---------------- kartu ChatGPT Desktop (1.0.32) — aplikasi Windows, Streamable HTTP lokal
+  const gd = g.desktop || {};
+  const nyalakanDesktop = () => aturGpt({ aksi: 'desktop', nyala: true }, null);
+  const matikanDesktop = () => aturGpt({ aksi: 'desktop', nyala: false }, 'ChatGPT Desktop dimatikan. URL lama tidak dapat dipakai lagi sampai diaktifkan kembali.');
+  const gantiKunciDesktop = () =>
+    notify('Ganti URL ChatGPT Desktop?', 'URL lama langsung tidak berlaku. Setelah ini salin URL baru ke ChatGPT Desktop (Settings › Plugins › KOPKU › edit).', [
+      { text: 'Batal', style: 'cancel' },
+      { text: 'Ganti', style: 'destructive', onPress: () => aturGpt({ aksi: 'gantiKunciDesktop' }, 'URL baru dibuat. Salin ke ChatGPT Desktop.') },
+    ], 'warning');
+  const isian = (label, nilai, tombol, testID) =>
+    h(View, { style: s.isianBaris },
+      h(Text, { style: s.isianLabel }, label),
+      h(View, { style: s.isianNilai }, h(Text, { style: s.isianTeks, selectable: true, numberOfLines: 1, testID }, nilai)),
+      tombol || null
+    );
+  const kartuChatGPTDesktop = h(
+    Kartu,
+    { testID: 'kartu-chatgpt-desktop' },
+    h(View, { style: s.judulBaris },
+      h(Ionicons, { name: 'desktop-outline', size: 20, color: C.primary }),
+      h(Text, { style: s.kartuJudul }, 'ChatGPT Desktop (aplikasi Windows)'),
+      !gd.nyala
+        ? h(Lencana, { warna: 'abu', teks: 'Mati', ikon: 'power' })
+        : gd.pemakaian && gd.pemakaian.total > 0
+          ? h(Lencana, { warna: 'hijau', teks: 'Terhubung & dipakai', ikon: 'checkmark-circle' })
+          : gd.siap
+            ? h(Lencana, { warna: 'kuning', teks: 'Siap — tempel URL di ChatGPT', ikon: 'time-outline' })
+            : h(Lencana, { warna: 'merah', teks: 'Server belum jalan', ikon: 'alert-circle' })
+    ),
+    h(Text, { style: [s.redup, { marginTop: 6 }] }, 'Paling mudah: tanpa API key dan tanpa tunnel. Aplikasi ChatGPT Desktop di komputer ini langsung tersambung ke KOPKU lewat satu URL lokal.'),
+    !gd.nyala
+      ? h(View, { style: [s.aksi, { marginTop: 10 }] },
+          h(Tombol, { label: 'Aktifkan untuk ChatGPT Desktop', ikon: 'flash-outline', utama: true, onPress: nyalakanDesktop, disabled: !bolehUbah || !pid || !aktif, sibuk: sibuk === 'gpt', testID: 'tombol-desktop-nyala' }),
+          !aktif ? h(Text, { style: s.catatan }, 'Nyalakan "Aktifkan Asisten AI" di atas lebih dulu.') : null
+        )
+      : h(View, null,
+          gd.peringatan ? h(View, { style: [s.galat, { backgroundColor: C.warningBg, borderColor: C.warningBorder, marginTop: 8 }] }, h(Ionicons, { name: 'warning-outline', size: 16, color: C.warning }), h(Text, { style: [s.galatTeks, { color: C.warning }] }, gd.peringatan)) : null,
+          h(View, { style: s.blok },
+            h(Subjudul, { teks: 'Isi di ChatGPT Desktop › Settings › Plugins › Connect to a custom MCP' }),
+            isian('Name', 'KOPKU', h(Tombol, { label: 'Salin', ikon: 'copy-outline', kecil: true, onPress: () => salin('KOPKU', 'Nama disalin.') })),
+            isian('Type', 'Streamable HTTP', null),
+            isian('URL', gd.url || '(menyalakan server…)', gd.url ? h(Tombol, { label: 'Salin URL', ikon: 'copy-outline', kecil: true, utama: true, onPress: () => salin(gd.url, 'URL disalin. Tempel di kolom URL (Type: Streamable HTTP) lalu Save.'), testID: 'tombol-salin-url-desktop' }) : null, 'url-desktop')
+          ),
+          h(View, { style: s.blok },
+            h(Subjudul, { teks: 'Langkah' }),
+            h(Langkah, { no: 1, judul: 'Buka ChatGPT Desktop › Settings › Plugins › Connect to a custom MCP' }),
+            h(Langkah, { no: 2, judul: 'Name: KOPKU · Type: pilih "Streamable HTTP"' }),
+            h(Langkah, { no: 3, judul: 'Tempel URL di atas, lalu Save' }),
+            h(Langkah, { no: 4, judul: 'Bertanya di ChatGPT Desktop', selesai: !!(gd.pemakaian && gd.pemakaian.total > 0) },
+              h(Text, { style: s.redup }, 'Mis. "Pakai KOPKU: ringkas kondisi koperasi hari ini". KOPKU Desktop harus tetap terbuka.')
+            )
+          ),
+          h(View, { style: [s.aksi, { marginTop: 10, alignItems: 'center' }] },
+            h(Text, { style: [s.catatan, { flex: 1 }] }, `URL ini rahasia & hanya berlaku di komputer ini. Permintaan dari ChatGPT Desktop: ${(gd.pemakaian && gd.pemakaian.total) || 0}`),
+            h(Tombol, { label: 'Ganti URL', ikon: 'key-outline', kecil: true, onPress: gantiKunciDesktop, disabled: !bolehUbah || !pid, testID: 'tombol-ganti-url-desktop' }),
+            h(Tombol, { label: 'Matikan', ikon: 'power', kecil: true, bahaya: true, onPress: matikanDesktop, disabled: !bolehUbah || !pid, testID: 'tombol-desktop-mati' })
+          )
+        )
+  );
+
   const tabBar = h(View, { style: s.tabBar },
     [['claude', 'Claude', 'sparkles-outline'], ['chatgpt', 'ChatGPT', 'chatbubbles-outline']].map(([k, label, ikon]) =>
       h(Touchable, { key: k, accessibilityRole: 'tab', onPress: () => setTab(k), style: [s.tab, tab === k && s.tabAktif], testID: 'tab-' + k },
         h(Ionicons, { name: ikon, size: 16, color: tab === k ? C.primary : C.textMuted }),
         h(Text, { style: [s.tabTeks, tab === k && s.tabTeksAktif] }, label),
-        k === 'chatgpt' && g.keadaan === 'TERHUBUNG' ? h(View, { style: s.tabTitik }) : null
+        k === 'chatgpt' && (g.keadaan === 'TERHUBUNG' || (g.desktop && g.desktop.siap)) ? h(View, { style: s.tabTitik }) : null
       )
     )
   );
@@ -52970,11 +53030,15 @@ function AsistenAiScreen() {
           h(Text, { style: [s.galatTeks, { color: C.warning, flex: 1 }] }, 'Ekstensi Claude (.mcpb) Anda dibuat oleh versi KOPKU lama dan dapat gagal menyala di Claude Desktop ("Request timed out"). Buat ulang lalu klik Install di Claude Desktop (ganti ekstensi lama).'),
           h(Tombol, { label: 'Buat ulang ekstensi', ikon: 'cube-outline', utama: true, kecil: true, onPress: ekstensi, sibuk: sibuk === 'ekstensi', disabled: !bolehUbah || !pid, testID: 'tombol-perbarui-ekstensi' }))
       : null,
-    h(View, { style: s.kolom }, banner, kartuSaklar, tabBar, ...(tab === 'chatgpt' ? [kartuChatGPT] : [kartuPasang]), kartuContoh, kartuAktivitas)
+    h(View, { style: s.kolom }, banner, kartuSaklar, tabBar, ...(tab === 'chatgpt' ? [kartuChatGPTDesktop, kartuChatGPT] : [kartuPasang]), kartuContoh, kartuAktivitas)
   ), panduan ? h(PanduanSlide, { onTutup: tutupPanduan }) : null);
 }
 
 const s = StyleSheet.create({
+  isianBaris: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.border },
+  isianLabel: { width: 60, fontSize: 12.5, fontWeight: '700', color: C.textMuted },
+  isianNilai: { flex: 1, minWidth: 0, backgroundColor: '#F4F6F8', borderRadius: T.radius.md, paddingHorizontal: 10, paddingVertical: 7 },
+  isianTeks: { fontFamily: 'Consolas, "Cascadia Mono", Menlo, monospace', fontSize: 12.5, color: C.text },
   tabBar: { flexDirection: 'row', gap: 6, padding: 4, backgroundColor: '#EEF1F4', borderRadius: T.radius.md, alignSelf: 'flex-start' },
   tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: T.radius.md },
   tabAktif: Object.assign({ backgroundColor: C.surface }, T.elevation.card),

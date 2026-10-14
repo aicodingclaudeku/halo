@@ -170,6 +170,7 @@ function daftarkanIpcAsistenAi(o) {
       tunnelId: i.tunnelId === undefined ? undefined : String(i.tunnelId).slice(0, 100),
       apiKey: i.apiKey === undefined ? undefined : String(i.apiKey).slice(0, 400),
       bolehTulis: i.bolehTulis === true,
+      nyala: i.nyala === true,
       penggunaId: i.penggunaId,
     });
     return statusLengkap();

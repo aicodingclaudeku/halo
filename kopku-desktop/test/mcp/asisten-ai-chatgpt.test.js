@@ -301,3 +301,104 @@ test('tafsir health & penyaring log (unit)', () => {
   const t = saringLog('key=sk-proj-abcdefghijklmnop Authorization: Bearer 0123456789abcdef0123 rahasia-lokal-xyz', ['rahasia-lokal-xyz']);
   assert.doesNotMatch(t, /sk-proj-abc|0123456789abcdef0123|rahasia-lokal-xyz/);
 });
+
+// ---------------------------------------------------------------- 1.0.32: ChatGPT Desktop (Streamable HTTP lokal)
+const permintaanDesktop = (url, { metode = 'POST', isi, headers = {} } = {}) => {
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const badan = isi === undefined ? '' : JSON.stringify(isi);
+    // Seperti klien Streamable HTTP MCP (ChatGPT Desktop): Accept JSON + SSE.
+    const req = http.request({ host: u.hostname, port: u.port, path: u.pathname, method: metode, agent: false, headers: Object.assign({ 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Content-Length': Buffer.byteLength(badan) }, headers) }, (res) => {
+      let t = '';
+      res.on('data', (c) => (t += c));
+      res.on('end', () => {
+        let json = null;
+        try {
+          json = JSON.parse(t);
+        } catch {
+          json = null;
+        }
+        resolve({ status: res.statusCode, json, teks: t });
+      });
+    });
+    req.on('error', reject);
+    req.end(badan);
+  });
+};
+
+test('Desktop: bawaan MATI; aktifkan → satu URL lokal 127.0.0.1 + kunci 256-bit; Streamable HTTP MCP berfungsi', async () => {
+  await host.atur({ aktif: true, perAnggota: true, penggunaId: s.users.admin });
+  assert.equal(gpt.status().desktop.nyala, false);
+  await assert.rejects(gpt.atur({ aksi: 'desktop', nyala: true, penggunaId: s.users.operator }));
+  const st = await gpt.atur({ aksi: 'desktop', nyala: true, penggunaId: s.users.admin });
+  assert.equal(st.desktop.siap, true);
+  assert.match(st.desktop.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp\/[0-9a-f]{64}$/);
+  assert.equal(gpt.server.address().address, '127.0.0.1');
+  const url = st.desktop.url;
+  const init = await permintaanDesktop(url, { isi: { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'chatgpt-desktop-uji', version: '1' } } } });
+  assert.equal(init.status, 200);
+  assert.equal(init.json.result.serverInfo.name, 'kopku');
+  assert.ok(init.json.result.instructions.includes(katalog.KEBIJAKAN));
+  assert.equal((await permintaanDesktop(url, { isi: { jsonrpc: '2.0', method: 'notifications/initialized' } })).status, 202);
+  const daftar = (await permintaanDesktop(url, { isi: { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} } })).json.result.tools.map((t) => t.name).sort();
+  assert.deepEqual(daftar, katalog.ALAT.map((a) => a.name).sort(), 'hanya-baca bawaan');
+  const r = await permintaanDesktop(url, { isi: { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'ringkasan_koperasi', arguments: {} } } });
+  assert.equal(r.json.result.isError, false);
+  assert.equal(JSON.parse(r.json.result.content[0].text).anggotaAktif, 4);
+  assert.equal((await permintaanDesktop(url, { metode: 'GET' })).status, 405, 'tanpa SSE: GET → 405 (sesuai spesifikasi)');
+  assert.equal((await permintaanDesktop(url, { metode: 'DELETE' })).status, 405);
+  assert.equal(gpt.status().desktop.pemakaian.total, 4, 'initialize, initialized, tools/list, tools/call');
+  assert.match(fs.readFileSync(path.join(dataDir, 'mcp', 'pemakaian.log'), 'utf8'), /ringkasan_koperasi\tBERHASIL\t\d+ms\t\[ChatGPT\]/);
+});
+
+test('Desktop: kunci salah / Host asing (DNS-rebinding) / Origin peramban → 404; ganti URL → URL lama mati', async () => {
+  const url = gpt.status().desktop.url;
+  const init = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18' } };
+  assert.equal((await permintaanDesktop(url.replace(/[0-9a-f]$/, (c) => (c === '0' ? '1' : '0')), { isi: init })).status, 404);
+  assert.equal((await permintaanDesktop(url, { isi: init, headers: { Host: 'situs-jahat.example' } })).status, 404);
+  assert.equal((await permintaanDesktop(url, { isi: init, headers: { Origin: 'https://situs-jahat.example' } })).status, 404);
+  assert.equal((await permintaanDesktop(url.replace('127.0.0.1', 'localhost'), { isi: init })).status, 200, 'localhost juga sah');
+  const st = await gpt.atur({ aksi: 'gantiKunciDesktop', penggunaId: s.users.admin });
+  assert.notEqual(st.desktop.url, url);
+  assert.equal((await permintaanDesktop(url, { isi: init })).status, 404, 'URL lama mati');
+  assert.equal((await permintaanDesktop(st.desktop.url, { isi: init })).status, 200);
+  assert.equal(new URL(st.desktop.url).port, new URL(url).port, 'port tetap');
+});
+
+test('Desktop: URL tetap sama setelah KOPKU dibuka ulang; tidak mengganggu tunnel; matikan → server berhenti', async () => {
+  const url = gpt.status().desktop.url;
+  await gpt.henti();
+  gpt = buatAkses();
+  await gpt.mulaiBilaAktif();
+  assert.equal(gpt.status().desktop.url, url, 'URL sama setelah restart');
+  assert.equal((await permintaanDesktop(url, { isi: { jsonrpc: '2.0', id: 1, method: 'ping' } })).status, 200);
+  // tunnel (Chrome) tetap terpisah: putuskan tunnel tidak mematikan desktop
+  await gpt.atur({ aksi: 'putuskan', penggunaId: s.users.admin });
+  assert.equal(gpt.berjalan, true, 'server tetap untuk ChatGPT Desktop');
+  // Asisten AI dimatikan → semua berhenti; dinyalakan → desktop kembali dengan URL sama
+  await host.atur({ aktif: false, penggunaId: s.users.admin });
+  assert.equal(gpt.berjalan, false);
+  await host.atur({ aktif: true, penggunaId: s.users.admin });
+  await gpt.mulaiBilaAktif();
+  assert.equal(gpt.status().desktop.url, url);
+  const st = await gpt.atur({ aksi: 'desktop', nyala: false, penggunaId: s.users.admin });
+  assert.equal(st.desktop.nyala, false);
+  assert.equal(st.desktop.url, null);
+  assert.equal(gpt.berjalan, false, 'tidak ada yang memakai → server berhenti');
+  await assert.rejects(permintaanDesktop(url, { isi: { jsonrpc: '2.0', id: 1, method: 'ping' } }));
+});
+
+test('Desktop: port dipakai aplikasi lain → pindah port + peringatan jelas', async () => {
+  const p = gpt.baca();
+  const pengganggu = http.createServer(() => undefined);
+  await new Promise((r) => pengganggu.listen(p.port, '127.0.0.1', r));
+  try {
+    const st = await gpt.atur({ aksi: 'desktop', nyala: true, penggunaId: s.users.admin });
+    assert.notEqual(new URL(st.desktop.url).port, String(p.port));
+    assert.match(st.desktop.peringatan, /Salin URL baru/);
+    assert.equal((await permintaanDesktop(st.desktop.url, { isi: { jsonrpc: '2.0', id: 1, method: 'ping' } })).status, 200);
+  } finally {
+    await new Promise((r) => pengganggu.close(r));
+    await gpt.atur({ aksi: 'desktop', nyala: false, penggunaId: s.users.admin });
+  }
+});

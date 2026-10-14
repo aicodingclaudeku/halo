@@ -10,6 +10,11 @@
  * port masuk, domain, atau Command Prompt. Pengguna cukup menempel Tunnel ID + Runtime API key dari
  * OpenAI Platform sekali, lalu klik "Hubungkan".
  *
+ * 1.0.32 — ChatGPT DESKTOP (aplikasi Windows): Settings › Plugins › "Connect to a custom MCP" › Streamable HTTP.
+ * Aplikasi desktop berjalan di komputer yang sama, jadi langsung ke http://127.0.0.1:<port tetap>/mcp/<kunci desktop>
+ * (satu URL untuk ditempel; tanpa tunnel/API key OpenAI). Kunci desktop TERPISAH dari kunci tunnel; port disimpan agar
+ * URL tetap sama setelah KOPKU dibuka ulang. Header Host wajib 127.0.0.1/localhost (anti DNS-rebinding).
+ *
  * Pengaman:
  *   - Bawaan MATI; hanya Admin; Asisten AI harus menyala.
  *   - Server hanya 127.0.0.1; setiap POST /mcp wajib `Authorization: Bearer <kunci lokal>` (dibandingkan
@@ -72,6 +77,8 @@ class AksesChatGPT {
     this.port = null;
     this.permintaan = [];
     this.statistik = { total: 0, ditolak: 0, terakhir: null };
+    this.statDesktop = { total: 0, terakhir: null };
+    this.peringatanPort = null;
     this.runtime = o.runtime || new RuntimeTunnel({ jalurRuntime: o.jalurRuntime || (() => null), dirLog: this.dir, baseUrl: o.baseUrl });
     this.host.chatgpt = this;
   }
@@ -93,9 +100,12 @@ class AksesChatGPT {
         bolehTulis: j.bolehTulis === true,
         tunnelId: typeof j.tunnelId === 'string' && RE_TUNNEL_ID.test(j.tunnelId) ? j.tunnelId : null,
         kunci: typeof j.kunci === 'string' && /^[0-9a-f]{64}$/.test(j.kunci) ? j.kunci : null,
+        desktop: j.desktop === true,
+        kunciDesktop: typeof j.kunciDesktop === 'string' && /^[0-9a-f]{64}$/.test(j.kunciDesktop) ? j.kunciDesktop : null,
+        port: Number.isInteger(j.port) && j.port >= 1024 && j.port <= 65535 ? j.port : null,
       };
     } catch {
-      return { aktif: false, bolehTulis: false, tunnelId: null, kunci: null };
+      return { aktif: false, bolehTulis: false, tunnelId: null, kunci: null, desktop: false, kunciDesktop: null, port: null };
     }
   }
 
@@ -156,6 +166,14 @@ class AksesChatGPT {
       prasyarat: this.prasyarat(),
       pemakaian: Object.assign({}, this.statistik),
       tautan: TAUTAN,
+      // ChatGPT Desktop (Windows): satu URL lokal untuk "Connect to a custom MCP" › Streamable HTTP.
+      desktop: {
+        nyala: p.desktop,
+        siap: p.desktop && this.berjalan,
+        url: p.desktop && p.kunciDesktop && this.berjalan ? `http://127.0.0.1:${this.port}/mcp/${p.kunciDesktop}` : null,
+        peringatan: p.desktop ? this.peringatanPort : null,
+        pemakaian: Object.assign({}, this.statDesktop),
+      },
     };
   }
 
@@ -192,7 +210,7 @@ class AksesChatGPT {
         p.aktif = false;
         this._simpan(p);
         catat('diputus');
-        await this.henti();
+        await this._hentiBilaTakDipakai();
         break;
       case 'hapus':
         p.aktif = false;
@@ -201,7 +219,27 @@ class AksesChatGPT {
         this._simpan(p);
         this.rahasia.remove(KUNCI_RAHASIA);
         catat('kredensial dihapus');
-        await this.henti();
+        await this._hentiBilaTakDipakai();
+        break;
+      case 'desktop':
+        if (i.nyala === true) {
+          if (!this.host.baca().aktif) throw galat('Nyalakan "Aktifkan Asisten AI" lebih dulu.', 'MATI');
+          p.desktop = true;
+          if (!p.kunciDesktop) p.kunciDesktop = crypto.randomBytes(32).toString('hex');
+          this._simpan(p);
+          catat('ChatGPT Desktop diaktifkan');
+          await this._mulaiServer();
+        } else {
+          p.desktop = false;
+          this._simpan(p);
+          catat('ChatGPT Desktop dimatikan');
+          await this._hentiBilaTakDipakai();
+        }
+        break;
+      case 'gantiKunciDesktop':
+        p.kunciDesktop = crypto.randomBytes(32).toString('hex');
+        this._simpan(p);
+        catat('kunci URL ChatGPT Desktop diganti');
         break;
       case 'izin':
         p.bolehTulis = i.bolehTulis === true;
@@ -217,8 +255,16 @@ class AksesChatGPT {
   /** Dipanggil saat KOPKU dibuka: sambung ulang bila sebelumnya terhubung. */
   async mulaiBilaAktif() {
     const p = this.baca();
-    if (p.aktif && p.tunnelId && this._apiKey() && this.host.baca().aktif) await this._sambung().catch(() => undefined);
+    if (!this.host.baca().aktif) return this.status();
+    if (p.desktop) await this._mulaiServer().catch(() => undefined);
+    if (p.aktif && p.tunnelId && this._apiKey()) await this._sambung().catch(() => undefined);
     return this.status();
+  }
+
+  /** Server lokal tetap hidup selama ChatGPT Desktop atau tunnel masih dipakai. */
+  async _hentiBilaTakDipakai() {
+    await this.runtime.henti();
+    if (!this.baca().desktop) await this.henti();
   }
 
   async _sambung() {
@@ -230,17 +276,30 @@ class AksesChatGPT {
 
   async _mulaiServer() {
     if (this.berjalan) return;
-    const server = http.createServer((req, res) => this._layani(req, res));
-    server.requestTimeout = 180000;
-    await new Promise((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        server.removeListener('error', reject);
-        resolve();
-      });
-    });
-    this.server = server;
-    this.port = server.address().port;
+    // Port TETAP (disimpan) agar URL di ChatGPT Desktop tetap berlaku setelah KOPKU dibuka ulang.
+    const p = this.baca();
+    let port = p.port || 41000 + crypto.randomInt(0, 8000);
+    for (let coba = 0; ; coba++) {
+      const server = http.createServer((req, res) => this._layani(req, res));
+      server.requestTimeout = 180000;
+      try {
+        await new Promise((resolve, reject) => {
+          server.once('error', reject);
+          server.listen(port, '127.0.0.1', () => {
+            server.removeListener('error', reject);
+            resolve();
+          });
+        });
+        this.server = server;
+        this.port = server.address().port;
+        break;
+      } catch (e) {
+        if (!(e && e.code === 'EADDRINUSE') || coba >= 5) throw galat('Server KOPKU untuk ChatGPT tidak dapat dinyalakan.', 'GAGAL');
+        port = 41000 + crypto.randomInt(0, 8000);
+        this.peringatanPort = 'Port sebelumnya dipakai aplikasi lain, jadi alamat KOPKU berubah. Salin URL baru ke ChatGPT Desktop (Settings › Plugins › KOPKU).';
+      }
+    }
+    if (p.port !== this.port) this._simpan(Object.assign(this.baca(), { port: this.port }));
   }
 
   /** Hentikan runtime & server (pengaturan tetap; dipakai saat Asisten AI dimatikan / KOPKU ditutup). */
@@ -264,14 +323,25 @@ class AksesChatGPT {
     res.end(badan);
   }
 
-  _otentik(req) {
-    const kunci = this.baca().kunci;
-    if (!kunci) return false;
-    const m = /^Bearer ([0-9a-f]{64})$/.exec(String(req.headers.authorization || ''));
-    if (!m) return false;
-    const a = Buffer.from(m[1]);
-    const b = Buffer.from(kunci);
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  /** @returns {'tunnel'|'desktop'|null} sumber yang sah untuk permintaan ini. */
+  _otentik(req, jalur) {
+    const p = this.baca();
+    const sama = (x, y) => {
+      const a = Buffer.from(String(x || ''));
+      const b = Buffer.from(String(y || ''));
+      return !!y && a.length === b.length && crypto.timingSafeEqual(a, b);
+    };
+    if (jalur === '/mcp') {
+      const m = /^Bearer ([0-9a-f]{64})$/.exec(String(req.headers.authorization || ''));
+      return m && sama(m[1], p.kunci) ? 'tunnel' : null;
+    }
+    const d = /^\/mcp\/([0-9a-f]{64})\/?$/.exec(jalur);
+    if (d && p.desktop && sama(d[1], p.kunciDesktop)) {
+      // Anti DNS-rebinding: hanya Host lokal.
+      const host = String(req.headers.host || '').toLowerCase();
+      return host === `127.0.0.1:${this.port}` || host === `localhost:${this.port}` ? 'desktop' : null;
+    }
+    return null;
   }
 
   _layani(req, res) {
@@ -285,7 +355,8 @@ class AksesChatGPT {
       return this._balas(res, 429, { pesan: 'Terlalu banyak permintaan.' }, { 'Retry-After': '30' });
     }
     this.permintaan.push(kini);
-    if (jalur !== '/mcp' || req.headers.origin || !this._otentik(req)) {
+    const sumber = req.headers.origin ? null : this._otentik(req, jalur);
+    if (!sumber) {
       this.statistik.ditolak++;
       return this._balas(res, 404, { pesan: 'Tidak ditemukan.' });
     }
@@ -304,8 +375,9 @@ class AksesChatGPT {
       } catch {
         return this._balas(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } });
       }
-      this.statistik.total++;
-      this.statistik.terakhir = new Date(kini).toISOString();
+      const stat = sumber === 'desktop' ? this.statDesktop : this.statistik;
+      stat.total++;
+      stat.terakhir = new Date(kini).toISOString();
       const o = { dataDir: this.o.dataDir, host: (_d, metode, j, isi) => this._keHost(metode, j, isi) };
       try {
         if (Array.isArray(msg)) {

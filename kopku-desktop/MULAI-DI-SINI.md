@@ -1,6 +1,13 @@
-# KOPKU Desktop 1.0.31 — Source Code Aplikasi Windows
+# KOPKU Desktop 1.0.32 — Source Code Aplikasi Windows
 
 Folder ini adalah source aplikasi **KOPKU Desktop** (Electron) yang **siap dibangun** menjadi `.exe` di Windows. Tampilan aplikasi sudah di-build dari source utama KOPKU dan tersimpan di `renderer/`, jadi tidak perlu memasang Expo/React Native.
+
+## Yang baru di 1.0.32 — ChatGPT Desktop (aplikasi Windows): satu URL, tanpa API key
+- Tab **ChatGPT** kini punya dua kartu: **ChatGPT Desktop (aplikasi Windows)** — baru — dan **ChatGPT Web (chatgpt.com di Chrome/browser)** — cara Secure MCP Tunnel 1.0.31, TIDAK diubah.
+- **ChatGPT Desktop:** klik **Aktifkan untuk ChatGPT Desktop** → KOPKU menampilkan isian siap salin untuk ChatGPT Desktop › Settings › Plugins › **Connect to a custom MCP**: Name `KOPKU`, Type **Streamable HTTP**, URL `http://127.0.0.1:<port>/mcp/<kunci>` (tombol **Salin URL**). Tanpa API key, tunnel, Node.js, atau Command Prompt, karena aplikasi desktop berjalan di komputer yang sama.
+- **Aman:** server hanya 127.0.0.1; kunci desktop 256-bit TERPISAH dari kunci tunnel; header Host wajib 127.0.0.1/localhost (anti DNS-rebinding); Origin peramban ditolak; **Ganti URL** membuat URL lama langsung mati; hanya-baca bawaan, ubah data tetap butuh izin ChatGPT terpisah + pratinjau/konfirmasi; log `[ChatGPT]`.
+- **Stabil:** port disimpan sehingga URL tetap sama setelah KOPKU dibuka ulang; bila port dipakai aplikasi lain, KOPKU pindah port dan menampilkan peringatan untuk menyalin URL baru. Status: Mati / Siap — tempel URL / **Terhubung & dipakai** (+ jumlah permintaan).
+- Uji: `test:mcp` 47/47 (baru 4 uji ChatGPT Desktop sebagai klien Streamable HTTP), `test:lan` 81/81, `test:keamanan` 15/15, layar Chromium 53/53, Electron nyata 27/27. **Belum diuji dengan aplikasi ChatGPT Desktop asli** (tidak tersedia di lingkungan build).
 
 ## Yang baru di 1.0.31 — "Hubungkan ke ChatGPT" memakai OpenAI Secure MCP Tunnel (resmi)
 - **Metode resmi OpenAI** (github.com/openai/tunnel-client, Apache-2.0): penghubung `tunnel-client-runtime` di komputer pengguna membuka koneksi KELUAR terenkripsi ke OpenAI; ChatGPT memakai konektor **Connection: Tunnel**. **Tanpa URL publik, port masuk, domain, Cloudflare buatan sendiri, atau Command Prompt.** Menggantikan cara 1.0.29 (alamat publik + terowongan manual), yang dihapus.
